@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Environment
+.env
+*.db
+
+# Build output
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Excel source files (copyrighted content)
+*.xlsx

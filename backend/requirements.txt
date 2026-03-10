@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+aiosqlite
+python-dotenv
+pydantic
+httpx
+fpdf2
+openai
+pyjwt
+passlib
+bcrypt<5
+openpyxl
