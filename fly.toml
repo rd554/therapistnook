@@ -1,0 +1,29 @@
+# Placeholder — replace `app` with a globally-unique name (fly will tell you
+# if it's taken), and `primary_region` with whatever `fly platform regions`
+# shows closest to your users (e.g. "bom" for Mumbai).
+app = "therapistnook-api"
+primary_region = "bom"
+
+[build]
+
+[env]
+  ENVIRONMENT = "production"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[http_service.checks]]
+  interval = "15s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "get"
+  path = "/api/health"
+
+[mounts]
+  source = "scoring_data"
+  destination = "/data"

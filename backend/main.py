@@ -73,6 +73,7 @@ from auth import (
     generate_ref_code, generate_resume_code,
 )
 from scoring import full_scoring_pipeline
+import scoring as scoring_module
 
 from logging_config import setup_logging, get_logger
 from middleware import (
@@ -9350,6 +9351,35 @@ async def serve_upload(file_path: str):
         raise HTTPException(403, "Access denied")
     
     return FileResponse(full_path)
+
+
+# ═════════════════════════════════════════════════════════════════════════════════
+#  SCORING DATA — one-time upload of the T-score workbooks onto a deploy volume
+#  (they're copyrighted and intentionally excluded from git; see scoring.py's
+#  SCORING_DATA_DIR). Owner-only. Safe to leave in place after seeding — it can
+#  only overwrite these four known filenames, nowhere else.
+# ═════════════════════════════════════════════════════════════════════════════════
+
+SCORING_WORKBOOK_FILENAMES = {
+    "T-score MMPI-2.xlsx",
+    "Subscale T1 score.xlsx",
+    "Si Subscale T-conversion.xlsx",
+    "Supplementary scales T score.xlsx",
+    "MMPI - 2 - Questionnaire.xlsx",  # question text, read once by seed.py --xlsx
+}
+
+@app.post("/api/admin/scoring-data")
+async def upload_scoring_workbook(
+    file: UploadFile = File(...),
+    owner=Depends(require_owner),
+):
+    if file.filename not in SCORING_WORKBOOK_FILENAMES:
+        raise HTTPException(400, f"filename must be one of: {', '.join(sorted(SCORING_WORKBOOK_FILENAMES))}")
+    os.makedirs(scoring_module.SCORING_DATA_DIR, exist_ok=True)
+    dest = os.path.join(scoring_module.SCORING_DATA_DIR, file.filename)
+    with open(dest, "wb") as f:
+        f.write(await file.read())
+    return {"status": "ok", "saved_to": dest}
 
 
 # ═════════════════════════════════════════════════════════════════════════════════

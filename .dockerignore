@@ -1,0 +1,11 @@
+**/venv/
+**/__pycache__/
+**/*.pyc
+backend/uploads/
+backend/mmpi.db
+frontend/
+node_modules/
+.git/
+.env
+*.xlsx
+*.pdf

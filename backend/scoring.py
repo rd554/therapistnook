@@ -3,11 +3,18 @@ import os
 
 import openpyxl
 
+# The T-score workbooks are copyrighted and deliberately excluded from git
+# (see .gitignore). In dev they sit at the repo root next to backend/. In
+# production (e.g. Railway) they instead live on a mounted volume, whose path
+# is given by SCORING_DATA_DIR — set that env var and drop the files there
+# instead of committing them.
+SCORING_DATA_DIR = os.getenv("SCORING_DATA_DIR") or os.path.join(os.path.dirname(__file__), "..")
+
 SCORING_KEY_PATH = os.path.join(os.path.dirname(__file__), "..", "scoring_key.json")
-T_SCORE_TABLE_PATH = os.path.join(os.path.dirname(__file__), "..", "T-score MMPI-2.xlsx")
-SUBSCALE_T_SCORE_PATH = os.path.join(os.path.dirname(__file__), "..", "Subscale T1 score.xlsx")
-SI_SUBSCALE_T_SCORE_PATH = os.path.join(os.path.dirname(__file__), "..", "Si Subscale T-conversion.xlsx")
-SUPPLEMENTARY_T_SCORE_PATH = os.path.join(os.path.dirname(__file__), "..", "Supplementary scales T score.xlsx")
+T_SCORE_TABLE_PATH = os.path.join(SCORING_DATA_DIR, "T-score MMPI-2.xlsx")
+SUBSCALE_T_SCORE_PATH = os.path.join(SCORING_DATA_DIR, "Subscale T1 score.xlsx")
+SI_SUBSCALE_T_SCORE_PATH = os.path.join(SCORING_DATA_DIR, "Si Subscale T-conversion.xlsx")
+SUPPLEMENTARY_T_SCORE_PATH = os.path.join(SCORING_DATA_DIR, "Supplementary scales T score.xlsx")
 
 # Excel column headers per scale and gender for main scales
 T_SCORE_COLUMNS = {

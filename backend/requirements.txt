@@ -10,8 +10,11 @@ httpx>=0.26.0,<1.0.0
 fpdf2>=2.7.0,<3.0.0
 openai>=1.10.0,<2.0.0
 pyjwt>=2.8.0,<3.0.0
+# bcrypt pinned below 4.1: passlib (unmaintained) reads bcrypt.__about__.__version__
+# to detect the installed version, which bcrypt>=4.1 removed — breaks password
+# verification with an AttributeError at runtime otherwise.
 passlib>=1.7.4,<2.0.0
-bcrypt>=4.0.0,<5.0.0
+bcrypt>=4.0.0,<4.1.0
 openpyxl>=3.1.0,<4.0.0
 aiofiles>=23.2.0,<24.0.0
 python-multipart>=0.0.6,<1.0.0
