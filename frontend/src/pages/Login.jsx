@@ -111,11 +111,6 @@ export default function Login({ onLogin, onLogout }) {
             </button>
           </form>
         </div>
-
-        {/* Footer */}
-        <p className="mt-6 text-center text-caption text-content-muted">
-          MMPI-2 Assessment Platform
-        </p>
       </div>
     </div>
   )

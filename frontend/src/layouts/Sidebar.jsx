@@ -97,7 +97,7 @@ export default function Sidebar({
     <>
       {/* Logo / wordmark */}
       <div className="sidebar-logo">
-        <span className="sidebar-logo__text">MMPI</span>
+        <span className="sidebar-logo__text">Therapist Nook</span>
       </div>
 
       {/* Navigation — flush list, no group header */}
