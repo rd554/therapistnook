@@ -1,7 +1,7 @@
 import os
 import sys
 import string
-import random
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -88,11 +88,16 @@ async def require_owner(
     return prac
 
 
-def generate_ref_code(length: int = 8) -> str:
+def generate_ref_code(length: int = 12) -> str:
+    # secrets, not random: this is a standing, never-expiring link that grants
+    # anyone holding it the ability to start a session under this practitioner,
+    # so it needs to resist deliberate guessing, not just accidental collision.
     chars = string.ascii_lowercase + string.digits
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
 
 
-def generate_resume_code(length: int = 6) -> str:
+def generate_resume_code(length: int = 8) -> str:
+    # Also secrets-backed; kept alphanumeric (not lengthened as far as ref_code)
+    # since patients type this one in by hand to resume an in-progress test.
     chars = string.ascii_uppercase + string.digits
-    return "".join(random.choices(chars, k=length))
+    return "".join(secrets.choice(chars) for _ in range(length))
