@@ -2,6 +2,7 @@
 node_modules/
 __pycache__/
 *.pyc
+venv/
 
 # Environment
 .env
@@ -15,6 +16,12 @@ frontend/.vite/
 .vscode/
 .idea/
 .DS_Store
+.claude/
 
-# Excel source files (copyrighted content)
+# Uploaded patient documents (PHI - never commit)
+backend/uploads/
+
+# Excel scoring workbooks (copyrighted content) + report PDFs
+# These are deployed manually to the server, not shipped via git
 *.xlsx
+*.pdf

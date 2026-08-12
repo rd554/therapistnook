@@ -4,9 +4,30 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MMPI-2 Assessment</title>
+    <meta name="theme-color" content="#7C72E8" />
+    <title>MMPI-2 Practitioner Portal</title>
+    
+    <!-- Preconnect for font loading performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- Manrope — Premium mental health portal typography -->
+    <!-- Weights: 400 (Regular), 500 (Medium), 600 (SemiBold for emphasis), 700 (Bold) -->
+    <link 
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" 
+      rel="stylesheet"
+    />
+    
+    <style>
+      /* Prevent FOUC (Flash of Unstyled Content) */
+      html {
+        font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
   </head>
-  <body class="bg-gray-50 text-gray-900 antialiased">
+  <body class="bg-white text-content-primary antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

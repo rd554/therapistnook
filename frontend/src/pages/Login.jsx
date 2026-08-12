@@ -1,14 +1,22 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { LogIn, Loader2, ClipboardList } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { LogIn, ClipboardCheck } from 'lucide-react'
 import { login } from '../api/client'
+import { Alert } from '../components/ui'
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onLogout }) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (searchParams.get('new') === '1' && onLogout) {
+      onLogout()
+    }
+  }, [searchParams, onLogout])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -16,11 +24,17 @@ export default function Login({ onLogin }) {
     setError('')
     try {
       const data = await login(email, password)
-      localStorage.setItem('mmpi_token', data.access_token)
-      localStorage.setItem('mmpi_role', data.role)
-      localStorage.setItem('mmpi_prac_name', data.name)
       onLogin(data)
-      navigate(data.role === 'owner' ? '/admin' : '/dashboard')
+      
+      if (data.must_change_password && data.role === 'practitioner') {
+        navigate('/change-password')
+      } else if (data.role === 'practitioner' && !data.profile_setup_complete) {
+        navigate('/profile-settings')
+      } else if (data.role === 'owner') {
+        navigate('/admin')
+      } else {
+        navigate('/practitioner')
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Login failed')
     } finally {
@@ -29,53 +43,79 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div className="flex min-h-[80vh] items-center justify-center">
-      <div className="card w-full max-w-md">
-        <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-100">
-            <ClipboardList className="h-7 w-7 text-primary-600" />
+    <div className="flex min-h-screen items-center justify-center p-4">
+      <div className="w-full max-w-md animate-fade-in">
+        <div className="card">
+          {/* Header */}
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-md">
+              <ClipboardCheck className="h-8 w-8 text-white" strokeWidth={2} />
+            </div>
+            <h1 className="text-h2 text-content-primary">Welcome back</h1>
+            <p className="mt-2 text-body text-content-secondary">
+              Sign in to your practitioner account
+            </p>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Practitioner Login</h1>
-          <p className="mt-1 text-sm text-gray-500">MMPI-2 Assessment Platform</p>
+
+          {/* Error Alert */}
+          {error && (
+            <div className="mb-6">
+              <Alert variant="error" onDismiss={() => setError('')}>
+                {error}
+              </Alert>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="label">Email</label>
+              <input
+                type="email"
+                className="input-field"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+            </div>
+            <div>
+              <label className="label">Password</label>
+              <input
+                type="password"
+                className="input-field"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+              />
+            </div>
+            <button 
+              type="submit" 
+              className="btn-primary w-full" 
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                <>
+                  <LogIn className="h-5 w-5" strokeWidth={1.5} />
+                  Sign In
+                </>
+              )}
+            </button>
+          </form>
         </div>
 
-        {error && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
-            <input
-              type="email"
-              className="input-field"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">Password</label>
-            <input
-              type="password"
-              className="input-field"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <button type="submit" className="btn-primary w-full" disabled={loading}>
-            {loading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Signing in...</>
-            ) : (
-              <><LogIn className="h-4 w-4" /> Sign In</>
-            )}
-          </button>
-        </form>
+        {/* Footer */}
+        <p className="mt-6 text-center text-caption text-content-muted">
+          MMPI-2 Assessment Platform
+        </p>
       </div>
     </div>
   )

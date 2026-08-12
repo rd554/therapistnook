@@ -1,4 +1,5 @@
 import os
+import sys
 import string
 import random
 from datetime import datetime, timedelta, timezone
@@ -12,12 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 
-JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production-use-a-long-random-string")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+JWT_SECRET = os.getenv("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_HOURS = 24
+JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
+
+if ENVIRONMENT == "production":
+    if not JWT_SECRET or len(JWT_SECRET) < 32:
+        print("ERROR: JWT_SECRET must be set to a secure value (at least 32 characters) in production")
+        sys.exit(1)
+elif not JWT_SECRET:
+    JWT_SECRET = "dev-secret-do-not-use-in-production"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -51,10 +60,23 @@ async def get_current_practitioner(
     db: AsyncSession = Depends(get_db),
 ):
     from models import Practitioner
+    
+    if not creds:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Authentication required",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
     payload = decode_token(creds.credentials)
     prac = await db.get(Practitioner, payload["sub"])
-    if not prac or not prac.is_active:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account not found or deactivated")
+    
+    if not prac:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account not found")
+    
+    if not prac.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account has been deactivated")
+    
     return prac
 
 

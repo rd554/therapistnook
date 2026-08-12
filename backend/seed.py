@@ -127,6 +127,7 @@ async def seed(questions: dict[int, str]):
                 password_hash=hash_password(OWNER_PASSWORD),
                 role="owner",
                 ref_code=ref,
+                must_change_password=False,
             )
             session.add(owner)
             await session.commit()

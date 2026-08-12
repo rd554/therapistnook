@@ -48,7 +48,7 @@ def send_practitioner_welcome(
     ref_code: str,
 ):
     test_link = f"{SITE_URL}/test?ref={ref_code}"
-    login_link = f"{SITE_URL}/login"
+    login_link = f"{SITE_URL}/login?new=1"
 
     html = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; color: #1f2937;">
