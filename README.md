@@ -1,4 +1,4 @@
-# MMPI-2 Assessment Platform
+# Therapistnook
 
 A comprehensive clinical psychology practice management platform for administering MMPI-2 assessments, managing patients, scheduling appointments, and handling payments.
 
