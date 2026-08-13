@@ -5110,18 +5110,23 @@ async def delete_appointment(
     if prac.role != "owner" and appt.practitioner_id != prac.id:
         raise HTTPException(403, "Access denied")
 
-    # A payment record is a financial/audit record and must not be silently
-    # destroyed by deleting the appointment it's attached to — block instead
-    # and tell the user how to proceed.
+    # A paid/refunded payment is a real financial/audit record and must not be
+    # silently destroyed by deleting the appointment it's attached to — block
+    # instead and tell the user how to proceed. A pending/failed/expired
+    # payment never represented real money, so it's cleaned up automatically
+    # (same rule as cancelling an appointment) rather than blocking deletion.
     payment_result = await db.execute(
         select(Payment).where(Payment.appointment_id == appointment_id)
     )
-    if payment_result.scalar_one_or_none():
+    payment = payment_result.scalar_one_or_none()
+    if payment and payment.status in ("paid", "refunded"):
         raise HTTPException(
             409,
             "This appointment has a payment record and can't be deleted. "
             "Cancel it instead, or remove the payment first.",
         )
+    if payment:
+        await _remove_unpaid_payment_for_appointment(db, appointment_id)
 
     # Reminders are disposable scheduling artifacts — safe to clean up.
     await db.execute(delete(ScheduledReminder).where(ScheduledReminder.appointment_id == appointment_id))
