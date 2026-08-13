@@ -787,6 +787,10 @@ class AppointmentResponse(BaseModel):
     meeting_link: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    # Only populated by the meeting-link endpoint, to report whether the
+    # patient was actually emailed (vs. the link merely being generated).
+    email_sent: Optional[bool] = None
+    email_error: Optional[str] = None
 
 
 class AppointmentListItem(BaseModel):

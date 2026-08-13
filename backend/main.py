@@ -4629,7 +4629,11 @@ async def _create_calendar_event_for_appointment(
 async def _email_meeting_link_to_patient(db: AsyncSession, appt, patient, practitioner):
     """Email the patient their Google Meet link. Best-effort: a failure here
     shouldn't fail the request, since the link itself was already generated
-    and saved — the practitioner can still copy/share it manually."""
+    and saved — the practitioner can still copy/share it manually.
+
+    Returns (success, error_message) so callers that surface this as an
+    explicit "send" action (rather than a fire-and-forget side effect) can
+    tell the practitioner whether the patient was actually emailed."""
     from models import PractitionerAvailability
     import pytz
     from notification_service import notification_service, format_date, format_time
@@ -4664,8 +4668,11 @@ async def _email_meeting_link_to_patient(db: AsyncSession, appt, patient, practi
                 f"Meeting link email to {patient.email} for appointment {appt.id} "
                 f"did not send: {result.error}"
             )
+            return False, result.error or "Email could not be sent"
+        return True, None
     except Exception as e:
         logger.error(f"Failed to email meeting link for appointment {appt.id}: {e}")
+        return False, str(e)
 
 
 @app.post("/api/appointments", response_model=AppointmentResponse)
@@ -5032,8 +5039,13 @@ async def generate_appointment_meeting_link(
             "Settings > Integrations, then try again.",
         )
 
+    email_sent = None
+    email_error = None
     if patient and patient.email:
-        await _email_meeting_link_to_patient(db, appt, patient, practitioner)
+        email_sent, email_error = await _email_meeting_link_to_patient(db, appt, patient, practitioner)
+    else:
+        email_sent = False
+        email_error = "Patient has no email on file"
 
     return AppointmentResponse(
         id=appt.id,
@@ -5055,6 +5067,8 @@ async def generate_appointment_meeting_link(
         meeting_link=appt.meeting_link,
         created_at=appt.created_at,
         updated_at=appt.updated_at,
+        email_sent=email_sent,
+        email_error=email_error,
     )
 
 

@@ -159,8 +159,9 @@ export default function ScheduleModal({
         const events = await getCalendarEvents(form.date, form.date)
         const startDateTime = new Date(`${form.date}T${form.startTime}:00`)
         const endDateTime = new Date(startDateTime.getTime() + form.duration * 60 * 1000)
-        
+
         const overlapping = events.filter(event => {
+          if (editMode && initialData && event.id === initialData.id) return false
           const eventStart = new Date(event.start)
           const eventEnd = new Date(event.end)
           return (startDateTime < eventEnd && endDateTime > eventStart)
@@ -224,9 +225,10 @@ export default function ScheduleModal({
       return
     }
 
-    // Check for past time
+    // Check for past time (skip when editing an existing appointment, since
+    // corrections like an AM/PM slip are often made after the slot has passed)
     const startDateTime = new Date(`${form.date}T${form.startTime}:00`)
-    if (startDateTime < new Date()) {
+    if (!editMode && startDateTime < new Date()) {
       setError('Cannot schedule appointments in the past')
       return
     }
@@ -352,7 +354,9 @@ export default function ScheduleModal({
             <h2 className="text-xl font-semibold text-content-primary">
               {editMode ? 'Edit Appointment' : 'Schedule Session'}
             </h2>
-            <p className="text-sm text-content-secondary mt-0.5">Create a new appointment</p>
+            <p className="text-sm text-content-secondary mt-0.5">
+              {editMode ? 'Update the session details below' : 'Create a new appointment'}
+            </p>
           </div>
           <button 
             onClick={onClose} 
@@ -403,13 +407,17 @@ export default function ScheduleModal({
                         </div>
                         <span className="font-medium text-content-primary">{form.patientName}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, patientId: '', patientName: '' }))}
-                        className="flex h-8 w-8 items-center justify-center rounded-[10px] text-content-muted hover:bg-slate-200 hover:text-content-primary transition-colors"
-                      >
-                        <X className="h-4 w-4" strokeWidth={1.5} />
-                      </button>
+                      {/* The update endpoint can't reassign a patient, so don't
+                          offer a way to clear/change the selection in edit mode. */}
+                      {!editMode && (
+                        <button
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, patientId: '', patientName: '' }))}
+                          className="flex h-8 w-8 items-center justify-center rounded-[10px] text-content-muted hover:bg-slate-200 hover:text-content-primary transition-colors"
+                        >
+                          <X className="h-4 w-4" strokeWidth={1.5} />
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <>
@@ -589,8 +597,9 @@ export default function ScheduleModal({
                 )}
               </div>
 
-              {/* Practitioner (Admin only) - Full Width */}
-              {practitioners && practitioners.length > 0 && (
+              {/* Practitioner (Admin only) - Full Width. Hidden in edit mode: the
+                  update endpoint doesn't support reassigning a practitioner. */}
+              {!editMode && practitioners && practitioners.length > 0 && (
                 <div className="col-span-2">
                   <label className="label">Practitioner</label>
                   <select

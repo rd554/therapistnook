@@ -3,9 +3,9 @@ import { useNavigate, Link } from 'react-router-dom'
 import {
   X, Calendar, Clock, User, Video, Building, FileText, Loader2,
   Edit, Trash2, XCircle, CheckCircle, RefreshCw, ExternalLink,
-  AlertCircle, MoreVertical, CreditCard, IndianRupee, Receipt, Send, Banknote,
+  AlertCircle, MoreVertical, CreditCard, IndianRupee, Receipt, Send, Banknote, Mail,
 } from 'lucide-react'
-import { getAppointment, updateAppointment, getAppointmentPayment, markPaymentPaid, sendPaymentReminder } from '../api/client'
+import { getAppointment, updateAppointment, getAppointmentPayment, markPaymentPaid, sendPaymentReminder, generateMeetingLink } from '../api/client'
 
 const STATUS_OPTIONS = [
   { value: 'scheduled', label: 'Scheduled', color: 'bg-blue-100 text-blue-700' },
@@ -61,6 +61,7 @@ export default function AppointmentDetail({
   onUpdate,
   onCancel,
   onDelete,
+  onEdit,
   onClose,
   onRefresh,
 }) {
@@ -73,6 +74,7 @@ export default function AppointmentDetail({
   const [cancelReason, setCancelReason] = useState('')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [paymentLoading, setPaymentLoading] = useState(false)
+  const [sendingInvite, setSendingInvite] = useState(false)
 
   useEffect(() => {
     loadAppointment()
@@ -122,6 +124,24 @@ export default function AppointmentDetail({
       console.error('Failed to send reminder:', err)
     } finally {
       setPaymentLoading(false)
+    }
+  }
+
+  const handleSendMeetingInvite = async () => {
+    setSendingInvite(true)
+    try {
+      const updated = await generateMeetingLink(appointmentId)
+      if (updated.email_sent) {
+        alert('Meeting invite emailed to the patient')
+      } else {
+        // The link exists/was created fine, but the email itself didn't go out
+        // (e.g. no email on file, or SMTP failed) — don't claim success.
+        alert(`Link ready, but couldn't email it: ${updated.email_error || 'unknown error'}`)
+      }
+    } catch (err) {
+      alert(err.userMessage || err.response?.data?.detail || 'Failed to send meeting invite')
+    } finally {
+      setSendingInvite(false)
     }
   }
 
@@ -178,9 +198,9 @@ export default function AppointmentDetail({
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4">
-        <div className="w-full max-w-lg rounded-xl bg-white shadow-xl">
+        <div className="flex w-full max-w-lg max-h-[90vh] flex-col rounded-xl bg-white shadow-xl">
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-6 py-4">
             <div>
               <h2 className="text-lg font-bold text-gray-900">Appointment Details</h2>
               <p className="text-sm text-gray-500">{formatDateTime(appointment.start_time)}</p>
@@ -191,7 +211,7 @@ export default function AppointmentDetail({
           </div>
 
           {/* Content */}
-          <div className="p-6 space-y-5">
+          <div className="flex-1 overflow-y-auto p-6 space-y-5">
             {/* Patient */}
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-100 text-lg font-semibold text-primary-700">
@@ -295,6 +315,18 @@ export default function AppointmentDetail({
                       className="px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 rounded-lg transition"
                     >
                       Copy
+                    </button>
+                    <button
+                      onClick={handleSendMeetingInvite}
+                      disabled={sendingInvite}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 rounded-lg transition disabled:opacity-50"
+                    >
+                      {sendingInvite ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Mail className="h-3.5 w-3.5" />
+                      )}
+                      Email
                     </button>
                     <a
                       href={appointment.meeting_link}
@@ -437,7 +469,7 @@ export default function AppointmentDetail({
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-between border-t border-gray-200 px-6 py-4">
+          <div className="flex shrink-0 items-center justify-between border-t border-gray-200 px-6 py-4">
             <button
               onClick={() => onDelete(appointmentId)}
               className="flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700"
@@ -449,6 +481,15 @@ export default function AppointmentDetail({
               <button onClick={onClose} className="btn-secondary">
                 Close
               </button>
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(appointmentId)}
+                  className="btn-primary flex items-center gap-1.5"
+                >
+                  <Edit className="h-4 w-4" />
+                  Edit
+                </button>
+              )}
             </div>
           </div>
         </div>

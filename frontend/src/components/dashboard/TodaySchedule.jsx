@@ -35,6 +35,8 @@ export default function TodaySchedule({ schedule }) {
   // exists, so it doesn't touch Google Calendar and shouldn't open a new tab.
   const [emailingId, setEmailingId] = useState(null)
   const [emailedId, setEmailedId] = useState(null)
+  const [emailErrorId, setEmailErrorId] = useState(null)
+  const [emailErrorMsg, setEmailErrorMsg] = useState('')
 
   const handleGenerateLink = async (appt) => {
     setGeneratingId(appt.id)
@@ -54,15 +56,23 @@ export default function TodaySchedule({ schedule }) {
 
   const handleEmailLink = async (appt) => {
     setEmailingId(appt.id)
-    setErrorId(null)
+    setEmailErrorId(null)
     try {
       // Same endpoint — when a link already exists it skips Google entirely
       // and just (re)sends the email to the patient.
-      await generateMeetingLink(appt.id)
-      setEmailedId(appt.id)
-      setTimeout(() => setEmailedId((current) => (current === appt.id ? null : current)), 3000)
+      const updated = await generateMeetingLink(appt.id)
+      if (updated.email_sent) {
+        setEmailedId(appt.id)
+        setTimeout(() => setEmailedId((current) => (current === appt.id ? null : current)), 3000)
+      } else {
+        // Link exists, but the email itself didn't go out — don't show the
+        // checkmark for something that didn't happen.
+        setEmailErrorId(appt.id)
+        setEmailErrorMsg(updated.email_error || 'Could not email the link')
+      }
     } catch {
-      setErrorId(appt.id)
+      setEmailErrorId(appt.id)
+      setEmailErrorMsg('Could not email the link')
     } finally {
       setEmailingId(null)
     }
@@ -140,6 +150,9 @@ export default function TodaySchedule({ schedule }) {
                     <p className="dash-session-card__error">
                       Couldn&apos;t create a link. Connect Google Calendar in Settings.
                     </p>
+                  )}
+                  {emailErrorId === appt.id && (
+                    <p className="dash-session-card__error">{emailErrorMsg}</p>
                   )}
                 </div>
                 {canJoin && (

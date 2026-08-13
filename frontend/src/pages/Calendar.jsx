@@ -8,7 +8,7 @@ import {
   Copy, ExternalLink,
 } from 'lucide-react'
 import {
-  getCalendarEvents, createAppointment, updateAppointment, rescheduleAppointment,
+  getCalendarEvents, getAppointment, createAppointment, updateAppointment, rescheduleAppointment,
   cancelAppointment, deleteAppointment, listPatients, listPractitioners,
 } from '../api/client'
 import ScheduleModal from '../components/ScheduleModal'
@@ -125,6 +125,8 @@ export default function Calendar() {
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showDetailPanel, setShowDetailPanel] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingAppointment, setEditingAppointment] = useState(null)
   const [patients, setPatients] = useState([])
   const [practitioners, setPractitioners] = useState([])
   const [statusFilter, setStatusFilter] = useState('')
@@ -182,7 +184,7 @@ export default function Calendar() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (showScheduleModal || showDetailPanel) return
+      if (showScheduleModal || showDetailPanel || showEditModal) return
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       
       switch (e.key) {
@@ -213,7 +215,7 @@ export default function Calendar() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showScheduleModal, showDetailPanel, view, currentDate])
+  }, [showScheduleModal, showDetailPanel, showEditModal, view, currentDate])
 
   // Close context menu on click outside
   useEffect(() => {
@@ -297,6 +299,30 @@ export default function Calendar() {
       await loadEvents()
       setShowDetailPanel(false)
       setSelectedEvent(null)
+    } catch (err) {
+      throw err
+    }
+  }
+
+  const handleEditAppointment = async (appointmentId) => {
+    try {
+      const data = await getAppointment(appointmentId)
+      setEditingAppointment(data)
+      setShowEditModal(true)
+      setShowDetailPanel(false)
+      setSelectedEvent(null)
+      setContextMenu(null)
+    } catch (err) {
+      console.error('Failed to load appointment for editing:', err)
+    }
+  }
+
+  const handleSaveEditedAppointment = async (data) => {
+    try {
+      await updateAppointment(editingAppointment.id, data)
+      await loadEvents()
+      setShowEditModal(false)
+      setEditingAppointment(null)
     } catch (err) {
       throw err
     }
@@ -519,10 +545,7 @@ export default function Calendar() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
-            onClick={() => {
-              handleEventClick(contextMenu.event)
-              setContextMenu(null)
-            }}
+            onClick={() => handleEditAppointment(contextMenu.event.id)}
             className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
           >
             <Edit className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
@@ -585,11 +608,27 @@ export default function Calendar() {
           onUpdate={handleUpdateAppointment}
           onCancel={handleCancelAppointment}
           onDelete={handleDeleteAppointment}
+          onEdit={handleEditAppointment}
           onClose={() => {
             setShowDetailPanel(false)
             setSelectedEvent(null)
           }}
           onRefresh={loadEvents}
+        />
+      )}
+
+      {/* Edit Appointment Modal */}
+      {showEditModal && editingAppointment && (
+        <ScheduleModal
+          editMode
+          initialData={editingAppointment}
+          patients={patients}
+          practitioners={isOwner ? practitioners : []}
+          onSubmit={handleSaveEditedAppointment}
+          onClose={() => {
+            setShowEditModal(false)
+            setEditingAppointment(null)
+          }}
         />
       )}
     </div>
