@@ -348,6 +348,7 @@ export default function Calendar() {
       setSelectedEvent(null)
     } catch (err) {
       console.error('Failed to delete:', err)
+      throw err
     }
   }
 

@@ -5082,14 +5082,56 @@ async def delete_appointment(
     appt = await db.get(Appointment, appointment_id)
     if not appt:
         raise HTTPException(404, "Appointment not found")
-    
+
     # Access control
     if prac.role != "owner" and appt.practitioner_id != prac.id:
         raise HTTPException(403, "Access denied")
-    
+
+    # A payment record is a financial/audit record and must not be silently
+    # destroyed by deleting the appointment it's attached to — block instead
+    # and tell the user how to proceed.
+    payment_result = await db.execute(
+        select(Payment).where(Payment.appointment_id == appointment_id)
+    )
+    if payment_result.scalar_one_or_none():
+        raise HTTPException(
+            409,
+            "This appointment has a payment record and can't be deleted. "
+            "Cancel it instead, or remove the payment first.",
+        )
+
+    # Reminders are disposable scheduling artifacts — safe to clean up.
+    await db.execute(delete(ScheduledReminder).where(ScheduledReminder.appointment_id == appointment_id))
+
+    # A booking request that led to this appointment should be kept (it holds
+    # the original booking info), just detached from the appointment being removed.
+    booking_result = await db.execute(
+        select(BookingRequest).where(BookingRequest.appointment_id == appointment_id)
+    )
+    booking_request = booking_result.scalar_one_or_none()
+    if booking_request:
+        booking_request.appointment_id = None
+
+    # Other appointments may point at this one through the reschedule chain
+    # (rescheduled_from_id / rescheduled_to_id are self-referential FKs) —
+    # detach them so deleting this row doesn't violate that constraint.
+    linked_result = await db.execute(
+        select(Appointment).where(
+            or_(
+                Appointment.rescheduled_from_id == appointment_id,
+                Appointment.rescheduled_to_id == appointment_id,
+            )
+        )
+    )
+    for linked in linked_result.scalars().all():
+        if linked.rescheduled_from_id == appointment_id:
+            linked.rescheduled_from_id = None
+        if linked.rescheduled_to_id == appointment_id:
+            linked.rescheduled_to_id = None
+
     await db.delete(appt)
     await db.commit()
-    
+
     return {"message": "Appointment deleted successfully"}
 
 

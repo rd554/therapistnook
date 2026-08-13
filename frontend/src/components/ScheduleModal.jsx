@@ -306,10 +306,14 @@ export default function ScheduleModal({
   // Success State
   if (showSuccess) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-        <div 
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+        onClick={onClose}
+      >
+        <div
           className="w-full max-w-md bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200"
           style={{ borderRadius: '24px' }}
+          onClick={(e) => e.stopPropagation()}
         >
           <div className="p-8 text-center">
             <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-success-bg">
@@ -343,10 +347,14 @@ export default function ScheduleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-      <div 
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
         className="w-full max-w-[800px] max-h-[90vh] bg-white shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200"
         style={{ borderRadius: '24px' }}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[#F1F5F9] px-7 py-5 shrink-0">

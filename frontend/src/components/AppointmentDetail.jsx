@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import {
   X, Calendar, Clock, User, Video, Building, FileText, Loader2,
@@ -75,10 +75,23 @@ export default function AppointmentDetail({
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [paymentLoading, setPaymentLoading] = useState(false)
   const [sendingInvite, setSendingInvite] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const statusMenuRef = useRef(null)
 
   useEffect(() => {
     loadAppointment()
   }, [appointmentId])
+
+  useEffect(() => {
+    if (!showStatusMenu) return
+    const handleClickOutside = (event) => {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(event.target)) {
+        setShowStatusMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showStatusMenu])
 
   const loadAppointment = async () => {
     setLoading(true)
@@ -176,6 +189,17 @@ export default function AppointmentDetail({
     }
   }
 
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await onDelete(appointmentId)
+    } catch (err) {
+      alert(err.userMessage || err.response?.data?.detail || 'Failed to delete appointment')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const getStatusColor = (status) => {
     const option = STATUS_OPTIONS.find(s => s.value === status)
     return option?.color || 'bg-gray-100 text-gray-700'
@@ -197,8 +221,14 @@ export default function AppointmentDetail({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4">
-        <div className="flex w-full max-w-lg max-h-[90vh] flex-col rounded-xl bg-white shadow-xl">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4"
+        onClick={onClose}
+      >
+        <div
+          className="flex w-full max-w-lg max-h-[90vh] flex-col rounded-xl bg-white shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Header */}
           <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-6 py-4">
             <div>
@@ -232,7 +262,7 @@ export default function AppointmentDetail({
             {/* Status */}
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-gray-500">Status</span>
-              <div className="relative">
+              <div className="relative" ref={statusMenuRef}>
                 <button
                   onClick={() => setShowStatusMenu(!showStatusMenu)}
                   className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-semibold ${getStatusColor(appointment.status)}`}
@@ -471,10 +501,11 @@ export default function AppointmentDetail({
           {/* Actions */}
           <div className="flex shrink-0 items-center justify-between border-t border-gray-200 px-6 py-4">
             <button
-              onClick={() => onDelete(appointmentId)}
-              className="flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
             >
-              <Trash2 className="h-4 w-4" />
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               Delete
             </button>
             <div className="flex gap-2">
