@@ -4976,17 +4976,21 @@ async def reschedule_appointment(
 
 
 async def _remove_unpaid_payment_for_appointment(db: AsyncSession, appointment_id: str):
-    """When an appointment is cancelled, its payment stub is only worth keeping
-    if money actually changed hands. A pending/failed/expired payment for a
-    session that's not happening is noise, not a financial record — remove it
-    so it stops showing up in the Payments list. Paid/refunded payments are
-    left alone since those represent a real transaction.
+    """When an appointment is cancelled or deleted, its payment stub is only
+    worth keeping if money actually changed hands. A pending/failed/expired/
+    cancelled payment for a session that's not happening is noise, not a
+    financial record — remove it so it stops showing up in the Payments list
+    (and, for deletion, so it doesn't dangle as an FK reference). Paid/
+    refunded payments are left alone since those represent a real
+    transaction; this is deliberately an exclusion list so any future
+    addition to PAYMENT_STATUSES defaults to being cleaned up rather than
+    silently left behind.
     """
     payment_result = await db.execute(
         select(Payment).where(Payment.appointment_id == appointment_id)
     )
     payment = payment_result.scalar_one_or_none()
-    if not payment or payment.status not in ("pending", "failed", "expired"):
+    if not payment or payment.status in ("paid", "refunded"):
         return
 
     await db.execute(delete(Receipt).where(Receipt.payment_id == payment.id))
@@ -5112,9 +5116,11 @@ async def delete_appointment(
 
     # A paid/refunded payment is a real financial/audit record and must not be
     # silently destroyed by deleting the appointment it's attached to — block
-    # instead and tell the user how to proceed. A pending/failed/expired
-    # payment never represented real money, so it's cleaned up automatically
-    # (same rule as cancelling an appointment) rather than blocking deletion.
+    # instead and tell the user how to proceed. Any other status (pending,
+    # failed, expired, cancelled) never represented real money, so it's
+    # cleaned up automatically (same rule as cancelling an appointment)
+    # rather than blocking deletion or being left dangling as an FK
+    # reference to an appointment that's about to be deleted.
     payment_result = await db.execute(
         select(Payment).where(Payment.appointment_id == appointment_id)
     )
