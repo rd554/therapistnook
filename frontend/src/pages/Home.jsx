@@ -32,7 +32,7 @@ export default function Home() {
         const start = toISODate(startDate)
 
         const [todayData, appts, txs] = await Promise.all([
-          getTodaySchedule().catch(() => null),
+          getTodaySchedule(end).catch(() => null),
           listAppointments({ startDate: start, endDate: end }).catch(() => []),
           getRecentTransactions(30).catch(() => []),
         ])

@@ -4362,12 +4362,19 @@ async def get_calendar_events(
 
 @app.get("/api/appointments/today", response_model=TodaySchedule)
 async def get_today_schedule(
+    for_date: date = Query(None, alias="date"),
     prac=Depends(get_current_practitioner),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get today's schedule for dashboard."""
-    today = date.today()
-    
+    """Get today's schedule for dashboard.
+
+    `date` should be the caller's local calendar date (the server may run in a
+    different timezone than the practitioner, so relying on the server's own
+    `date.today()` can miss/misplace appointments near midnight). Falls back
+    to the server's date if not provided, for backward compatibility.
+    """
+    today = for_date or date.today()
+
     query = select(Appointment).where(
         Appointment.date == today,
         Appointment.practitioner_id == prac.id,

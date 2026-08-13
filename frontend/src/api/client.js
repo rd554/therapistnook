@@ -495,8 +495,8 @@ export async function getCalendarEvents(startDate, endDate, practitionerId = nul
   return res.data
 }
 
-export async function getTodaySchedule() {
-  const res = await api.get('/appointments/today')
+export async function getTodaySchedule(date) {
+  const res = await api.get('/appointments/today', { params: date ? { date } : {} })
   return res.data
 }
 
