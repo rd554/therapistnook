@@ -4,7 +4,7 @@ import {
   CreditCard, TrendingUp, Clock, AlertCircle, CheckCircle, XCircle,
   RefreshCcw, Search, Filter, ChevronDown, Eye, Send,
   MoreVertical, Download, Loader2, Calendar, User, IndianRupee, X,
-  Copy, Check, Banknote, Plus, FileText, ExternalLink,
+  Banknote, Plus, FileText, ExternalLink,
   Wallet, Stethoscope, ClipboardCheck, MessageSquare,
 } from 'lucide-react'
 import {
@@ -675,7 +675,6 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [receipt, setReceipt] = useState(null)
-  const [copied, setCopied] = useState(false)
   const [showMarkPaid, setShowMarkPaid] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState('cash')
 
@@ -721,14 +720,6 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
       console.error('Failed to send reminder:', err)
     } finally {
       setLoading(false)
-    }
-  }
-
-  function copyPaymentLink() {
-    if (payment.payment_link_url) {
-      navigator.clipboard.writeText(payment.payment_link_url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
     }
   }
 
@@ -804,7 +795,11 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
             <div className="p-5 grid grid-cols-2 gap-4">
               <div>
                 <p className="text-xs text-content-muted mb-1">Date</p>
-                <p className="text-sm font-medium text-content-primary">{formatDate(payment.appointment_date)}</p>
+                <p className="text-sm font-medium text-content-primary">
+                  {payment.appointment_start_time
+                    ? formatDateTime(payment.appointment_start_time)
+                    : formatDate(payment.appointment_date)}
+                </p>
               </div>
               <div>
                 <p className="text-xs text-content-muted mb-1">Session Type</p>
@@ -822,33 +817,6 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
               )}
             </div>
           </div>
-
-          {/* Payment Link (for pending payments) */}
-          {payment.status === 'pending' && payment.payment_link_url && (
-            <div className="rounded-[16px] border border-[#E8ECF4] overflow-hidden">
-              <div className="bg-slate-50/80 px-5 py-3 border-b border-[#F1F5F9]">
-                <h3 className="text-sm font-semibold text-content-primary">Payment Link</h3>
-              </div>
-              <div className="p-5">
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 truncate rounded-[10px] bg-slate-100 px-3 py-2.5 text-xs text-content-secondary">
-                    {payment.payment_link_url}
-                  </code>
-                  <button
-                    onClick={copyPaymentLink}
-                    className="flex h-10 w-10 items-center justify-center rounded-[10px] border border-[#E2E8F0] text-content-muted hover:bg-lavender hover:text-content-primary transition-colors"
-                  >
-                    {copied ? <Check className="h-4 w-4 text-success-text" strokeWidth={1.5} /> : <Copy className="h-4 w-4" strokeWidth={1.5} />}
-                  </button>
-                </div>
-                {payment.payment_link_expires_at && (
-                  <p className="mt-2 text-xs text-content-muted">
-                    Expires: {formatDateTime(payment.payment_link_expires_at)}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Receipt */}
           {receipt && (

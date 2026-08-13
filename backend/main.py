@@ -5706,6 +5706,7 @@ async def get_payment(
         refund_completed_at=payment.refund_completed_at,
         notes=payment.notes,
         appointment_date=appt.date if appt else None,
+        appointment_start_time=appt.start_time if appt else None,
         session_type=appt.session_type if appt else None,
         receipt_number=receipt.receipt_number if receipt else None,
         created_at=payment.created_at,

@@ -1004,6 +1004,7 @@ class PaymentResponse(BaseModel):
     refund_completed_at: Optional[datetime] = None
     notes: Optional[str] = None
     appointment_date: Optional[date] = None
+    appointment_start_time: Optional[datetime] = None
     session_type: Optional[str] = None
     receipt_number: Optional[str] = None
     created_at: datetime
