@@ -4846,13 +4846,16 @@ async def update_appointment(
         appt.notes = data.notes
     if data.cancellation_reason is not None:
         appt.cancellation_reason = data.cancellation_reason
-    
+
+    if data.status == "cancelled":
+        await _remove_unpaid_payment_for_appointment(db, appointment_id)
+
     await db.commit()
     await db.refresh(appt)
-    
+
     patient = await db.get(Patient, appt.patient_id)
     practitioner = await db.get(Practitioner, appt.practitioner_id)
-    
+
     return AppointmentResponse(
         id=appt.id,
         practitioner_id=appt.practitioner_id,
@@ -4972,6 +4975,24 @@ async def reschedule_appointment(
     )
 
 
+async def _remove_unpaid_payment_for_appointment(db: AsyncSession, appointment_id: str):
+    """When an appointment is cancelled, its payment stub is only worth keeping
+    if money actually changed hands. A pending/failed/expired payment for a
+    session that's not happening is noise, not a financial record — remove it
+    so it stops showing up in the Payments list. Paid/refunded payments are
+    left alone since those represent a real transaction.
+    """
+    payment_result = await db.execute(
+        select(Payment).where(Payment.appointment_id == appointment_id)
+    )
+    payment = payment_result.scalar_one_or_none()
+    if not payment or payment.status not in ("pending", "failed", "expired"):
+        return
+
+    await db.execute(delete(Receipt).where(Receipt.payment_id == payment.id))
+    await db.delete(payment)
+
+
 @app.post("/api/appointments/{appointment_id}/cancel")
 async def cancel_appointment(
     appointment_id: str,
@@ -4993,9 +5014,11 @@ async def cancel_appointment(
     
     appt.status = "cancelled"
     appt.cancellation_reason = reason
-    
+
+    await _remove_unpaid_payment_for_appointment(db, appointment_id)
+
     await db.commit()
-    
+
     return {"message": "Appointment cancelled successfully"}
 
 
@@ -5448,7 +5471,17 @@ async def get_payment_dashboard(
         base_query = select(Payment)
     else:
         base_query = select(Payment).where(Payment.practitioner_id == prac.id)
-    
+
+    # Same rule as list_payments: a pending/failed/expired payment tied to a
+    # cancelled appointment isn't real outstanding revenue, it's a leftover
+    # stub — exclude it so it doesn't inflate pending/outstanding totals.
+    base_query = base_query.join(Appointment).where(
+        or_(
+            Appointment.status != "cancelled",
+            Payment.status.notin_(["pending", "failed", "expired"]),
+        )
+    )
+
     # Get all payments
     payments = (await db.execute(base_query)).scalars().all()
     
@@ -5497,7 +5530,16 @@ async def get_recent_transactions(
         query = select(Payment)
     else:
         query = select(Payment).where(Payment.practitioner_id == prac.id)
-    
+
+    # Same rule as list_payments/dashboard: don't surface unpaid stubs left
+    # behind by cancelled appointments.
+    query = query.join(Appointment).where(
+        or_(
+            Appointment.status != "cancelled",
+            Payment.status.notin_(["pending", "failed", "expired"]),
+        )
+    )
+
     query = query.order_by(Payment.updated_at.desc()).limit(limit)
     payments = (await db.execute(query)).scalars().all()
     
@@ -5537,13 +5579,24 @@ async def list_payments(
 ):
     """List payments with filters."""
     query = select(Payment).join(Appointment)
-    
+
     # Access control
     if prac.role != "owner":
         query = query.where(Payment.practitioner_id == prac.id)
     elif practitioner_id:
         query = query.where(Payment.practitioner_id == practitioner_id)
-    
+
+    # A payment left behind by a cancelled appointment is noise, not a
+    # financial record, unless money actually changed hands (paid/refunded).
+    # This also covers rows that were cancelled before the cleanup-on-cancel
+    # logic existed, since those are never retroactively deleted.
+    query = query.where(
+        or_(
+            Appointment.status != "cancelled",
+            Payment.status.notin_(["pending", "failed", "expired"]),
+        )
+    )
+
     # Filters
     if status:
         query = query.where(Payment.status == status)
