@@ -71,18 +71,12 @@ Default credentials:
 
 **Change this immediately in production!**
 
-## Documentation
-
-- [Technical Documentation](docs/TECHNICAL.md) - Architecture and API reference
-- [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment instructions
-
 ## Project Structure
 
 ```
 MMPI/
 ├── backend/          # FastAPI backend
 ├── frontend/         # React frontend
-├── docs/            # Documentation
 └── scoring_key.json # MMPI-2 scoring keys
 ```
 
