@@ -48,7 +48,7 @@ export default function Login({ onLogin, onLogout }) {
         <div className="card">
           {/* Header */}
           <div className="mb-8 text-center">
-            <img src="/logo.png" alt="Therapistnook" className="mx-auto mb-4 h-20 w-20" />
+            <img src="/logo.png" alt="Therapistnook" className="mx-auto mb-4 h-28 w-28" />
             <h1 className="text-h2 text-content-primary">Therapistnook</h1>
             <p className="mt-2 text-body text-content-secondary">
               Sign in to your practitioner account
