@@ -757,21 +757,24 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
 
   return (
     <>
-      {/* Backdrop */}
-      <div 
-        className="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-sm animate-in fade-in duration-200"
+      {/* Backdrop + centering */}
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-sm p-4"
         onClick={onClose}
-      />
-      
-      {/* Drawer */}
-      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[480px] bg-white shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+      >
+        {/* Modal */}
+        <div
+          className="w-full max-w-[480px] max-h-[85vh] bg-white shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200"
+          style={{ borderRadius: '24px' }}
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[#F1F5F9] px-6 py-5 shrink-0">
           <div>
             <h2 className="text-lg font-semibold text-content-primary">Payment Details</h2>
             <p className="text-sm text-content-secondary mt-0.5">{payment.patient_name}</p>
           </div>
-          <button 
+          <button
             onClick={onClose}
             className="flex h-10 w-10 items-center justify-center rounded-[12px] text-content-muted hover:bg-lavender hover:text-content-primary transition-colors"
           >
@@ -977,6 +980,7 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
             View Patient Profile
             <ExternalLink className="h-3.5 w-3.5 ml-auto" strokeWidth={1.5} />
           </button>
+        </div>
         </div>
       </div>
     </>
