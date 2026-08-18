@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import {
   getMyProfile, updateMyProfile, uploadProfilePhoto, uploadCoverImage,
+  uploadSignatureImage, deleteSignatureImage, uploadStampImage, deleteStampImage,
   listMyResources, createResource, uploadResource,
   updateResource, deleteResource, listMyTestimonials, createTestimonial,
   updateTestimonial, deleteTestimonial
@@ -81,6 +82,8 @@ export default function ProfileSettings({ onProfileSetupComplete } = {}) {
   
   const photoInputRef = useRef(null)
   const coverInputRef = useRef(null)
+  const signatureInputRef = useRef(null)
+  const stampInputRef = useRef(null)
   const resourceFileInputRef = useRef(null)
 
   // Form state
@@ -226,6 +229,52 @@ export default function ProfileSettings({ onProfileSetupComplete } = {}) {
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       setError('Failed to upload cover image')
+    }
+  }
+
+  async function handleSignatureUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    try {
+      const result = await uploadSignatureImage(file)
+      setFormData(prev => ({ ...prev, signature_image_url: result.url }))
+      setSuccess('Signature uploaded')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError('Failed to upload signature')
+    }
+  }
+
+  async function handleRemoveSignature() {
+    try {
+      await deleteSignatureImage()
+      setFormData(prev => ({ ...prev, signature_image_url: null }))
+    } catch (err) {
+      setError('Failed to remove signature')
+    }
+  }
+
+  async function handleStampUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    try {
+      const result = await uploadStampImage(file)
+      setFormData(prev => ({ ...prev, stamp_image_url: result.url }))
+      setSuccess('Stamp uploaded')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError('Failed to upload stamp')
+    }
+  }
+
+  async function handleRemoveStamp() {
+    try {
+      await deleteStampImage()
+      setFormData(prev => ({ ...prev, stamp_image_url: null }))
+    } catch (err) {
+      setError('Failed to remove stamp')
     }
   }
 
@@ -655,6 +704,57 @@ export default function ProfileSettings({ onProfileSetupComplete } = {}) {
                     placeholder="Optional"
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   />
+                </div>
+              </div>
+
+              {/* Digital Signature & Stamp — rendered on invoice PDFs above the printed name.
+                  Optional: most practitioners won't set one, invoices work fine without it. */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Digital Signature & Stamp</label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Shown above your name on invoice PDFs. Optional — leave blank to sign printed invoices by hand.
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <span className="block text-xs text-slate-500 mb-1">Signature</span>
+                    {formData.signature_image_url ? (
+                      <div className="flex items-center gap-3 p-3 border rounded-lg bg-slate-50">
+                        <img src={formData.signature_image_url} alt="Signature" className="h-10 object-contain" />
+                        <button onClick={handleRemoveSignature} className="ml-auto text-red-500 hover:text-red-600">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => signatureInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-3 border border-dashed rounded-lg text-sm text-slate-500 hover:bg-slate-50"
+                      >
+                        <Upload className="w-4 h-4" />
+                        Upload signature
+                      </button>
+                    )}
+                    <input ref={signatureInputRef} type="file" accept="image/*" onChange={handleSignatureUpload} className="hidden" />
+                  </div>
+                  <div>
+                    <span className="block text-xs text-slate-500 mb-1">Stamp</span>
+                    {formData.stamp_image_url ? (
+                      <div className="flex items-center gap-3 p-3 border rounded-lg bg-slate-50">
+                        <img src={formData.stamp_image_url} alt="Stamp" className="h-10 object-contain" />
+                        <button onClick={handleRemoveStamp} className="ml-auto text-red-500 hover:text-red-600">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => stampInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-3 border border-dashed rounded-lg text-sm text-slate-500 hover:bg-slate-50"
+                      >
+                        <Upload className="w-4 h-4" />
+                        Upload stamp
+                      </button>
+                    )}
+                    <input ref={stampInputRef} type="file" accept="image/*" onChange={handleStampUpload} className="hidden" />
+                  </div>
                 </div>
               </div>
 

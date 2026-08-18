@@ -10,7 +10,7 @@ import {
 import {
   getPaymentDashboard, listPayments, getPayment,
   markPaymentPaid, sendPaymentReminder, initiateRefund, completeRefund,
-  getPaymentReceipt, regeneratePaymentLink, listPractitioners,
+  getPaymentReceipt, getInvoicePdfUrl, getInvoicePdfPreviewUrl, regeneratePaymentLink, listPractitioners,
 } from '../api/client'
 import { EmptyState, SummaryCard } from '../components/ui'
 
@@ -330,7 +330,7 @@ export default function Payments() {
                 <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-content-muted" strokeWidth={1.5} />
                 <input
                   type="text"
-                  placeholder="Search patient, invoice or receipt..."
+                  placeholder="Search patient or invoice..."
                   value={filters.search}
                   onChange={(e) => setFilters({ ...filters, search: e.target.value })}
                   className="h-10 w-72 rounded-[12px] border border-[#E2E8F0] bg-white pl-10 pr-4 text-sm text-content-primary placeholder:text-content-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all"
@@ -536,7 +536,7 @@ export default function Payments() {
               <span>Session Type</span>
               <span className="text-right">Amount</span>
               <span>Status</span>
-              <span>Receipt</span>
+              <span>Invoice</span>
               <span />
             </div>
             <div className="flex flex-col gap-2">
@@ -545,6 +545,7 @@ export default function Payments() {
                   key={payment.id}
                   payment={payment}
                   onView={() => handleViewPayment(payment.id)}
+                  onGenerated={loadPayments}
                 />
               ))}
             </div>
@@ -571,12 +572,27 @@ export default function Payments() {
 }
 
 
-function PaymentRow({ payment, onView }) {
+function PaymentRow({ payment, onView, onGenerated }) {
   const [showMenu, setShowMenu] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const menuRef = useRef(null)
   const config = STATUS_CONFIG[payment.status] || STATUS_CONFIG.pending
   const Icon = config.icon
   const sessionType = SESSION_TYPES[payment.session_type] || { label: payment.session_type, icon: Stethoscope }
+
+  async function handleGenerate(e) {
+    e.stopPropagation()
+    if (generating) return
+    setGenerating(true)
+    try {
+      await getPaymentReceipt(payment.id) // auto-generates the invoice if it doesn't exist yet
+      onGenerated?.()
+    } catch (err) {
+      console.error('Failed to generate invoice:', err)
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -616,10 +632,10 @@ function PaymentRow({ payment, onView }) {
         <span className="font-mono text-xs text-content-secondary truncate">{payment.receipt_number}</span>
       ) : payment.status === 'paid' ? (
         <span
-          onClick={(e) => e.stopPropagation()}
+          onClick={handleGenerate}
           className="text-xs text-primary font-medium cursor-pointer hover:underline w-fit"
         >
-          Generate
+          {generating ? 'Generating…' : 'Generate'}
         </span>
       ) : (
         <span className="text-content-muted">—</span>
@@ -642,10 +658,26 @@ function PaymentRow({ payment, onView }) {
               View Details
             </button>
             {payment.receipt_number && (
-              <button className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors">
-                <Download className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-                Download Receipt
-              </button>
+              <>
+                <a
+                  href={getInvoicePdfPreviewUrl(payment.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setShowMenu(false)}
+                  className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
+                >
+                  <Eye className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
+                  Preview Invoice
+                </a>
+                <a
+                  href={getInvoicePdfUrl(payment.id)}
+                  onClick={() => setShowMenu(false)}
+                  className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
+                >
+                  <Download className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
+                  Download Invoice
+                </a>
+              </>
             )}
             {payment.status === 'pending' && (
               <>
@@ -818,21 +850,32 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
             </div>
           </div>
 
-          {/* Receipt */}
+          {/* Invoice */}
           {receipt && (
             <div className="rounded-[16px] border border-[#E8ECF4] overflow-hidden">
               <div className="bg-slate-50/80 px-5 py-3 border-b border-[#F1F5F9]">
-                <h3 className="text-sm font-semibold text-content-primary">Receipt</h3>
+                <h3 className="text-sm font-semibold text-content-primary">Invoice</h3>
               </div>
               <div className="p-5 flex items-center justify-between">
                 <div>
                   <p className="font-mono text-sm font-medium text-content-primary">{receipt.receipt_number}</p>
                   <p className="text-xs text-content-muted">Generated on {formatDateTime(receipt.generated_at)}</p>
                 </div>
-                <button className="btn-secondary !py-2 !px-4 !text-xs">
-                  <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
-                  Download
-                </button>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={getInvoicePdfPreviewUrl(payment.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-secondary !py-2 !px-4 !text-xs"
+                  >
+                    <Eye className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    Preview
+                  </a>
+                  <a href={getInvoicePdfUrl(payment.id)} className="btn-secondary !py-2 !px-4 !text-xs">
+                    <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    Download
+                  </a>
+                </div>
               </div>
             </div>
           )}

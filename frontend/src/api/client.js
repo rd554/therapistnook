@@ -212,6 +212,32 @@ export async function restorePatient(patientId) {
   return res.data
 }
 
+// ─── Bulk Patient Import ────────────────────────────────────────────────────
+
+// Fetched as a blob (via the normal axios instance, so the auth header goes
+// through the usual interceptor) rather than a `?token=` URL for `<a href>`,
+// since this is a generated file rather than something already stored server-side.
+export async function downloadPatientBulkTemplate() {
+  const res = await api.get('/patients/bulk-template', { responseType: 'blob' })
+  const url = window.URL.createObjectURL(new Blob([res.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'patient_bulk_upload_template.xlsx'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+export async function bulkImportPatients(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await api.post('/patients/bulk-import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data
+}
+
 // ─── Intake Submissions (public "Start Intake" leads) ─────────────────────────
 
 export async function listIntakeSubmissions(status = 'pending') {
@@ -378,7 +404,40 @@ export async function uploadTherapySession(patientId, file, sessionDate, onProgr
 }
 
 export async function processTherapySession(patientId, sessionId) {
-  const res = await api.post(`/patients/${patientId}/therapy-sessions/${sessionId}/process`)
+  // Summary/SOAP generation (session_intelligence) uses a 180s upstream
+  // timeout for long transcripts, same as uploadTherapySessionTranscript
+  // below — match it here so this doesn't time out client-side first.
+  const res = await api.post(`/patients/${patientId}/therapy-sessions/${sessionId}/process`, null, {
+    timeout: 180000,
+  })
+  return res.data
+}
+
+// Transcript-based sessions run summary + SOAP generation synchronously in
+// one request (no audio to transcribe), which can take a while for a full
+// 50-60 min session transcript — override the default 30s client timeout.
+export async function uploadTherapySessionTranscript(patientId, transcriptText, sessionDate) {
+  const res = await api.post(
+    `/patients/${patientId}/therapy-sessions/transcript`,
+    { transcript_text: transcriptText, session_date: sessionDate },
+    { timeout: 180000 }
+  )
+  return res.data
+}
+
+// Same summary/SOAP pipeline as uploadTherapySessionTranscript, but for an
+// uploaded PDF/DOCX/TXT transcript instead of pasted text — server extracts
+// the text, so this also gets the longer timeout.
+export async function uploadTherapySessionTranscriptFile(patientId, file, sessionDate, onProgress = null) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('session_date', sessionDate)
+
+  const res = await api.post(`/patients/${patientId}/therapy-sessions/transcript/file`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+    onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / e.total)) : undefined,
+  })
   return res.data
 }
 
@@ -470,6 +529,16 @@ export async function getVersionSnapshot(patientId, versionId) {
 
 export async function restoreVersion(patientId, versionId) {
   const res = await api.post(`/patients/${patientId}/clinical-intelligence/versions/${versionId}/restore`)
+  return res.data
+}
+
+export async function getClinicalIntelligenceChat(patientId) {
+  const res = await api.get(`/patients/${patientId}/clinical-intelligence/chat`)
+  return res.data
+}
+
+export async function askClinicalIntelligenceChat(patientId, message) {
+  const res = await api.post(`/patients/${patientId}/clinical-intelligence/chat`, { message })
   return res.data
 }
 
@@ -647,6 +716,18 @@ export async function getPaymentReceipt(paymentId) {
   return res.data
 }
 
+export function getInvoicePdfUrl(paymentId) {
+  const token = localStorage.getItem('mmpi_token')
+  return `/api/payments/${paymentId}/invoice.pdf?token=${token}`
+}
+
+// Same PDF, served with Content-Disposition: inline so it can render in an
+// <iframe> preview instead of forcing a download.
+export function getInvoicePdfPreviewUrl(paymentId) {
+  const token = localStorage.getItem('mmpi_token')
+  return `/api/payments/${paymentId}/invoice.pdf?token=${token}&inline=true`
+}
+
 export async function getPatientPaymentHistory(patientId) {
   const res = await api.get(`/patients/${patientId}/payments`)
   return res.data
@@ -762,6 +843,38 @@ export async function uploadClinicLogo(file, onProgress = null) {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / e.total)) : undefined,
   })
+  return res.data
+}
+
+export async function uploadSignatureImage(file, onProgress = null) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const res = await api.post('/profile/me/signature', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / e.total)) : undefined,
+  })
+  return res.data
+}
+
+export async function deleteSignatureImage() {
+  const res = await api.delete('/profile/me/signature')
+  return res.data
+}
+
+export async function uploadStampImage(file, onProgress = null) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const res = await api.post('/profile/me/stamp', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / e.total)) : undefined,
+  })
+  return res.data
+}
+
+export async function deleteStampImage() {
+  const res = await api.delete('/profile/me/stamp')
   return res.data
 }
 

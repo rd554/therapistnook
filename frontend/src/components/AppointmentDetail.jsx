@@ -445,7 +445,7 @@ export default function AppointmentDetail({
                   
                   {payment.receipt_number && (
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-500">Receipt</span>
+                      <span className="text-sm text-gray-500">Invoice</span>
                       <span className="flex items-center gap-1 text-sm">
                         <Receipt className="h-4 w-4 text-gray-400" />
                         <span className="font-mono text-xs">{payment.receipt_number}</span>
