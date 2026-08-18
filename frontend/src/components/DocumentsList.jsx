@@ -159,6 +159,15 @@ export default function DocumentsList({ patientId, onPreview, onViewAssessment }
         return <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700"><Loader2 className="h-3 w-3" />In Progress</span>
       case 'failed':
         return <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700"><AlertCircle className="h-3 w-3" />Failed</span>
+      case 'unsupported_format':
+        return (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            title="This file type can't be read for AI analysis. Re-upload as PDF or Word (.docx) to include it in Clinical Intelligence."
+          >
+            <AlertCircle className="h-3 w-3" />Format not readable
+          </span>
+        )
       default:
         return null
     }

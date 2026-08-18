@@ -249,10 +249,18 @@ export default function DocumentPreview({ patientId, documentId, onClose }) {
                 <p className={`mt-1 text-sm ${
                   document.processing_status === 'completed' ? 'text-green-600' :
                   document.processing_status === 'failed' ? 'text-red-600' :
+                  document.processing_status === 'unsupported_format' ? 'text-gray-500' :
                   'text-amber-600'
                 }`}>
-                  {document.processing_status.charAt(0).toUpperCase() + document.processing_status.slice(1)}
+                  {document.processing_status === 'unsupported_format'
+                    ? 'Format not readable'
+                    : document.processing_status.charAt(0).toUpperCase() + document.processing_status.slice(1)}
                 </p>
+                {document.processing_status === 'unsupported_format' && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    This file type can't be read for AI analysis. Re-upload as PDF or Word (.docx) to include it in Clinical Intelligence.
+                  </p>
+                )}
               </div>
             </div>
           ) : (

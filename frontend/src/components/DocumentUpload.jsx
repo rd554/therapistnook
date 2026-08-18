@@ -128,7 +128,7 @@ export default function DocumentUpload({ patientId, onUploadComplete, onClose })
       }))
       
       try {
-        await uploadDocument(
+        const uploaded = await uploadDocument(
           patientId,
           file,
           category,
@@ -141,11 +141,26 @@ export default function DocumentUpload({ patientId, onUploadComplete, onClose })
             }))
           }
         )
-        
-        setUploadStatus(prev => ({
-          ...prev,
-          [file.name]: { progress: 100, status: 'success', error: '' }
-        }))
+
+        // The upload itself succeeded either way, but a small set of formats
+        // (legacy .doc, spreadsheets) can't actually be read for Clinical
+        // Intelligence — flag that distinctly instead of showing a plain
+        // green "success" that implies the AI saw the content.
+        if (uploaded.processing_status === 'unsupported_format') {
+          setUploadStatus(prev => ({
+            ...prev,
+            [file.name]: {
+              progress: 100,
+              status: 'warning',
+              error: "Uploaded, but this file type can't be read for AI analysis. Re-upload as PDF or Word (.docx) if you want it included in Clinical Intelligence.",
+            }
+          }))
+        } else {
+          setUploadStatus(prev => ({
+            ...prev,
+            [file.name]: { progress: 100, status: 'success', error: '' }
+          }))
+        }
         successCount++
       } catch (err) {
         setUploadStatus(prev => ({
@@ -168,7 +183,7 @@ export default function DocumentUpload({ patientId, onUploadComplete, onClose })
     }
   }
 
-  const allUploaded = files.length > 0 && files.every(f => uploadStatus[f.name]?.status === 'success')
+  const allUploaded = files.length > 0 && files.every(f => ['success', 'warning'].includes(uploadStatus[f.name]?.status))
   const hasErrors = files.some(f => uploadStatus[f.name]?.status === 'error')
 
   return (
@@ -250,20 +265,23 @@ export default function DocumentUpload({ patientId, onUploadComplete, onClose })
                 className={`flex items-center gap-3 rounded-lg border p-3 ${
                   status.status === 'error'
                     ? 'border-red-200 bg-red-50'
-                    : status.status === 'success'
-                      ? 'border-green-200 bg-green-50'
-                      : 'border-gray-200 bg-gray-50'
+                    : status.status === 'warning'
+                      ? 'border-amber-200 bg-amber-50'
+                      : status.status === 'success'
+                        ? 'border-green-200 bg-green-50'
+                        : 'border-gray-200 bg-gray-50'
                 }`}
               >
                 <Icon className={`h-8 w-8 ${
                   status.status === 'error' ? 'text-red-400' :
+                  status.status === 'warning' ? 'text-amber-400' :
                   status.status === 'success' ? 'text-green-400' : 'text-gray-400'
                 }`} />
-                
+
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-sm font-medium text-gray-800">{file.name}</p>
                   <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
-                  
+
                   {status.status === 'uploading' && (
                     <div className="mt-1 h-1.5 w-full rounded-full bg-gray-200">
                       <div
@@ -272,18 +290,25 @@ export default function DocumentUpload({ patientId, onUploadComplete, onClose })
                       />
                     </div>
                   )}
-                  
+
                   {status.status === 'error' && (
                     <p className="mt-1 text-xs text-red-600">{status.error}</p>
                   )}
+
+                  {status.status === 'warning' && (
+                    <p className="mt-1 text-xs text-amber-700">{status.error}</p>
+                  )}
                 </div>
-                
+
                 <div className="flex items-center gap-2">
                   {status.status === 'uploading' && (
                     <Loader2 className="h-5 w-5 animate-spin text-primary-500" />
                   )}
                   {status.status === 'success' && (
                     <CheckCircle className="h-5 w-5 text-green-500" />
+                  )}
+                  {status.status === 'warning' && (
+                    <AlertCircle className="h-5 w-5 text-amber-500" />
                   )}
                   {status.status === 'error' && (
                     <AlertCircle className="h-5 w-5 text-red-500" />

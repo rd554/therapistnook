@@ -1619,6 +1619,11 @@ async def upload_document(
     except Exception as e:
         print(f"Clinical Intelligence processing error: {e}")
     
+    from storage import is_unsupported_text_format
+    upload_status = doc.processing_status
+    if upload_status == "completed" and not doc.extracted_text and is_unsupported_text_format(doc.original_filename):
+        upload_status = "unsupported_format"
+
     return DocumentUploadResponse(
         id=doc.id,
         patient_id=doc.patient_id,
@@ -1628,7 +1633,7 @@ async def upload_document(
         mime_type=doc.mime_type,
         file_size=doc.file_size,
         version=doc.version,
-        processing_status=doc.processing_status,
+        processing_status=upload_status,
         uploaded_by_name=prac.name,
         notes=doc.notes,
         created_at=doc.created_at,
@@ -1671,8 +1676,18 @@ async def list_documents_and_assessments(
     
     docs = (await db.execute(doc_query.order_by(ClinicalDocument.created_at.desc()))).scalars().all()
     
+    from storage import is_unsupported_text_format
+
     for doc in docs:
         uploader = await db.get(Practitioner, doc.uploaded_by)
+        # processing_status="completed" only means "the upload succeeded" — it
+        # doesn't mean text was actually pulled out for Clinical Intelligence.
+        # Surface that distinction for formats we know we can't read (see
+        # is_unsupported_text_format) rather than silently showing "Completed"
+        # for a document the AI never actually saw.
+        doc_status = doc.processing_status
+        if doc_status == "completed" and not doc.extracted_text and is_unsupported_text_format(doc.original_filename):
+            doc_status = "unsupported_format"
         items.append(DocumentListItem(
             id=doc.id,
             type="document",
@@ -1682,7 +1697,7 @@ async def list_documents_and_assessments(
             date=doc.created_at,
             file_type=doc.mime_type,
             file_size=doc.file_size,
-            status=doc.processing_status,
+            status=doc_status,
             version=doc.version,
         ))
     
@@ -1742,7 +1757,12 @@ async def get_document(
         raise HTTPException(404, "Document not found")
     
     uploader = await db.get(Practitioner, doc.uploaded_by)
-    
+
+    from storage import is_unsupported_text_format
+    doc_status = doc.processing_status
+    if doc_status == "completed" and not doc.extracted_text and is_unsupported_text_format(doc.original_filename):
+        doc_status = "unsupported_format"
+
     return DocumentResponse(
         id=doc.id,
         patient_id=doc.patient_id,
@@ -1756,7 +1776,7 @@ async def get_document(
         version=doc.version,
         parent_document_id=doc.parent_document_id,
         notes=doc.notes,
-        processing_status=doc.processing_status,
+        processing_status=doc_status,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -1855,7 +1875,12 @@ async def update_document(
     await db.refresh(doc)
     
     uploader = await db.get(Practitioner, doc.uploaded_by)
-    
+
+    from storage import is_unsupported_text_format
+    doc_status = doc.processing_status
+    if doc_status == "completed" and not doc.extracted_text and is_unsupported_text_format(doc.original_filename):
+        doc_status = "unsupported_format"
+
     return DocumentResponse(
         id=doc.id,
         patient_id=doc.patient_id,
@@ -1869,7 +1894,7 @@ async def update_document(
         version=doc.version,
         parent_document_id=doc.parent_document_id,
         notes=doc.notes,
-        processing_status=doc.processing_status,
+        processing_status=doc_status,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -2129,6 +2154,109 @@ async def _push_mmpi_interpretation_to_ci(db: AsyncSession, session: Session, re
     ci.last_processed_at = datetime.now(timezone.utc)
     ci.last_source_type = "mmpi_result"
     ci.last_source_id = session.id
+    await db.commit()
+
+
+async def _push_assessment_completion_to_ci(db: AsyncSession, assessment: Assessment):
+    """
+    Feed a newly-completed Assessment record (PHQ-9, GAD-7, etc. — non-MMPI
+    instruments logged by the practitioner) into the patient's Clinical
+    Intelligence record. Called once, the moment update_assessment transitions
+    an assessment's status to "completed" (see update_assessment) — mirrors
+    _push_mmpi_interpretation_to_ci's pattern for the MMPI-2 pipeline. Always
+    lands as a pending review item; assessment-derived updates never auto-apply.
+    """
+    from clinical_intelligence import process_assessment, merge_intelligence_update
+    from models import generate_uuid as gen_uuid
+
+    ci = (await db.execute(
+        select(ClinicalIntelligence).where(ClinicalIntelligence.patient_id == assessment.patient_id)
+    )).scalar_one_or_none()
+
+    if not ci:
+        ci = ClinicalIntelligence(id=gen_uuid(), patient_id=assessment.patient_id, version=1)
+        db.add(ci)
+        await db.commit()
+        await db.refresh(ci)
+
+    pending_rows = (await db.execute(
+        select(ClinicalIntelligenceUpdate).where(
+            ClinicalIntelligenceUpdate.clinical_intelligence_id == ci.id,
+            ClinicalIntelligenceUpdate.review_status == "pending",
+        )
+    )).scalars().all()
+    pending_updates = [
+        {"section": p.section, "proposed_changes": p.proposed_changes}
+        for p in pending_rows
+    ]
+
+    assessment_data = {
+        "id": assessment.id,
+        "assessment_type": assessment.assessment_type,
+        "display_name": assessment.display_name,
+        "completion_date": assessment.completion_date.isoformat() if assessment.completion_date else None,
+        "created_at": assessment.created_at.isoformat() if assessment.created_at else None,
+    }
+    existing = {
+        "patient_summary": ci.patient_summary,
+        "psychological_profile": ci.psychological_profile,
+        "symptoms": ci.symptoms or [],
+        "diagnoses": ci.diagnoses or [],
+        "treatment_goals": ci.treatment_goals or [],
+        "relationships": ci.relationships or [],
+        "life_events": ci.life_events or [],
+        "risk_factors": ci.risk_factors or [],
+        "timeline": ci.timeline or [],
+        "outstanding_questions": ci.outstanding_questions or [],
+    }
+
+    updates = await process_assessment(assessment_data, None, existing, pending_updates)
+
+    for update in updates:
+        if update.get("auto_apply"):
+            ci_data = {
+                "patient_summary": ci.patient_summary,
+                "psychological_profile": ci.psychological_profile,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
+            }
+            updated_data = merge_intelligence_update(ci_data, update)
+            ci.patient_summary = updated_data.get("patient_summary")
+            ci.psychological_profile = updated_data.get("psychological_profile")
+            ci.symptoms = updated_data.get("symptoms")
+            ci.diagnoses = updated_data.get("diagnoses")
+            ci.treatment_goals = updated_data.get("treatment_goals")
+            ci.relationships = updated_data.get("relationships")
+            ci.life_events = updated_data.get("life_events")
+            ci.risk_factors = updated_data.get("risk_factors")
+            ci.timeline = updated_data.get("timeline")
+            ci.outstanding_questions = updated_data.get("outstanding_questions")
+        else:
+            db.add(ClinicalIntelligenceUpdate(
+                id=gen_uuid(),
+                clinical_intelligence_id=ci.id,
+                update_type=update.get("update_type"),
+                section=update.get("section"),
+                operation=update.get("operation"),
+                proposed_changes=update.get("proposed_changes"),
+                source_type=update.get("source_type"),
+                source_id=update.get("source_id"),
+                source_excerpt=update.get("source_excerpt"),
+                confidence=update.get("confidence", "medium"),
+                reasoning=update.get("reasoning"),
+                review_status="pending",
+                auto_apply=False,
+            ))
+
+    ci.last_processed_at = datetime.now(timezone.utc)
+    ci.last_source_type = "assessment"
+    ci.last_source_id = assessment.id
     await db.commit()
 
 
@@ -2395,6 +2523,8 @@ async def update_assessment(
     if not assessment or assessment.patient_id != patient_id:
         raise HTTPException(404, "Assessment not found")
     
+    was_completed = assessment.status == "completed"
+
     if data.display_name is not None:
         assessment.display_name = data.display_name.strip()
     if data.status is not None:
@@ -2403,12 +2533,22 @@ async def update_assessment(
             assessment.completion_date = datetime.now(timezone.utc)
     if data.notes is not None:
         assessment.notes = data.notes
-    
+
     await db.commit()
     await db.refresh(assessment)
-    
+
+    # Push into Clinical Intelligence the first time this assessment becomes
+    # completed (not on every subsequent edit) — mirrors the MMPI-2 interpretation
+    # hook. Best-effort: a failure here shouldn't turn an otherwise-successful
+    # status update into a 500.
+    if not was_completed and assessment.status == "completed":
+        try:
+            await _push_assessment_completion_to_ci(db, assessment)
+        except Exception as e:
+            print(f"Clinical Intelligence push error for assessment {assessment.id}: {e}")
+
     practitioner = await db.get(Practitioner, assessment.practitioner_id)
-    
+
     return AssessmentResponse(
         id=assessment.id,
         patient_id=assessment.patient_id,
@@ -4563,7 +4703,72 @@ async def trigger_clinical_intelligence_processing(
             }
             session_updates = await process_therapy_session(session_data, existing, pending_updates)
             updates.extend(session_updates)
-    
+
+    if source_type == "document" or source_type is None:
+        documents = (await db.execute(
+            select(ClinicalDocument).where(
+                ClinicalDocument.patient_id == patient_id,
+                ClinicalDocument.processing_status == "completed",
+            )
+        )).scalars().all()
+
+        for doc in documents:
+            if source_id and doc.id != source_id:
+                continue
+            doc_data = {
+                "id": doc.id,
+                "category": doc.category,
+                "display_name": doc.display_name,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+            }
+            existing = {
+                "patient_summary": ci.patient_summary,
+                "psychological_profile": ci.psychological_profile,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
+            }
+            doc_updates = await process_document(doc_data, doc.extracted_text, existing, pending_updates)
+            updates.extend(doc_updates)
+
+    if source_type == "assessment" or source_type is None:
+        assessments = (await db.execute(
+            select(Assessment).where(
+                Assessment.patient_id == patient_id,
+                Assessment.status == "completed",
+            )
+        )).scalars().all()
+
+        for assessment in assessments:
+            if source_id and assessment.id != source_id:
+                continue
+            assessment_data = {
+                "id": assessment.id,
+                "assessment_type": assessment.assessment_type,
+                "display_name": assessment.display_name,
+                "completion_date": assessment.completion_date.isoformat() if assessment.completion_date else None,
+                "created_at": assessment.created_at.isoformat() if assessment.created_at else None,
+            }
+            existing = {
+                "patient_summary": ci.patient_summary,
+                "psychological_profile": ci.psychological_profile,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
+            }
+            assessment_updates = await process_assessment(assessment_data, None, existing, pending_updates)
+            updates.extend(assessment_updates)
+
     # Store updates for review
     from models import generate_uuid
     for update in updates:
@@ -5551,10 +5756,90 @@ async def _create_calendar_event_for_appointment(
             include_conference=(appt.session_mode == "online"),
         )
         appt.meeting_link = meeting_result.link or None
+        appt.google_event_id = meeting_result.meeting_id or None
         await db.commit()
         await db.refresh(appt)
     except Exception as e:
         logger.error(f"Failed to create calendar event for appointment {appt.id}: {e}")
+
+
+async def _get_connected_google_provider(db: AsyncSession, practitioner_id: str):
+    """Return a ready-to-use GoogleMeetProvider for practitioner_id, or None if
+    Google Calendar isn't connected. Shared by the update/delete calendar-sync
+    helpers below (see _update_calendar_event_for_appointment,
+    _delete_calendar_event_for_appointment) so they don't each re-fetch and
+    re-check CalendarIntegration."""
+    from models import CalendarIntegration
+
+    integration = (
+        await db.execute(
+            select(CalendarIntegration).where(
+                CalendarIntegration.practitioner_id == practitioner_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not (
+        integration
+        and integration.google_connected
+        and integration.google_credentials
+        and integration.google_refresh_token
+    ):
+        return None
+
+    from meeting_service import GoogleMeetProvider
+    return GoogleMeetProvider(
+        credentials=integration.google_credentials,
+        refresh_token=integration.google_refresh_token,
+    )
+
+
+async def _update_calendar_event_for_appointment(db: AsyncSession, appt, practitioner, patient):
+    """Keep a previously-pushed Google Calendar event's time in sync when an
+    appointment is edited in place (see update_appointment). No-op if the
+    appointment has no google_event_id (never pushed, or push failed) or
+    Google Calendar isn't connected. Best-effort: a failure here shouldn't
+    fail the appointment update itself, which already succeeded in the DB.
+    """
+    if not appt.google_event_id:
+        return
+
+    provider = await _get_connected_google_provider(db, appt.practitioner_id)
+    if provider is None:
+        return
+
+    try:
+        title = f"Therapy Session - {patient.full_name} with {practitioner.name if practitioner else 'Therapist'}"
+        await provider.update_meeting(
+            meeting_id=appt.google_event_id,
+            title=title,
+            start_time=appt.start_time,
+            end_time=appt.end_time,
+        )
+    except Exception as e:
+        logger.error(f"Failed to update calendar event for appointment {appt.id}: {e}")
+
+
+async def _delete_calendar_event_for_appointment(db: AsyncSession, appt):
+    """Remove a previously-pushed Google Calendar event — called when an
+    appointment is cancelled, rescheduled away from, or deleted (see
+    update_appointment, reschedule_appointment, delete_appointment). Clears
+    appt.google_event_id regardless of whether the Google-side delete
+    succeeded, so a later reschedule/update never retries against an event
+    that's already gone (or was never really there). Caller is responsible
+    for committing — this only mutates the in-session object.
+    """
+    if not appt.google_event_id:
+        return
+
+    provider = await _get_connected_google_provider(db, appt.practitioner_id)
+    if provider is not None:
+        try:
+            await provider.delete_meeting(appt.google_event_id)
+        except Exception as e:
+            logger.error(f"Failed to delete calendar event for appointment {appt.id}: {e}")
+
+    appt.google_event_id = None
 
 
 async def _email_meeting_link_to_patient(db: AsyncSession, appt, patient, practitioner):
@@ -5778,6 +6063,8 @@ async def update_appointment(
     if data.cancellation_reason is not None:
         appt.cancellation_reason = data.cancellation_reason
 
+    time_changed = bool(data.start_time or data.end_time or data.date)
+
     if data.status == "cancelled":
         await _remove_unpaid_payment_for_appointment(db, appointment_id)
 
@@ -5786,6 +6073,16 @@ async def update_appointment(
 
     patient = await db.get(Patient, appt.patient_id)
     practitioner = await db.get(Practitioner, appt.practitioner_id)
+
+    # Keep the pushed Google Calendar event in sync: cancelling removes it,
+    # a time/date edit updates it in place. Both are best-effort (see the
+    # helpers) so a Google-side failure never turns an otherwise-successful
+    # appointment update into an error response.
+    if data.status == "cancelled":
+        await _delete_calendar_event_for_appointment(db, appt)
+        await db.commit()
+    elif time_changed:
+        await _update_calendar_event_for_appointment(db, appt, practitioner, patient)
 
     return AppointmentResponse(
         id=appt.id,
@@ -5874,7 +6171,12 @@ async def reschedule_appointment(
     # Update old appointment
     old_appt.status = "rescheduled"
     old_appt.rescheduled_to_id = new_appt.id
-    
+
+    # Remove the old appointment's Google Calendar event (if any) rather than
+    # leaving a stale entry behind — the new appointment below gets its own
+    # fresh event pushed.
+    await _delete_calendar_event_for_appointment(db, old_appt)
+
     await db.commit()
     await db.refresh(new_appt)
 
@@ -6093,6 +6395,8 @@ async def delete_appointment(
             linked.rescheduled_from_id = None
         if linked.rescheduled_to_id == appointment_id:
             linked.rescheduled_to_id = None
+
+    await _delete_calendar_event_for_appointment(db, appt)
 
     await db.delete(appt)
     await db.commit()

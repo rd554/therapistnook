@@ -394,6 +394,21 @@ _TEXT_EXTRACTORS = {
     ".txt": _extract_txt_text_sync,
 }
 
+# Formats a practitioner would reasonably expect to be readable "documents" but
+# that extract_document_text can't parse (legacy binary .doc has no maintained
+# pure-Python reader; .xls/.xlsx are spreadsheets, not prose). Used to tell
+# these apart from images, which were never expected to yield text in the first
+# place, so the UI can say *why* a document has no extracted text instead of
+# just quietly extracting nothing.
+UNSUPPORTED_TEXT_EXTENSIONS = {".doc", ".xls", ".xlsx"}
+
+
+def is_unsupported_text_format(filename: str) -> bool:
+    """True if `filename`'s extension is a known-unreadable-for-text format
+    (see UNSUPPORTED_TEXT_EXTENSIONS) rather than just one that happened to
+    yield no text (e.g. a scanned PDF)."""
+    return Path(filename).suffix.lower() in UNSUPPORTED_TEXT_EXTENSIONS
+
 # Matches a speaker turn label ("Client:", "Therapist:", etc.) — capitalized so it
 # doesn't fire on the same words used mid-sentence in prose ("...with my previous
 # therapist..."). Covers the labels this app's transcript documents use in practice.

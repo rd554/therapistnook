@@ -627,6 +627,7 @@ class BookingService:
             session_mode=booking.session_mode,
             status="scheduled",
             meeting_link=meeting_link,
+            google_event_id=meeting_id_str,
             notes=booking.patient_notes,
         )
         db.add(appointment)

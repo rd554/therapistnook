@@ -743,6 +743,14 @@ class Appointment(Base):
     # Future integrations (placeholders)
     meeting_link = Column(String, nullable=True)  # For future Google Meet/Zoom integration
     payment_id = Column(String, nullable=True)  # For future payment integration
+
+    # Google Calendar event ID this appointment was pushed to (see
+    # _create_calendar_event_for_appointment in main.py). Null if Google
+    # Calendar wasn't connected when the appointment was created, or the push
+    # failed. Used to keep the calendar event in sync on reschedule/cancel/
+    # delete instead of leaving a stale event behind on the practitioner's
+    # Google Calendar.
+    google_event_id = Column(String, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

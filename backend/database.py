@@ -114,6 +114,7 @@ async def _run_sqlite_migrations(conn):
         await _add_column_if_missing_sqlite(conn, "receipts", "patient_dob", "patient_dob DATE")
         await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "signature_image_path", "signature_image_path VARCHAR")
         await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "stamp_image_path", "stamp_image_path VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "appointments", "google_event_id", "google_event_id VARCHAR")
     except Exception:
         pass
 
@@ -181,6 +182,7 @@ async def _run_postgres_migrations(conn):
         await _add_column_if_missing_postgres(conn, "receipts", "patient_dob", "patient_dob DATE")
         await _add_column_if_missing_postgres(conn, "practitioner_profiles", "signature_image_path", "signature_image_path VARCHAR")
         await _add_column_if_missing_postgres(conn, "practitioner_profiles", "stamp_image_path", "stamp_image_path VARCHAR")
+        await _add_column_if_missing_postgres(conn, "appointments", "google_event_id", "google_event_id VARCHAR")
     except Exception as e:
         print(f"Migration warning: {e}")
         pass
