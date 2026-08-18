@@ -250,7 +250,13 @@ export default function SessionDetail({ patientId, sessionId, initialTab = 'tran
 
           {/* Transcript Content */}
           <div className="max-h-[60vh] space-y-4 overflow-y-auto">
-            {transcript.length === 0 ? (
+            {transcript.length === 0 && session.transcript_text ? (
+              // Manually uploaded transcripts have no per-segment speaker/timestamp
+              // data — just the raw text the therapist provided.
+              <p className="whitespace-pre-wrap text-sm text-gray-700">
+                {highlightText(session.transcript_text, searchTerm)}
+              </p>
+            ) : transcript.length === 0 ? (
               <p className="text-center text-gray-500">No transcript available</p>
             ) : (
               transcript

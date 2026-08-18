@@ -5,6 +5,7 @@ import {
   ChevronDown,
 } from 'lucide-react'
 import { getClinicalHistory, updateClinicalHistory } from '../api/client'
+import { PhoneInput } from './ui'
 
 const STEPS = [
   { value: 1, label: 'Basic Information', icon: User },
@@ -393,12 +394,9 @@ function Step1BasicInfo({ data, patient, onChange }) {
         </FormField>
         
         <FormField label="Phone">
-          <input
-            type="tel"
-            className="input-field"
+          <PhoneInput
             value={info.phone || ''}
-            onChange={(e) => onChange('basic_info', 'phone', e.target.value)}
-            placeholder="+91 98765 43210"
+            onChange={(phone) => onChange('basic_info', 'phone', phone)}
           />
         </FormField>
         

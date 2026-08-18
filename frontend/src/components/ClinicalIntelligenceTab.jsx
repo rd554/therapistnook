@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Brain, Loader2, AlertCircle, RefreshCw, CheckCircle, XCircle, Clock,
   User, Heart, AlertTriangle, Target, Users, Calendar, HelpCircle,
   FileText, Activity, ChevronDown, ChevronRight, History,
   ThumbsUp, ThumbsDown, Sparkles, Shield, TrendingUp,
+  MessageCircle, Send, ShieldAlert,
 } from 'lucide-react'
 import {
   getClinicalIntelligence,
@@ -13,6 +14,8 @@ import {
   reviewUpdate,
   bulkReviewUpdates,
   listClinicalIntelligenceVersions,
+  getClinicalIntelligenceChat,
+  askClinicalIntelligenceChat,
 } from '../api/client'
 import {
   SectionHeader,
@@ -52,6 +55,45 @@ const SEVERITY_COLORS = {
   severe: 'bg-error-bg text-error-text',
 }
 
+const SOURCE_TYPE_META = {
+  clinical_history: { label: 'Clinical History', icon: FileText },
+  therapy_session: { label: 'Therapy Session', icon: Activity },
+  assessment: { label: 'Assessment', icon: TrendingUp },
+  mmpi_interpretation: { label: 'MMPI-2 Interpretation', icon: Brain },
+  document: { label: 'Document', icon: FileText },
+}
+
+function sourceGroupMeta(sourceType) {
+  return SOURCE_TYPE_META[sourceType] || {
+    label: sourceType
+      ? sourceType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      : 'Unknown Source',
+    icon: Sparkles,
+  }
+}
+
+// Groups pending updates by the source event that produced them (e.g. one
+// clinical-history save, one therapy session) rather than showing a flat
+// list, so a practitioner can review "everything from Tuesday's session" as
+// a unit. `pendingUpdates` arrives newest-first (see list_pending_updates'
+// created_at desc ordering), so the first time a group's key is seen is
+// always its most recent item - no separate sort needed.
+function groupPendingUpdates(updates) {
+  const groups = []
+  const indexByKey = new Map()
+  for (const update of updates) {
+    const key = `${update.source_type || 'unknown'}::${update.source_id || 'none'}`
+    if (!indexByKey.has(key)) {
+      indexByKey.set(key, groups.length)
+      groups.push({ key, sourceType: update.source_type, sourceId: update.source_id, updates: [] })
+    }
+    groups[indexByKey.get(key)].updates.push(update)
+  }
+  return groups
+}
+
+const CONFIDENCE_FILTERS = ['all', 'high', 'medium', 'low']
+
 export default function ClinicalIntelligenceTab({ patientId }) {
   const [intelligence, setIntelligence] = useState(null)
   const [stats, setStats] = useState(null)
@@ -62,15 +104,17 @@ export default function ClinicalIntelligenceTab({ patientId }) {
   const [error, setError] = useState('')
   const [activeSection, setActiveSection] = useState('overview')
   const [showVersions, setShowVersions] = useState(false)
+  const [showChat, setShowChat] = useState(false)
+  const [confidenceFilter, setConfidenceFilter] = useState('all')
   const [expandedSections, setExpandedSections] = useState({
-    summary: true,
-    symptoms: true,
-    diagnoses: true,
-    goals: true,
+    summary: false,
+    symptoms: false,
+    diagnoses: false,
+    goals: false,
     relationships: false,
     events: false,
-    risks: true,
-    questions: true,
+    risks: false,
+    questions: false,
     timeline: false,
   })
 
@@ -117,18 +161,18 @@ export default function ClinicalIntelligenceTab({ patientId }) {
     }
   }
 
-  const handleBulkApprove = async () => {
+  const handleBulkApprove = async (updateIds = null) => {
     try {
-      await bulkReviewUpdates(patientId, 'approve')
+      await bulkReviewUpdates(patientId, 'approve', updateIds)
       await loadData()
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to approve updates')
     }
   }
 
-  const handleBulkReject = async () => {
+  const handleBulkReject = async (updateIds = null) => {
     try {
-      await bulkReviewUpdates(patientId, 'reject')
+      await bulkReviewUpdates(patientId, 'reject', updateIds)
       await loadData()
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to reject updates')
@@ -149,6 +193,30 @@ export default function ClinicalIntelligenceTab({ patientId }) {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
   }
 
+  // These must run on every render regardless of loading/error state - the
+  // early returns below would otherwise change the hook count between
+  // renders (violates Rules of Hooks: "Rendered more hooks than during the
+  // previous render").
+  const confidenceCounts = useMemo(() => {
+    const counts = { all: pendingUpdates.length, high: 0, medium: 0, low: 0 }
+    for (const u of pendingUpdates) {
+      if (counts[u.confidence] !== undefined) counts[u.confidence] += 1
+    }
+    return counts
+  }, [pendingUpdates])
+
+  const filteredPendingUpdates = useMemo(
+    () => confidenceFilter === 'all'
+      ? pendingUpdates
+      : pendingUpdates.filter(u => u.confidence === confidenceFilter),
+    [pendingUpdates, confidenceFilter]
+  )
+
+  const pendingGroups = useMemo(
+    () => groupPendingUpdates(filteredPendingUpdates),
+    [filteredPendingUpdates]
+  )
+
   if (loading) {
     return <PageLoader />
   }
@@ -168,7 +236,8 @@ export default function ClinicalIntelligenceTab({ patientId }) {
   }
 
   const hasPendingUpdates = pendingUpdates.length > 0
-  const isEmpty = !intelligence?.patient_summary && 
+
+  const isEmpty = !intelligence?.patient_summary &&
     !(intelligence?.symptoms?.length) && 
     !(intelligence?.diagnoses?.length) &&
     !(intelligence?.treatment_goals?.length)
@@ -184,6 +253,9 @@ export default function ClinicalIntelligenceTab({ patientId }) {
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={loadVersions} leftIcon={History}>
               Version History
+            </Button>
+            <Button variant="secondary" onClick={() => setShowChat(true)} leftIcon={MessageCircle}>
+              Ask About This Patient
             </Button>
             <Button onClick={handleProcess} isLoading={processing} leftIcon={RefreshCw}>
               {processing ? 'Processing...' : 'Reprocess All Sources'}
@@ -218,24 +290,58 @@ export default function ClinicalIntelligenceTab({ patientId }) {
               </p>
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={handleBulkReject} leftIcon={ThumbsDown}>
-                Reject All
+              <Button
+                variant="secondary"
+                onClick={() => handleBulkReject(confidenceFilter === 'all' ? null : filteredPendingUpdates.map(u => u.id))}
+                leftIcon={ThumbsDown}
+                disabled={filteredPendingUpdates.length === 0}
+              >
+                {confidenceFilter === 'all' ? 'Reject All' : `Reject Filtered (${filteredPendingUpdates.length})`}
               </Button>
-              <Button onClick={handleBulkApprove} leftIcon={ThumbsUp}>
-                Approve All
+              <Button
+                onClick={() => handleBulkApprove(confidenceFilter === 'all' ? null : filteredPendingUpdates.map(u => u.id))}
+                leftIcon={ThumbsUp}
+                disabled={filteredPendingUpdates.length === 0}
+              >
+                {confidenceFilter === 'all' ? 'Approve All' : `Approve Filtered (${filteredPendingUpdates.length})`}
               </Button>
             </div>
           </div>
-          
-          <div className="mt-4 max-h-96 space-y-3 overflow-y-auto">
-            {pendingUpdates.map(update => (
-              <PendingUpdateCard
-                key={update.id}
-                update={update}
-                onApprove={() => handleReviewUpdate(update.id, 'approve')}
-                onReject={() => handleReviewUpdate(update.id, 'reject')}
-              />
+
+          {/* Confidence filter */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide opacity-70">Confidence</span>
+            {CONFIDENCE_FILTERS.map(level => (
+              <button
+                key={level}
+                onClick={() => setConfidenceFilter(level)}
+                className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                  confidenceFilter === level
+                    ? 'bg-white text-warning-text shadow-sm'
+                    : 'bg-white/40 text-warning-text/80 hover:bg-white/70'
+                }`}
+              >
+                {level} ({confidenceCounts[level]})
+              </button>
             ))}
+          </div>
+
+          {/* Grouped by source event */}
+          <div className="mt-4 max-h-[32rem] space-y-4 overflow-y-auto">
+            {pendingGroups.length === 0 ? (
+              <p className="py-6 text-center text-sm opacity-80">No pending updates match this filter.</p>
+            ) : (
+              pendingGroups.map(group => (
+                <PendingSourceGroup
+                  key={group.key}
+                  group={group}
+                  onApprove={(updateId) => handleReviewUpdate(updateId, 'approve')}
+                  onReject={(updateId) => handleReviewUpdate(updateId, 'reject')}
+                  onApproveGroup={() => handleBulkApprove(group.updates.map(u => u.id))}
+                  onRejectGroup={() => handleBulkReject(group.updates.map(u => u.id))}
+                />
+              ))
+            )}
           </div>
         </Alert>
       )}
@@ -419,6 +525,14 @@ export default function ClinicalIntelligenceTab({ patientId }) {
         />
       )}
 
+      {/* Ask-about-this-patient chat panel */}
+      {showChat && (
+        <ClinicalChatPanel
+          patientId={patientId}
+          onClose={() => setShowChat(false)}
+        />
+      )}
+
       {/* Last Updated */}
       {intelligence?.updated_at && (
         <div className="text-center text-xs text-gray-400">
@@ -459,29 +573,91 @@ function IntelligenceCollapsibleSection({ title, icon: Icon, count, expanded, on
   )
 }
 
-function PendingUpdateCard({ update, onApprove, onReject }) {
+// Maps a pending update's `section` to the same card component used to
+// render approved items in that section, plus the prop name it expects its
+// item under. Keeps the pending-review queue showing an accurate preview of
+// what the record will look like once approved, instead of a raw JSON dump.
+const SECTION_CARD_MAP = {
+  symptoms: { Component: SymptomCard, prop: 'symptom' },
+  diagnoses: { Component: DiagnosisCard, prop: 'diagnosis' },
+  treatment_goals: { Component: GoalCard, prop: 'goal' },
+  relationships: { Component: RelationshipCard, prop: 'relationship' },
+  life_events: { Component: LifeEventCard, prop: 'event' },
+  risk_factors: { Component: RiskCard, prop: 'risk' },
+  outstanding_questions: { Component: QuestionCard, prop: 'question' },
+  // No `timeline` entry: TimelineItem's dot is absolutely-positioned against
+  // the vertical rail its parent section renders (see the Timeline section
+  // below) - nested standalone in the pending queue it'd float with no rail.
+  // Timeline updates are also auto_apply everywhere they're generated, so
+  // they essentially never reach this queue; falls through to the raw-JSON
+  // fallback on the rare case one does.
+}
+
+// One collapsible-free block per source event (a clinical-history save, a
+// therapy session, etc) so a practitioner can act on "everything from this
+// event" at once instead of hunting through a flat list.
+function PendingSourceGroup({ group, onApprove, onReject, onApproveGroup, onRejectGroup }) {
+  const meta = sourceGroupMeta(group.sourceType)
+  const Icon = meta.icon
+  const latestDate = group.updates[0]?.created_at
+
   return (
-    <div className="rounded-xl border border-warning bg-white p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-warning-bg px-2.5 py-0.5 text-xs font-medium text-warning-text">
-              {update.update_type}
+    <div className="rounded-xl bg-white/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 opacity-70" />
+          <span className="text-sm font-medium">
+            From {meta.label}
+            {latestDate && ` — ${new Date(latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+          </span>
+          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-warning-text">
+            {group.updates.length}
+          </span>
+        </div>
+        <div className="flex gap-1">
+          <button
+            onClick={onRejectGroup}
+            className="rounded-lg px-2 py-1 text-xs font-medium text-error-text hover:bg-error-bg transition-colors"
+          >
+            Reject shown ({group.updates.length})
+          </button>
+          <button
+            onClick={onApproveGroup}
+            className="rounded-lg px-2 py-1 text-xs font-medium text-success-text hover:bg-success-bg transition-colors"
+          >
+            Approve shown ({group.updates.length})
+          </button>
+        </div>
+      </div>
+      <div className="mt-3 space-y-3">
+        {group.updates.map(update => (
+          <PendingUpdateCard
+            key={update.id}
+            update={update}
+            onApprove={() => onApprove(update.id)}
+            onReject={() => onReject(update.id)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PendingUpdateCard({ update, onApprove, onReject }) {
+  const mapping = SECTION_CARD_MAP[update.section]
+  const changes = update.proposed_changes || {}
+
+  return (
+    <div className="rounded-xl border-2 border-dashed border-warning bg-warning-bg/20 p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-warning-bg px-2.5 py-0.5 text-xs font-medium text-warning-text">
+            {update.operation === 'update' ? 'Proposed update' : 'Proposed addition'}
+          </span>
+          {update.section && (
+            <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium capitalize text-content-secondary">
+              {update.section.replace(/_/g, ' ')}
             </span>
-            <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${CONFIDENCE_COLORS[update.confidence]}`}>
-              {update.confidence} confidence
-            </span>
-          </div>
-          <p className="mt-2 text-secondary">
-            {update.proposed_changes?.name || update.proposed_changes?.goal || update.proposed_changes?.text || JSON.stringify(update.proposed_changes).slice(0, 100)}
-          </p>
-          {update.source_excerpt && (
-            <p className="mt-1 text-caption">
-              Source: {update.source_excerpt.slice(0, 100)}...
-            </p>
-          )}
-          {update.reasoning && (
-            <p className="mt-1 text-caption italic">{update.reasoning}</p>
           )}
         </div>
         <div className="flex gap-2">
@@ -501,6 +677,42 @@ function PendingUpdateCard({ update, onApprove, onReject }) {
           </button>
         </div>
       </div>
+
+      {mapping ? (
+        <mapping.Component {...{ [mapping.prop]: changes }} />
+      ) : update.section === 'patient_summary' ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <p className="text-sm text-gray-700">{changes.text}</p>
+          {changes.sources?.length > 0 && <SourceCitations sources={changes.sources} />}
+        </div>
+      ) : (
+        <FallbackPendingContent update={update} />
+      )}
+
+      {update.reasoning && (
+        <p className="mt-2 text-xs italic text-content-muted">{update.reasoning}</p>
+      )}
+    </div>
+  )
+}
+
+function FallbackPendingContent({ update }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-warning-bg px-2.5 py-0.5 text-xs font-medium text-warning-text">
+          {update.update_type}
+        </span>
+        <ConfidenceBadge confidence={update.confidence} />
+      </div>
+      <p className="mt-2 text-secondary">
+        {update.proposed_changes?.name || update.proposed_changes?.goal || update.proposed_changes?.text || JSON.stringify(update.proposed_changes).slice(0, 100)}
+      </p>
+      {update.source_excerpt && (
+        <p className="mt-1 text-caption">
+          Source: {update.source_excerpt.slice(0, 100)}...
+        </p>
+      )}
     </div>
   )
 }
@@ -602,7 +814,7 @@ function RiskCard({ risk }) {
               'text-gray-400'
             }`} />
             <h4 className="font-medium text-gray-900">
-              {risk.risk_type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
+              {(risk.risk_type || 'Unknown').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
             </h4>
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_COLORS[risk.severity] || 'bg-gray-100 text-gray-600'}`}>
               {risk.severity}
@@ -815,6 +1027,159 @@ function VersionHistoryModal({ versions, onClose }) {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// Right-rail "ask about this patient" chat. Read-only over the patient's
+// approved Clinical Intelligence record - it can never write to it. Every
+// request is scoped by `patientId` at the API layer (see
+// clinical-intelligence/chat routes in main.py), so switching patients and
+// reopening this panel always starts from that patient's own history, never
+// a previous patient's.
+function ClinicalChatPanel({ patientId, onClose }) {
+  const [messages, setMessages] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState('')
+  const scrollRef = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError('')
+    getClinicalIntelligenceChat(patientId)
+      .then(data => { if (!cancelled) setMessages(data) })
+      .catch(err => { if (!cancelled) setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to load chat history') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [patientId])
+
+  // Keep the transcript pinned to the latest message as the conversation
+  // grows, rather than making the practitioner scroll down manually.
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages, loading])
+
+  const handleSend = async () => {
+    const question = draft.trim()
+    if (!question || sending) return
+    setSending(true)
+    setError('')
+    // Optimistic render of the user's own message; the server is still the
+    // source of truth for what gets persisted.
+    const optimisticId = `pending-${Date.now()}`
+    setMessages(prev => [...prev, { id: optimisticId, role: 'user', content: question, created_at: new Date().toISOString() }])
+    setDraft('')
+    try {
+      const reply = await askClinicalIntelligenceChat(patientId, question)
+      setMessages(prev => [...prev, reply])
+    } catch (err) {
+      setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to get a response')
+      // Roll back the optimistic message so the transcript doesn't show an
+      // unanswered question sitting there forever.
+      setMessages(prev => prev.filter(m => m.id !== optimisticId))
+      setDraft(question)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/20" onClick={onClose} />
+      <div
+        className="fixed bottom-6 right-6 z-50 flex h-[70vh] max-h-[640px] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-gray-100 p-4">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-gray-900">
+            <MessageCircle className="h-5 w-5 text-gray-400" />
+            Ask About This Patient
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            <XCircle className="h-5 w-5" />
+          </button>
+        </div>
+
+        <p className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-500">
+          Answers draw only from this patient's approved record. Updates still awaiting review aren't included.
+        </p>
+
+        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            </div>
+          ) : messages.length === 0 ? (
+            <p className="py-8 text-center text-sm text-gray-500">
+              Ask a question about this patient's clinical record, e.g. "What symptoms have been reported?"
+            </p>
+          ) : (
+            messages.map(m => <ChatBubble key={m.id} message={m} />)
+          )}
+        </div>
+
+        {error && (
+          <p className="border-t border-error-bg bg-error-bg/40 px-4 py-2 text-xs text-error-text">{error}</p>
+        )}
+
+        <div className="border-t border-gray-100 p-3">
+          <div className="flex items-end gap-2">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask a question…"
+              rows={2}
+              disabled={sending}
+              className="flex-1 resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none disabled:bg-gray-50"
+            />
+            <button
+              onClick={handleSend}
+              disabled={sending || !draft.trim()}
+              className="rounded-lg bg-primary-600 p-2.5 text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function ChatBubble({ message }) {
+  const isUser = message.role === 'user'
+  return (
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
+        isUser ? 'bg-primary-600 text-white' : 'bg-white border border-gray-200 text-gray-900'
+      }`}>
+        <p className="whitespace-pre-wrap">{message.content}</p>
+        {!isUser && message.grounded === false && (
+          <div className="mt-2 flex items-center gap-1 text-[11px] text-warning-text">
+            <ShieldAlert className="h-3 w-3" />
+            No matching record citation - treat as unverified
+          </div>
+        )}
+        {!isUser && message.citations?.length > 0 && (
+          <SourceCitations sources={message.citations} />
+        )}
       </div>
     </div>
   )
