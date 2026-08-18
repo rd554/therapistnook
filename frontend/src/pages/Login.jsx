@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { LogIn, ClipboardCheck } from 'lucide-react'
+import { LogIn } from 'lucide-react'
 import { login } from '../api/client'
 import { Alert } from '../components/ui'
 
@@ -48,10 +48,8 @@ export default function Login({ onLogin, onLogout }) {
         <div className="card">
           {/* Header */}
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-md">
-              <ClipboardCheck className="h-8 w-8 text-white" strokeWidth={2} />
-            </div>
-            <h1 className="text-h2 text-content-primary">Welcome back</h1>
+            <img src="/logo.png" alt="Therapistnook" className="mx-auto mb-4 h-20 w-20" />
+            <h1 className="text-h2 text-content-primary">Therapistnook</h1>
             <p className="mt-2 text-body text-content-secondary">
               Sign in to your practitioner account
             </p>

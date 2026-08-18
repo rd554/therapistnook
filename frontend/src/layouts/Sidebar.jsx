@@ -97,6 +97,7 @@ export default function Sidebar({
     <>
       {/* Logo / wordmark */}
       <div className="sidebar-logo">
+        <img src="/logo.png" alt="" className="sidebar-logo__mark" />
         <span className="sidebar-logo__text">Therapist Nook</span>
       </div>
 

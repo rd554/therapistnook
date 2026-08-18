@@ -694,7 +694,16 @@
   }
 
   .sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 0;
+  }
+
+  .sidebar-logo__mark {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
   }
 
   .sidebar-logo__text {

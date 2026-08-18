@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { ClipboardCheck, LogOut, LayoutDashboard, Shield, Users, Settings } from 'lucide-react'
+import { LogOut, LayoutDashboard, Shield, Users, Settings } from 'lucide-react'
 
 export default function Header({ auth, onLogout, patientSession }) {
   const location = useLocation()
@@ -19,9 +19,7 @@ export default function Header({ auth, onLogout, patientSession }) {
     <header className="sticky top-0 z-50 border-b border-border bg-white/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
         <Link to={getHomeLink()} className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-sm">
-            <ClipboardCheck className="h-5 w-5 text-white" strokeWidth={2} />
-          </div>
+          <img src="/logo.png" alt="Therapistnook" className="h-9 w-9" />
           <span className="text-lg font-semibold text-content-primary tracking-tight">MMPI-2</span>
         </Link>
 
