@@ -31,11 +31,13 @@ async def process_clinical_history(
     patient_id: str,
     clinical_history: dict,
     existing_intelligence: Optional[dict] = None,
+    pending_updates: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Process clinical history data and generate intelligence updates.
-    
-    Returns list of proposed updates for practitioner review.
+
+    Returns list of proposed updates for practitioner review. Re-running this
+    over unchanged source data should be a no-op - see `_dedupe_updates`.
     """
     updates = []
     source_info = {
@@ -115,13 +117,14 @@ async def process_clinical_history(
     )
     if summary_update:
         updates.append(summary_update)
-    
-    return updates
+
+    return _dedupe_updates(updates, existing_intelligence, pending_updates)
 
 
 async def process_therapy_session(
     session_data: dict,
     existing_intelligence: Optional[dict] = None,
+    pending_updates: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Process therapy session data and generate intelligence updates.
@@ -182,14 +185,15 @@ async def process_therapy_session(
         "auto_apply": True,
     }
     updates.append(timeline_update)
-    
-    return updates
+
+    return _dedupe_updates(updates, existing_intelligence, pending_updates)
 
 
 async def process_assessment(
     assessment_data: dict,
     result_data: Optional[dict] = None,
     existing_intelligence: Optional[dict] = None,
+    pending_updates: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Process assessment data and generate intelligence updates.
@@ -238,8 +242,8 @@ async def process_assessment(
             source_info,
             existing_intelligence,
         ))
-    
-    return updates
+
+    return _dedupe_updates(updates, existing_intelligence, pending_updates)
 
 
 async def process_mmpi_interpretation(
@@ -247,6 +251,7 @@ async def process_mmpi_interpretation(
     result_data: dict,
     interpretation: str,
     existing_intelligence: Optional[dict] = None,
+    pending_updates: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Process MMPI interpretation and generate intelligence updates.
@@ -266,14 +271,15 @@ async def process_mmpi_interpretation(
     )
     
     updates.extend(extraction)
-    
-    return updates
+
+    return _dedupe_updates(updates, existing_intelligence, pending_updates)
 
 
 async def process_document(
     document_data: dict,
     extracted_text: Optional[str] = None,
     existing_intelligence: Optional[dict] = None,
+    pending_updates: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Process clinical document and generate intelligence updates.
@@ -323,8 +329,8 @@ async def process_document(
             existing_intelligence,
         )
         updates.extend(extraction)
-    
-    return updates
+
+    return _dedupe_updates(updates, existing_intelligence, pending_updates)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -519,21 +525,38 @@ async def _extract_from_family_history(
     source_info: dict,
     existing: Optional[dict],
 ) -> list[dict]:
-    """Extract family relationships."""
+    """Extract family relationships.
+
+    The wizard writes fixed per-relation keys (mother/father/siblings/
+    grandparents/other), each an object with `conditions`, `quality`, `notes`
+    - not the `family_members` list shape this used to assume.
+    """
     updates = []
     now = datetime.now(timezone.utc).isoformat()
-    
-    family_members = data.get("family_members", [])
-    for member in family_members:
-        if not member:
+
+    relation_labels = {
+        "mother": "Mother",
+        "father": "Father",
+        "siblings": "Siblings",
+        "grandparents": "Grandparents",
+        "other": "Other family",
+    }
+
+    for key, relation in relation_labels.items():
+        member = data.get(key)
+        if not isinstance(member, dict):
             continue
-        relation = member.get("relation", "Unknown")
-        conditions = member.get("conditions", [])
-        quality = member.get("relationship_quality", "")
+        conditions = member.get("conditions") or []
+        quality = member.get("quality", "")
         notes = member.get("notes", "")
-        
+
+        # Nothing meaningful recorded for this relation - skip rather than
+        # proposing an empty relationship entry.
+        if not conditions and not quality and not notes:
+            continue
+
         condition_text = ", ".join(conditions) if conditions else "No known conditions"
-        
+
         updates.append({
             "update_type": "relationship",
             "section": "relationships",
@@ -541,7 +564,7 @@ async def _extract_from_family_history(
             "proposed_changes": {
                 "id": generate_uuid(),
                 "person": relation,
-                "relationship_type": relation.lower(),
+                "relationship_type": key,
                 "importance": "high" if quality in ["good", "close"] else "medium",
                 "notes": f"Conditions: {condition_text}. {notes}".strip(),
                 "first_mention": now,
@@ -561,7 +584,7 @@ async def _extract_from_family_history(
             "reasoning": "Family relationship from family history",
             "auto_apply": True,
         })
-    
+
     return updates
 
 
@@ -711,50 +734,71 @@ async def _extract_from_trauma_history(
     source_info: dict,
     existing: Optional[dict],
 ) -> list[dict]:
-    """Extract trauma-related life events."""
+    """Extract trauma-related life events.
+
+    Most trauma fields are wizard toggle objects (`{present: bool, details: str}`),
+    not flat strings - `major_life_events` and `other` are the exceptions and stay
+    flat free-text. Treating a `{"present": False}` dict as truthy previously fired
+    an event for every trauma type explicitly marked absent.
+    """
     updates = []
     now = datetime.now(timezone.utc).isoformat()
-    
+
+    # (field, event_type, description, "text" for flat free-text fields or
+    # "flag" for {present, details} toggle objects)
     trauma_types = [
-        ("major_life_events", "trauma", "Major life event"),
-        ("physical_abuse", "trauma", "Physical abuse history"),
-        ("sexual_abuse", "trauma", "Sexual abuse history"),
-        ("emotional_abuse", "trauma", "Emotional abuse history"),
-        ("accidents", "trauma", "Accident history"),
-        ("bereavement", "bereavement", "Bereavement"),
-        ("bullying", "trauma", "Bullying history"),
-        ("other_trauma", "trauma", "Other trauma"),
+        ("major_life_events", "trauma", "Major life event", "text"),
+        ("physical_abuse", "trauma", "Physical abuse history", "flag"),
+        ("sexual_abuse", "trauma", "Sexual abuse history", "flag"),
+        ("emotional_abuse", "trauma", "Emotional abuse history", "flag"),
+        ("neglect", "trauma", "Neglect history", "flag"),
+        ("domestic_violence", "trauma", "Domestic violence history", "flag"),
+        ("accidents", "trauma", "Accident history", "flag"),
+        ("medical_trauma", "trauma", "Medical trauma history", "flag"),
+        ("natural_disaster", "trauma", "Natural disaster history", "flag"),
+        ("bereavement", "bereavement", "Bereavement", "flag"),
+        ("bullying", "trauma", "Bullying history", "flag"),
+        ("other", "trauma", "Other trauma", "text"),
     ]
-    
-    for field, event_type, description in trauma_types:
-        value = data.get(field, "")
-        if value:
-            updates.append({
-                "update_type": "life_event",
-                "section": "life_events",
-                "operation": "add",
-                "proposed_changes": {
-                    "id": generate_uuid(),
-                    "event": description,
-                    "event_type": event_type,
-                    "description": value if isinstance(value, str) else str(value),
-                    "impact": "significant",
-                    "sources": [{
-                        "source_type": source_info["source_type"],
-                        "source_id": source_info["source_id"],
-                        "excerpt": f"{description}: {value}",
-                        "date": now,
-                    }],
-                    "confidence": "high",
-                },
-                "source_type": source_info["source_type"],
-                "source_id": source_info["source_id"],
-                "source_excerpt": f"{description}: {value}",
+
+    for field, event_type, description, kind in trauma_types:
+        raw = data.get(field)
+
+        if kind == "text":
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            detail_text = raw.strip()
+        else:
+            if not isinstance(raw, dict) or not raw.get("present"):
+                continue
+            detail_text = (raw.get("details") or "").strip() or description
+
+        updates.append({
+            "update_type": "life_event",
+            "section": "life_events",
+            "operation": "add",
+            "proposed_changes": {
+                "id": generate_uuid(),
+                "event": description,
+                "event_type": event_type,
+                "description": detail_text,
+                "impact": "significant",
+                "sources": [{
+                    "source_type": source_info["source_type"],
+                    "source_id": source_info["source_id"],
+                    "excerpt": f"{description}: {detail_text}",
+                    "date": now,
+                }],
                 "confidence": "high",
-                "reasoning": f"Trauma history: {description}",
-                "auto_apply": False,
-            })
-    
+            },
+            "source_type": source_info["source_type"],
+            "source_id": source_info["source_id"],
+            "source_excerpt": f"{description}: {detail_text}",
+            "confidence": "high",
+            "reasoning": f"Trauma history: {description}",
+            "auto_apply": False,
+        })
+
     return updates
 
 
@@ -763,63 +807,76 @@ async def _extract_from_risk_assessment(
     source_info: dict,
     existing: Optional[dict],
 ) -> list[dict]:
-    """Extract risk factors from risk assessment."""
+    """Extract risk factors from risk assessment.
+
+    The wizard keys this object by `suicide` (not `suicide_risk`), and
+    `present` is a tri-state string ("no" / "past" / "current"), not a
+    boolean - `data.get(field)` truthiness on the whole sub-object always
+    passed, and a plain `.get("present")` truthy-check treated "no" as
+    present. Both meant the suicide-risk path in particular never fired
+    correctly.
+    """
     updates = []
     now = datetime.now(timezone.utc).isoformat()
-    
+
     risk_types = [
-        ("suicide_risk", "suicide"),
+        ("suicide", "suicide"),
         ("self_harm", "self_harm"),
         ("violence", "violence"),
         ("abuse", "other"),
         ("neglect", "other"),
     ]
-    
+
     for field, risk_type in risk_types:
         risk_data = data.get(field, {})
-        if risk_data and risk_data.get("present"):
-            level = risk_data.get("level", "low")
-            notes = risk_data.get("notes", "")
-            
-            # Map levels
-            severity_map = {"low": "low", "moderate": "moderate", "high": "high", "severe": "critical"}
-            severity = severity_map.get(level, "low")
-            
-            updates.append({
-                "update_type": "risk_factor",
-                "section": "risk_factors",
-                "operation": "add",
-                "proposed_changes": {
-                    "id": generate_uuid(),
-                    "risk_type": risk_type,
-                    "status": "current",
+        if not isinstance(risk_data, dict):
+            continue
+        present = risk_data.get("present")
+        if present not in ("current", "past"):
+            continue
+        level = risk_data.get("level", "low")
+        notes = risk_data.get("notes", "")
+
+        # Map levels
+        severity_map = {"low": "low", "moderate": "moderate", "medium": "moderate", "high": "high", "severe": "critical"}
+        severity = severity_map.get(level, "low")
+        status = "current" if present == "current" else "historical"
+
+        updates.append({
+            "update_type": "risk_factor",
+            "section": "risk_factors",
+            "operation": "add",
+            "proposed_changes": {
+                "id": generate_uuid(),
+                "risk_type": risk_type,
+                "status": status,
+                "severity": severity,
+                "first_identified": now,
+                "last_updated": now,
+                "last_assessment": now,
+                "history": [{
+                    "status": status,
                     "severity": severity,
-                    "first_identified": now,
-                    "last_updated": now,
-                    "last_assessment": now,
-                    "history": [{
-                        "status": "current",
-                        "severity": severity,
-                        "date": now,
-                        "source": "Clinical History",
-                        "note": notes,
-                    }],
-                    "sources": [{
-                        "source_type": source_info["source_type"],
-                        "source_id": source_info["source_id"],
-                        "excerpt": f"{field.replace('_', ' ').title()}: {level}. {notes}",
-                        "date": now,
-                    }],
-                    "confidence": "high",
-                },
-                "source_type": source_info["source_type"],
-                "source_id": source_info["source_id"],
-                "source_excerpt": f"{field.replace('_', ' ').title()}: {level}",
+                    "date": now,
+                    "source": "Clinical History",
+                    "note": notes,
+                }],
+                "sources": [{
+                    "source_type": source_info["source_type"],
+                    "source_id": source_info["source_id"],
+                    "excerpt": f"{field.replace('_', ' ').title()}: {level}. {notes}",
+                    "date": now,
+                }],
                 "confidence": "high",
-                "reasoning": f"Risk assessment: {field.replace('_', ' ')}",
-                "auto_apply": False,
-            })
-    
+            },
+            "source_type": source_info["source_type"],
+            "source_id": source_info["source_id"],
+            "source_excerpt": f"{field.replace('_', ' ').title()}: {level}",
+            "confidence": "high",
+            "reasoning": f"Risk assessment: {field.replace('_', ' ')}",
+            "auto_apply": False,
+        })
+
     return updates
 
 
@@ -849,9 +906,9 @@ async def _generate_patient_summary(
     if clinical_history.get("risk_assessment"):
         ra = clinical_history["risk_assessment"]
         risks = []
-        for risk_type in ["suicide_risk", "self_harm", "violence"]:
+        for risk_type in ["suicide", "self_harm", "violence"]:
             risk_data = ra.get(risk_type, {})
-            if risk_data.get("present"):
+            if isinstance(risk_data, dict) and risk_data.get("present") in ("current", "past"):
                 risks.append(f"{risk_type.replace('_', ' ')}: {risk_data.get('level', 'present')}")
         if risks:
             sections.append(f"Risk Factors: {', '.join(risks)}")
@@ -1171,26 +1228,36 @@ async def _extract_document_intelligence(
     
     updates = []
     category = document_data.get("category", "other")
-    
+
+    # gpt-4o-mini has a 128k-token context window, so a full multi-page report fits
+    # in one call without chunking (same approach as session_intelligence.py's
+    # transcript processing). Still cap it - extremely long documents (huge exports,
+    # multi-report bundles) shouldn't blow the token budget - and log when we do so
+    # this doesn't silently drop content the way the old 4000-char cap did.
+    MAX_CHARS = 60000
+    text = extracted_text[:MAX_CHARS]
+    if len(extracted_text) > MAX_CHARS:
+        print(f"Document intelligence: truncated {document_data.get('id')} from "
+              f"{len(extracted_text)} to {MAX_CHARS} chars")
+
     prompt = f"""Analyze this clinical document and extract structured clinical information.
 
 DOCUMENT CATEGORY: {category}
 DOCUMENT CONTENT:
-{extracted_text[:4000]}
+{text}
 
 Extract any of the following if present (respond with JSON):
 {{
-    "diagnoses": [{{name, status (current/historical/provisional)}}],
-    "symptoms": [{{name, status (active/remission/resolved), severity}}],
-    "medications": [{{name, dosage, notes}}],
-    "risk_factors": [{{type, severity, notes}}],
+    "diagnoses": [{{"name": str, "status": "current/historical/provisional"}}],
+    "symptoms": [{{"name": str, "status": "active/remission/resolved", "severity": "mild/moderate/severe"}}],
+    "risk_factors": [{{"risk_type": "suicide/self_harm/violence/substance_abuse/other", "severity": "low/moderate/high/critical", "notes": str}}],
     "recommendations": [string]
 }}
 
 Only include fields that have actual data. Do not fabricate information."""
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -1198,7 +1265,7 @@ Only include fields that have actual data. Do not fabricate information."""
                     "model": "gpt-4o-mini",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3,
-                    "max_tokens": 1000,
+                    "max_tokens": 1500,
                 },
             )
             response.raise_for_status()
@@ -1264,11 +1331,228 @@ Only include fields that have actual data. Do not fabricate information."""
                     "reasoning": f"Symptom extracted from {category} document",
                     "auto_apply": False,
                 })
-            
+
+            for risk in extracted.get("risk_factors", []):
+                risk_type = risk.get("risk_type", "other")
+                severity = risk.get("severity", "moderate")
+                updates.append({
+                    "update_type": "risk_factor",
+                    "section": "risk_factors",
+                    "operation": "add",
+                    "proposed_changes": {
+                        "id": generate_uuid(),
+                        "risk_type": risk_type,
+                        "status": "current",
+                        "severity": severity,
+                        "first_identified": now,
+                        "last_updated": now,
+                        "history": [{"status": "current", "severity": severity, "date": now, "source": f"{category} document"}],
+                        "sources": [{
+                            "source_type": source_info["source_type"],
+                            "source_id": source_info["source_id"],
+                            "excerpt": risk.get("notes") or f"Document: {risk_type}",
+                            "date": now,
+                        }],
+                        "confidence": "medium",
+                    },
+                    "source_type": source_info["source_type"],
+                    "source_id": source_info["source_id"],
+                    "confidence": "medium",
+                    "reasoning": f"Risk factor extracted from {category} document",
+                    "auto_apply": False,
+                })
+
+            for recommendation in extracted.get("recommendations", []):
+                if not recommendation:
+                    continue
+                updates.append({
+                    "update_type": "question",
+                    "section": "outstanding_questions",
+                    "operation": "add",
+                    "proposed_changes": {
+                        "id": generate_uuid(),
+                        "question": recommendation,
+                        "category": "other",
+                        "priority": "medium",
+                        "created_date": now,
+                        "resolved": False,
+                        "sources": [{
+                            "source_type": source_info["source_type"],
+                            "source_id": source_info["source_id"],
+                            "excerpt": recommendation[:200],
+                            "date": now,
+                        }],
+                    },
+                    "source_type": source_info["source_type"],
+                    "source_id": source_info["source_id"],
+                    "confidence": "medium",
+                    "reasoning": f"Recommendation extracted from {category} document",
+                    "auto_apply": False,
+                })
+
     except Exception as e:
         print(f"Document intelligence extraction error: {e}")
-    
+
     return updates
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DEDUPLICATION
+#
+#  Every process_* entry point above re-runs its extraction functions against
+#  the *entire* current source (e.g. the whole clinical history), every time
+#  it's called - not just what changed. Without this pass, re-saving a
+#  clinical history section, or re-processing a session, proposes the same
+#  finding again as a brand-new pending update each time. `_dedupe_updates`
+#  is the single choke point all process_* functions run their output through
+#  before returning it, so callers in main.py don't need to reimplement this.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Fields that legitimately differ between two proposals of "the same fact"
+# (ids, timestamps, nested source/history logs) and so are ignored when
+# deciding whether two proposed_changes dicts describe the same thing.
+_VOLATILE_COMPARE_KEYS = {
+    "id", "first_mention", "last_updated", "first_identified",
+    "last_assessment", "created_date", "sources", "history",
+}
+
+
+def _semantic_key(section: Optional[str], changes: dict) -> Optional[str]:
+    """
+    Stable identity key for a proposed change within a section - i.e. "what
+    fact is this about", independent of wording/timestamps. Two updates with
+    the same (section, key) are treated as proposals about the same
+    underlying fact for deduplication purposes. Returns None for sections
+    that don't have a natural notion of identity (skips dedup for those).
+    """
+    if not isinstance(changes, dict):
+        return None
+
+    if section in ("symptoms", "diagnoses"):
+        name = (changes.get("name") or "").strip().lower()
+        return name or None
+
+    if section == "relationships":
+        key = (changes.get("relationship_type") or changes.get("person") or "").strip().lower()
+        return key or None
+
+    if section == "life_events":
+        event_type = (changes.get("event_type") or "").strip().lower()
+        event = (changes.get("event") or "").strip().lower()
+        if not event_type and not event:
+            return None
+        return f"{event_type}:{event}"
+
+    if section == "risk_factors":
+        risk_type = (changes.get("risk_type") or "").strip().lower()
+        return risk_type or None
+
+    if section == "treatment_goals":
+        goal = (changes.get("goal") or "").strip().lower()
+        return goal[:120] or None
+
+    if section == "outstanding_questions":
+        question = (changes.get("question") or "").strip().lower()
+        return question[:120] or None
+
+    if section == "timeline":
+        return f"{changes.get('source_type', '')}:{changes.get('source_id', '')}:{changes.get('event_type', '')}"
+
+    if section in ("patient_summary", "psychological_profile"):
+        # Singleton sections - the section itself is the identity.
+        return section
+
+    return None
+
+
+def _normalize_for_compare(changes: dict) -> dict:
+    """Strip volatile fields and normalize strings so two dicts describing
+    the same fact compare equal regardless of casing/whitespace/ids."""
+    normalized = {}
+    for key, value in changes.items():
+        if key in _VOLATILE_COMPARE_KEYS:
+            continue
+        if isinstance(value, str):
+            value = value.strip().lower()
+        normalized[key] = value
+    return normalized
+
+
+def _dedupe_updates(
+    updates: list[dict],
+    existing_intelligence: Optional[dict],
+    pending_updates: Optional[list[dict]],
+) -> list[dict]:
+    """
+    Filter a freshly-extracted batch of updates against already-approved
+    state and the already-pending review queue, so re-running extraction
+    over unchanged source data is a no-op instead of creating duplicates.
+
+    Rules (per update, by semantic key within its section):
+    - Already proposed within this same batch -> drop.
+    - Matches an approved item with identical content -> drop, nothing new.
+    - Matches an approved item with different content -> convert to an
+      `operation: "update"` targeting that item's id, instead of a new "add".
+    - No approved match, but an equivalent proposal is already pending
+      review -> drop (don't pile another copy onto the queue).
+    - Otherwise -> keep as-is.
+    """
+    existing_intelligence = existing_intelligence or {}
+    pending_updates = pending_updates or []
+
+    pending_index = set()
+    for pending in pending_updates:
+        key = _semantic_key(pending.get("section"), pending.get("proposed_changes") or {})
+        if key is not None:
+            pending_index.add((pending.get("section"), key))
+
+    result = []
+    seen_in_batch = set()
+
+    for update in updates:
+        section = update.get("section")
+        changes = update.get("proposed_changes") or {}
+        key = _semantic_key(section, changes)
+
+        if key is None:
+            result.append(update)
+            continue
+
+        batch_key = (section, key)
+        if batch_key in seen_in_batch:
+            continue
+        seen_in_batch.add(batch_key)
+
+        if section in ("patient_summary", "psychological_profile"):
+            if batch_key in pending_index:
+                continue
+            result.append(update)
+            continue
+
+        approved_items = existing_intelligence.get(section) or []
+        matched_existing = None
+        for item in approved_items:
+            if isinstance(item, dict) and _semantic_key(section, item) == key:
+                matched_existing = item
+                break
+
+        if matched_existing is not None:
+            if _normalize_for_compare(changes) == _normalize_for_compare(matched_existing):
+                continue  # already recorded, nothing new to say
+            updated = dict(update)
+            new_changes = dict(changes)
+            new_changes["id"] = matched_existing.get("id", new_changes.get("id"))
+            updated["operation"] = "update"
+            updated["proposed_changes"] = new_changes
+            result.append(updated)
+            continue
+
+        if batch_key in pending_index:
+            continue  # equivalent proposal already awaiting review
+
+        result.append(update)
+
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

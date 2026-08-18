@@ -75,7 +75,41 @@ async def process_therapy_session(
     
     # Step 5: Generate SOAP notes
     result["soap_notes"] = await generate_soap_notes(text_for_analysis, result["summary"])
-    
+
+    return result
+
+
+async def process_transcript_session(
+    transcript_text: str,
+    session_date: Optional[datetime] = None,
+) -> dict:
+    """
+    Process a manually-uploaded session transcript (no audio, no recording).
+
+    The therapist pastes/uploads the transcript text directly, so there is
+    nothing to transcribe, no speakers to identify, and no translation step —
+    this goes straight to summary + SOAP note generation on the provided text.
+    A 50-60 min session transcript can run several thousand words; both
+    generate_session_summary/generate_soap_notes are sized (context window +
+    request timeout) to handle that in one call.
+
+    Returns a dict shaped like process_therapy_session()'s output so callers
+    can populate a TherapySession row the same way regardless of source,
+    just with the audio-only fields left null.
+    """
+    result = {
+        "transcript": None,
+        "transcript_text": transcript_text,
+        "detected_language": None,
+        "translation": None,
+        "translation_text": None,
+        "summary": None,
+        "soap_notes": None,
+    }
+
+    result["summary"] = await generate_session_summary(transcript_text)
+    result["soap_notes"] = await generate_soap_notes(transcript_text, result["summary"])
+
     return result
 
 
@@ -227,6 +261,20 @@ async def translate_transcript(
     return translated_segments
 
 
+def _stringify_fields(data: dict, fields: list[str]) -> dict:
+    """
+    GPT-4o-mini doesn't always honor "return a string" — it sometimes
+    returns a list of bullet points for a field instead. Both SessionSummary
+    and SOAPNotes schemas require plain strings, so normalize before we hand
+    the parsed JSON back (otherwise response serialization blows up).
+    """
+    for field in fields:
+        value = data.get(field)
+        if isinstance(value, list):
+            data[field] = "\n".join(str(item) for item in value)
+    return data
+
+
 async def generate_session_summary(transcript_text: str) -> dict:
     """
     Generate a structured summary of the therapy session.
@@ -253,7 +301,10 @@ Generate a JSON object with the following sections. Be concise but thorough. Do 
 Respond ONLY with valid JSON."""
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        # A full 50-60 min session transcript can run several thousand words;
+        # gpt-4o-mini's 128k-token context handles that fine, but the request
+        # itself takes longer to complete, so give it more room than a short prompt.
+        async with httpx.AsyncClient(timeout=180) as client:
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -266,13 +317,17 @@ Respond ONLY with valid JSON."""
             )
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
-            
+
             # Parse JSON from response
             content = content.strip()
             if content.startswith("```"):
                 content = content.split("\n", 1)[1].rsplit("\n", 1)[0]
-            
-            return json.loads(content)
+
+            parsed = json.loads(content)
+            return _stringify_fields(parsed, [
+                "presenting_issues", "key_discussion_points", "emotional_themes",
+                "homework_discussed", "action_items", "open_questions",
+            ])
     except Exception as e:
         print(f"Summary generation error: {e}")
         return _mock_session_summary()
@@ -321,7 +376,7 @@ Use professional clinical language. Be concise but comprehensive. Do not make un
 Respond ONLY with valid JSON."""
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
@@ -334,12 +389,13 @@ Respond ONLY with valid JSON."""
             )
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
-            
+
             content = content.strip()
             if content.startswith("```"):
                 content = content.split("\n", 1)[1].rsplit("\n", 1)[0]
-            
+
             result = json.loads(content)
+            result = _stringify_fields(result, ["subjective", "objective", "assessment", "plan"])
             result["edited"] = False
             return result
     except Exception as e:

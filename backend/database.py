@@ -108,6 +108,12 @@ async def _run_sqlite_migrations(conn):
         await _add_column_if_missing_sqlite(conn, "clinic_settings", "instagram_handle", "instagram_handle VARCHAR")
         await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "instagram_handle", "instagram_handle VARCHAR")
         await _add_column_if_missing_sqlite(conn, "intake_submissions", "phone", "phone VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "therapy_sessions", "input_type", "input_type VARCHAR DEFAULT 'audio'")
+        await _add_column_if_missing_sqlite(conn, "clinical_documents", "extracted_text", "extracted_text TEXT")
+        await _add_column_if_missing_sqlite(conn, "sessions", "patient_id", "patient_id VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "receipts", "patient_dob", "patient_dob DATE")
+        await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "signature_image_path", "signature_image_path VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "stamp_image_path", "stamp_image_path VARCHAR")
     except Exception:
         pass
 
@@ -169,6 +175,12 @@ async def _run_postgres_migrations(conn):
         await _add_column_if_missing_postgres(conn, "clinic_settings", "instagram_handle", "instagram_handle VARCHAR")
         await _add_column_if_missing_postgres(conn, "practitioner_profiles", "instagram_handle", "instagram_handle VARCHAR")
         await _add_column_if_missing_postgres(conn, "intake_submissions", "phone", "phone VARCHAR")
+        await _add_column_if_missing_postgres(conn, "therapy_sessions", "input_type", "input_type VARCHAR DEFAULT 'audio'")
+        await _add_column_if_missing_postgres(conn, "clinical_documents", "extracted_text", "extracted_text TEXT")
+        await _add_column_if_missing_postgres(conn, "sessions", "patient_id", "patient_id VARCHAR")
+        await _add_column_if_missing_postgres(conn, "receipts", "patient_dob", "patient_dob DATE")
+        await _add_column_if_missing_postgres(conn, "practitioner_profiles", "signature_image_path", "signature_image_path VARCHAR")
+        await _add_column_if_missing_postgres(conn, "practitioner_profiles", "stamp_image_path", "stamp_image_path VARCHAR")
     except Exception as e:
         print(f"Migration warning: {e}")
         pass

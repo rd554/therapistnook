@@ -23,3 +23,6 @@ pytz>=2024.1
 google-api-python-client>=2.100.0,<3.0.0
 google-auth-oauthlib>=1.2.0,<2.0.0
 certifi>=2024.2.2
+# PDF/DOCX text extraction for uploaded clinical documents (feeds Clinical Intelligence)
+pypdf>=4.0.0,<5.0.0
+python-docx>=1.1.0,<2.0.0

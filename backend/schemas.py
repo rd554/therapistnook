@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Any
 from datetime import date, datetime
 
@@ -197,6 +197,23 @@ class PatientListItem(BaseModel):
     avatar_url: Optional[str] = None
     created_at: datetime
     clinical_history_status: Optional[str] = "not_started"
+
+
+# ─── Bulk Patient Import ──────────────────────────────────────────────────────
+
+class PatientBulkImportRowResult(BaseModel):
+    row_number: int
+    full_name: Optional[str] = None
+    status: str  # "created" | "error"
+    errors: list[str] = []
+    patient_id: Optional[str] = None
+
+
+class PatientBulkImportResult(BaseModel):
+    total_rows: int
+    created_count: int
+    error_count: int
+    results: list[PatientBulkImportRowResult]
 
 
 # ─── Therapist Daily Notes (Dashboard) ───────────────────────────────────────────
@@ -441,7 +458,10 @@ AUDIO_MIME_TYPES = [
 
 
 class TranscriptSegment(BaseModel):
-    speaker: str  # "Therapist" or "Patient"
+    # Populated by the (currently disabled) audio pipeline's speaker-ID step.
+    # "Therapist"/"Patient" labels only apply there — manually uploaded
+    # transcripts have no per-speaker segments.
+    speaker: str
     timestamp: float  # Start time in seconds
     end_timestamp: Optional[float] = None
     text: str
@@ -468,10 +488,17 @@ class TherapySessionCreate(BaseModel):
     session_date: datetime
 
 
+class TranscriptSessionCreate(BaseModel):
+    """Manually-provided transcript for a therapy session (no audio/recording)."""
+    session_date: datetime
+    transcript_text: str = Field(..., min_length=1)
+
+
 class TherapySessionResponse(BaseModel):
     id: str
     patient_id: str
     practitioner_id: str
+    input_type: str = "audio"
     audio_duration: Optional[int] = None
     original_filename: str
     file_size: int
@@ -492,6 +519,7 @@ class TherapySessionResponse(BaseModel):
 class TherapySessionListItem(BaseModel):
     id: str
     patient_id: str
+    input_type: str = "audio"
     session_date: datetime
     audio_duration: Optional[int] = None
     detected_language: Optional[str] = None
@@ -701,6 +729,27 @@ class ClinicalIntelligenceUpdateResponse(BaseModel):
 class ReviewUpdateRequest(BaseModel):
     action: str  # approve, reject
     notes: Optional[str] = None
+
+
+class ClinicalChatCitation(BaseModel):
+    source_type: Optional[str] = None
+    source_id: Optional[str] = None
+    excerpt: Optional[str] = None
+    date: Optional[datetime] = None
+    section: Optional[str] = None
+
+
+class ClinicalChatMessageResponse(BaseModel):
+    id: str
+    role: str  # user, assistant
+    content: str
+    citations: Optional[list[ClinicalChatCitation]] = None
+    grounded: Optional[bool] = None
+    created_at: datetime
+
+
+class ClinicalChatAskRequest(BaseModel):
+    message: str
 
 
 class ClinicalIntelligenceStats(BaseModel):
@@ -1066,6 +1115,7 @@ class ReceiptResponse(BaseModel):
     receipt_number: str
     patient_name: str
     patient_email: Optional[str] = None
+    patient_dob: Optional[date] = None
     practitioner_name: str
     session_fee: int
     discount_amount: int
@@ -1380,7 +1430,11 @@ class PractitionerProfileResponse(BaseModel):
     profile_photo_url: Optional[str] = None
     cover_image_url: Optional[str] = None
     clinic_logo_url: Optional[str] = None
-    
+
+    # Digital signature/stamp — management-only, never exposed on the public profile
+    signature_image_url: Optional[str] = None
+    stamp_image_url: Optional[str] = None
+
     # Onboarding Content
     welcome_message: Optional[str] = None
     what_to_expect: Optional[str] = None

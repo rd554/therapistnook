@@ -377,8 +377,8 @@ DEFAULT_EMAIL_TEMPLATES = {
     </p>
 
     <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 20px; margin: 24px 0;">
-        <h3 style="font-size: 14px; color: #065f46; margin: 0 0 12px;">Payment Receipt</h3>
-        <p style="font-size: 14px; color: #065f46; margin: 0;">Receipt #: <strong>{{receipt_number}}</strong></p>
+        <h3 style="font-size: 14px; color: #065f46; margin: 0 0 12px;">Payment Invoice</h3>
+        <p style="font-size: 14px; color: #065f46; margin: 0;">Invoice #: <strong>{{receipt_number}}</strong></p>
     </div>
 
     <p style="font-size: 13px; color: #6b7280; text-align: center;">
@@ -720,7 +720,7 @@ DEFAULT_EMAIL_TEMPLATES = {
             <tr><td style="padding: 6px 0; color: #6b7280;">Patient:</td><td style="padding: 6px 0; font-weight: 600;">{{patient_name}}</td></tr>
             <tr><td style="padding: 6px 0; color: #6b7280;">Amount:</td><td style="padding: 6px 0; font-weight: 600;">{{payment_amount}}</td></tr>
             <tr><td style="padding: 6px 0; color: #6b7280;">Appointment:</td><td style="padding: 6px 0; font-weight: 600;">{{appointment_date}} at {{appointment_time}}</td></tr>
-            <tr><td style="padding: 6px 0; color: #6b7280;">Receipt:</td><td style="padding: 6px 0; font-weight: 600;">{{receipt_number}}</td></tr>
+            <tr><td style="padding: 6px 0; color: #6b7280;">Invoice:</td><td style="padding: 6px 0; font-weight: 600;">{{receipt_number}}</td></tr>
         </table>
     </div>
 
@@ -743,7 +743,7 @@ DEFAULT_WHATSAPP_MESSAGES = {
     
     "payment_pending": "Reminder: Your appointment with {{therapist_name}} on {{appointment_date}} is pending payment. Complete payment here: {{payment_link}}",
     
-    "payment_successful": "Payment confirmed! Your appointment with {{therapist_name}} on {{appointment_date}} at {{appointment_time}} is now confirmed. Receipt: {{receipt_number}}",
+    "payment_successful": "Payment confirmed! Your appointment with {{therapist_name}} on {{appointment_date}} at {{appointment_time}} is now confirmed. Invoice: {{receipt_number}}",
     
     "appointment_confirmed": "✅ Appointment Confirmed!\n\n👨‍⚕️ {{therapist_name}}\n📅 {{appointment_date}}\n⏰ {{appointment_time}}\n\n📹 Meeting Link: {{meeting_link}}",
     

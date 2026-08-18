@@ -30,6 +30,7 @@ SINGLE_INDEXES = [
     ("ix_scheduled_reminders_scheduled_for", "scheduled_reminders", "scheduled_for"),
     ("ix_scheduled_reminders_status", "scheduled_reminders", "status"),
     ("ix_internal_notifications_is_read", "internal_notifications", "is_read"),
+    ("ix_sessions_patient_id", "sessions", "patient_id"),
 ]
 
 

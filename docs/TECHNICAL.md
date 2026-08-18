@@ -92,6 +92,15 @@ MMPI/
 4. **TherapySession** - Session recordings and transcripts
 5. **ClinicalIntelligence** - AI-generated patient insights
 
+### Clinical Intelligence wiring status
+
+`ClinicalIntelligence`/`ClinicalIntelligenceUpdate` is an AI-maintained per-patient summary (`backend/clinical_intelligence.py`), fed from several sources. Current status per source:
+
+- **Clinical history / therapy session transcripts / uploaded documents** — implemented and live. This includes historical/external MMPI-2 reports: when a patient already has a past MMPI-2 done elsewhere and a (possibly different) practitioner uploads the PDF/Word report via Patient Profile → Documents (category `mmpi2_assessment`), `upload_document` always runs `process_document()` after text extraction, so it feeds Clinical Intelligence like any other document. No extra work was needed for this case. Caveat: text extraction only supports PDF and `.docx` — legacy `.doc` uploads store the file but contribute no text.
+- **MMPI-2 test results (`Session`/`Result`)** — implemented. `Session` previously had no link to `Patient` (it's created through the unauthenticated patient-facing intake flow, where the patient types their own name/dob). `Session.patient_id` is a nullable FK, resolved lazily and persisted by `_resolve_session_patient_id()` in `main.py` on an exact `(practitioner_id, full_name, date_of_birth)` match, scoped per-practitioner so two practitioners' same-named patients never cross-link. Generating an interpretation (`POST /api/dashboard/sessions/{id}/interpret`) pushes it into Clinical Intelligence once, as a **pending review** item (MMPI-derived updates never auto-apply). Interpretations produced by the non-AI fallback template (used when `OPENAI_API_KEY` isn't configured, or the OpenAI call fails) are intentionally *not* pushed.
+- **Assessment records (`Assessment` model)** — deliberately deferred. `process_assessment()` already exists in `clinical_intelligence.py` and is ready to fire on `Assessment` completion, but nothing today creates+completes `Assessment` rows as part of a real flow yet (it's schema for future non-MMPI tests, e.g. PHQ-9, represented as document-backed assessments). Pick this up once that upload+completion flow is built — don't wire it preemptively.
+- **Known gap:** the bulk-reprocess endpoint (`trigger_clinical_intelligence_processing` in `main.py`) imports `process_assessment`/`process_document` but has no branch that actually calls them for `source_type == "document"`/`"assessment"` — bulk-reprocessing a patient's Clinical Intelligence silently skips documents and MMPI/assessment sources. Not yet fixed.
+
 ### Scheduling & Payments
 
 1. **Appointment** - Scheduled appointments

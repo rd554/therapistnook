@@ -19,6 +19,7 @@ from models import (
     Practitioner, Question, Session, Answer, Result, Patient, ClinicalHistory, 
     ClinicalDocument, Assessment, VoiceProfile, TherapySession, 
     ClinicalIntelligence, ClinicalIntelligenceVersion, ClinicalIntelligenceUpdate,
+    ClinicalIntelligenceChatMessage,
     Payment, Receipt, InternalNotification,
     PractitionerProfile, PractitionerResource, Testimonial,
     BookingRequest, MeetingProviderConfig, NotificationTemplate, NotificationLog,
@@ -33,16 +34,19 @@ from schemas import (
     QuestionsPage, QuestionResponse,
     AnswersBatch, ResultResponse, ScoreResult,
     PatientCreate, PatientUpdate, PatientResponse, PatientListItem,
+    PatientBulkImportRowResult, PatientBulkImportResult,
     ClinicalHistoryUpdate, ClinicalHistoryResponse, ClinicalHistorySummary,
     DocumentUploadResponse, DocumentResponse, DocumentUpdate, DocumentListItem,
     AssessmentCreate, AssessmentUpdate, AssessmentResponse, AssessmentListItem,
     DOCUMENT_CATEGORIES, ALLOWED_MIME_TYPES, ASSESSMENT_TYPES,
     VoiceProfileResponse, VoiceProfileStatus,
     TherapySessionResponse, TherapySessionListItem, SOAPNotesUpdate,
+    TranscriptSessionCreate,
     AUDIO_MIME_TYPES,
     ClinicalIntelligenceResponse, ClinicalIntelligenceVersionResponse,
     ClinicalIntelligenceUpdateResponse, ClinicalIntelligenceStats,
     ReviewUpdateRequest,
+    ClinicalChatMessageResponse, ClinicalChatAskRequest,
     PaymentCreate, PaymentUpdate, PaymentStatusUpdate, PaymentResponse, PaymentListItem,
     PaymentDashboard, RecentTransaction, RefundRequest, RefundComplete,
     ReceiptResponse, PaymentHistoryItem,
@@ -66,7 +70,7 @@ from schemas import (
     TherapistNoteResponse, TherapistNoteUpsert,
     IntakeSubmissionCreate, IntakeSubmissionResponse,
 )
-from storage import save_file, get_file_path, read_file, delete_file, validate_file_type, get_mime_type, validate_audio_file, save_voice_profile, save_therapy_session_audio, get_audio_mime_type
+from storage import save_file, get_file_path, read_file, delete_file, validate_file_type, get_mime_type, validate_audio_file, save_voice_profile, save_therapy_session_audio, get_audio_mime_type, validate_transcript_document, save_therapy_session_document
 from auth import (
     hash_password, verify_password, create_access_token,
     get_current_practitioner, require_owner,
@@ -441,6 +445,345 @@ async def list_patients(
         ))
     
     return result
+
+
+# NOTE: these two routes must stay registered before "/api/patients/{patient_id}"
+# below — otherwise FastAPI would match "bulk-template"/"bulk-import" as a
+# patient_id and 404 inside get_patient() instead.
+@app.get("/api/patients/bulk-template")
+async def download_patient_bulk_template(
+    prac=Depends(get_current_practitioner),
+):
+    """Download an .xlsx template for bulk patient import (see bulk_import_patients)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Patients"
+
+    # "*" marks the columns bulk_import_patients treats as required; stripped
+    # back off when matching header names on upload.
+    headers = [
+        "Patient Name*", "Date of Birth*", "Gender*", "Phone", "Email",
+        "Emergency Contact", "Referral Source", "Chief Complaint",
+        "Therapist Notes", "Status",
+    ]
+    ws.append(headers)
+    header_font = Font(bold=True)
+    for col_idx in range(1, len(headers) + 1):
+        ws.cell(row=1, column=col_idx).font = header_font
+    ws.freeze_panes = "A2"
+
+    # Constrain Gender/Status to the exact values the import endpoint accepts,
+    # so a typo in the sheet can't silently fail validation on upload.
+    gender_dv = DataValidation(type="list", formula1='"Male,Female,Other"', allow_blank=False)
+    status_dv = DataValidation(type="list", formula1='"Active,Archived"', allow_blank=True)
+    ws.add_data_validation(gender_dv)
+    ws.add_data_validation(status_dv)
+    gender_dv.add("C2:C1000")
+    status_dv.add("J2:J1000")
+
+    widths = [22, 14, 10, 16, 26, 26, 20, 44, 32, 10]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+
+    # The example row lives on its own sheet — NOT on "Patients" — so it can
+    # never be uploaded as a real patient by someone who just fills rows below
+    # it and re-uploads without deleting it. bulk_import_patients() reads the
+    # "Patients" sheet by name specifically because of this split.
+    example = wb.create_sheet("Example")
+    example.append(headers)
+    for col_idx in range(1, len(headers) + 1):
+        example.cell(row=1, column=col_idx).font = header_font
+    example.append([
+        "Jane Doe", "1990-05-14", "Female", "+91 98765 43210",
+        "jane@example.com", "John Doe - +91 91234 56789", "Self-referral",
+        "Persistent low mood and difficulty sleeping for the past 2 months",
+        "", "Active",
+    ])
+    for i, w in enumerate(widths, start=1):
+        example.column_dimensions[example.cell(row=1, column=i).column_letter].width = w
+
+    wb.active = 0  # keep "Patients" the tab that's focused/selected on open
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="patient_bulk_upload_template.xlsx"'},
+    )
+
+
+@app.post("/api/patients/bulk-import", response_model=PatientBulkImportResult)
+async def bulk_import_patients(
+    file: UploadFile = File(...),
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create patients in bulk from a filled copy of the bulk-template .xlsx.
+
+    Every row is validated first (required fields, DOB parsing, gender/status
+    normalization, email/phone shape, and duplicates — both within the sheet
+    and against this practitioner's existing patients, since email/phone have
+    no DB uniqueness constraint). Rows with errors are reported but don't block
+    the rest of the sheet; valid rows are committed together in one transaction
+    so a partially-bad sheet doesn't leave a half-imported mess.
+
+    A row with a Chief Complaint (and/or Therapist Notes) also gets a
+    ClinicalHistory record seeded with that field plus the same basic_info the
+    wizard would auto-fill from the Patient row, left at status="in_progress"
+    so the practitioner can pick up the rest of the wizard later — the wizard
+    has no step-ordering gate (see ClinicalHistoryWizard.goToStep), so leaving
+    other steps unset is safe.
+    """
+    import re
+    from openpyxl import load_workbook
+
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(400, "Please upload an .xlsx file (use the downloadable template)")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(400, "File is too large (max 5MB)")
+
+    try:
+        wb = load_workbook(io.BytesIO(content), data_only=True)
+        # The template puts real data on a sheet named "Patients" and the
+        # filled-in example on a separate "Example" sheet (see
+        # download_patient_bulk_template). Prefer "Patients" by name so a
+        # workbook re-saved with a different tab focused/active still parses
+        # correctly instead of falling back to whatever sheet was last open.
+        ws = wb["Patients"] if "Patients" in wb.sheetnames else wb.active
+    except Exception:
+        raise HTTPException(400, "Could not read the uploaded file. Please make sure it's a valid .xlsx file.")
+
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        raise HTTPException(400, "The uploaded file is empty")
+
+    def normalize_header(h):
+        return re.sub(r"\*$", "", str(h or "")).strip().lower()
+
+    col_index = {}
+    for idx, h in enumerate(header_row):
+        key = normalize_header(h)
+        if key:
+            col_index[key] = idx
+
+    field_aliases = {
+        "full_name": ["patient name", "name", "full name"],
+        "date_of_birth": ["date of birth", "dob"],
+        "gender": ["gender"],
+        "phone": ["phone", "phone number"],
+        "email": ["email", "email id"],
+        "emergency_contact": ["emergency contact"],
+        "referral_source": ["referral source"],
+        "chief_complaint": ["chief complaint"],
+        "therapist_notes": ["therapist notes"],
+        "status": ["status"],
+    }
+    field_col = {}
+    for field, aliases in field_aliases.items():
+        field_col[field] = next((col_index[a] for a in aliases if a in col_index), None)
+
+    missing_required = [
+        label for field, label in
+        [("full_name", "Patient Name"), ("date_of_birth", "Date of Birth"), ("gender", "Gender")]
+        if field_col[field] is None
+    ]
+    if missing_required:
+        raise HTTPException(
+            400,
+            f"Missing required column(s): {', '.join(missing_required)}. Please use the downloadable template.",
+        )
+
+    def cell(row, field):
+        idx = field_col[field]
+        if idx is None or idx >= len(row):
+            return None
+        val = row[idx]
+        if isinstance(val, str):
+            val = val.strip()
+        return val or None
+
+    def parse_dob(val):
+        if val is None:
+            return None, "Date of birth is required"
+        if isinstance(val, datetime):
+            return val.date(), None
+        if isinstance(val, date):
+            return val, None
+        text = str(val).strip()
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(text, fmt).date(), None
+            except ValueError:
+                continue
+        return None, "Date of birth could not be read — use YYYY-MM-DD"
+
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    gender_map = {"male": "Male", "female": "Female", "other": "Other"}
+
+    existing = (await db.execute(
+        select(Patient.email, Patient.phone).where(Patient.practitioner_id == prac.id)
+    )).all()
+    existing_emails = {e.lower() for e, _ in existing if e}
+    existing_phones = {re.sub(r'[\s\-\(\)]', '', p) for _, p in existing if p}
+    seen_emails = set()
+    seen_phones = set()
+
+    results = []
+    to_create = []
+
+    row_number = 1  # header is row 1
+    for row in rows_iter:
+        row_number += 1
+        if row is None or all(v is None or (isinstance(v, str) and not v.strip()) for v in row):
+            continue  # skip blank trailing rows
+
+        errors = []
+
+        full_name = cell(row, "full_name")
+        if not full_name:
+            errors.append("Patient name is required")
+
+        dob, dob_error = parse_dob(cell(row, "date_of_birth"))
+        if dob_error:
+            errors.append(dob_error)
+        elif dob > date.today():
+            errors.append("Date of birth cannot be in the future")
+
+        gender_raw = cell(row, "gender")
+        gender = gender_map.get(str(gender_raw).strip().lower()) if gender_raw else None
+        if not gender_raw:
+            errors.append("Gender is required")
+        elif not gender:
+            errors.append("Gender must be Male, Female, or Other")
+
+        # Excel stores a column of digits typed into a General cell as a
+        # number, not text, so a phone entered as e.g. 9876543210 comes back
+        # as an int/float (and a float would otherwise stringify as
+        # "9876543210.0"). Normalize for matching, but keep `phone` as a
+        # human-readable string for storage — matches how create_patient()
+        # stores phone as-typed rather than normalized.
+        phone_raw = cell(row, "phone")
+        phone = None
+        phone_key = None
+        if phone_raw is not None:
+            if isinstance(phone_raw, float) and phone_raw.is_integer():
+                phone = str(int(phone_raw))
+            else:
+                phone = str(phone_raw).strip()
+            phone_key = re.sub(r'[\s\-\(\)]', '', phone)
+            if not re.match(r'^[\+]?[0-9]{7,15}$', phone_key):
+                errors.append("Phone number is not valid")
+            elif phone_key in existing_phones or phone_key in seen_phones:
+                errors.append("A patient with this phone number already exists")
+
+        email = cell(row, "email")
+        if email:
+            email = str(email).strip()
+            if not re.match(email_pattern, email):
+                errors.append("Email address is not valid")
+            else:
+                email = email.lower()
+                if email in existing_emails or email in seen_emails:
+                    errors.append("A patient with this email already exists")
+
+        status_raw = cell(row, "status")
+        status = "active"
+        if status_raw:
+            status_norm = str(status_raw).strip().lower()
+            if status_norm not in ("active", "archived"):
+                errors.append("Status must be Active or Archived")
+            else:
+                status = status_norm
+
+        emergency_contact = cell(row, "emergency_contact")
+        referral_source = cell(row, "referral_source")
+        chief_complaint = cell(row, "chief_complaint")
+        therapist_notes = cell(row, "therapist_notes")
+
+        if errors:
+            results.append(PatientBulkImportRowResult(
+                row_number=row_number,
+                full_name=str(full_name) if full_name else None,
+                status="error",
+                errors=errors,
+            ))
+            continue
+
+        if email:
+            seen_emails.add(email)
+        if phone_key:
+            seen_phones.add(phone_key)
+
+        patient_id = generate_uuid()
+        patient = Patient(
+            id=patient_id,
+            practitioner_id=prac.id,
+            full_name=str(full_name).strip(),
+            date_of_birth=dob,
+            age=_compute_age(dob),
+            gender=gender,
+            phone=phone,
+            email=email,
+            emergency_contact=str(emergency_contact).strip() if emergency_contact else None,
+            referral_source=str(referral_source).strip() if referral_source else None,
+            status=status,
+        )
+
+        clinical_history = None
+        if chief_complaint or therapist_notes:
+            clinical_history = ClinicalHistory(
+                id=generate_uuid(),
+                patient_id=patient_id,
+                status="in_progress",
+                current_step=2 if chief_complaint else 1,
+                basic_info={
+                    "full_name": patient.full_name,
+                    "date_of_birth": dob.isoformat(),
+                    "age": patient.age,
+                    "gender": gender,
+                    "phone": phone,
+                    "email": email,
+                    "emergency_contact": patient.emergency_contact,
+                    "referral_source": patient.referral_source,
+                },
+                presenting_complaint={"chief_complaint": str(chief_complaint).strip()} if chief_complaint else None,
+                therapist_notes=str(therapist_notes).strip() if therapist_notes else None,
+            )
+
+        to_create.append((patient, clinical_history))
+        results.append(PatientBulkImportRowResult(
+            row_number=row_number, full_name=patient.full_name, status="created", errors=[], patient_id=patient_id,
+        ))
+
+    if not results:
+        raise HTTPException(400, "No data rows found in the uploaded file")
+
+    if to_create:
+        for patient, clinical_history in to_create:
+            db.add(patient)
+            if clinical_history:
+                db.add(clinical_history)
+        await db.commit()
+
+    created_count = sum(1 for r in results if r.status == "created")
+    return PatientBulkImportResult(
+        total_rows=len(results),
+        created_count=created_count,
+        error_count=len(results) - created_count,
+        results=results,
+    )
 
 
 @app.get("/api/patients/{patient_id}", response_model=PatientResponse)
@@ -978,11 +1321,27 @@ async def update_clinical_history(
             existing = {
                 "patient_summary": ci.patient_summary,
                 "psychological_profile": ci.psychological_profile,
-                "symptoms": ci.symptoms,
-                "diagnoses": ci.diagnoses,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
             }
-            updates = await process_clinical_history(patient_id, ch_data, existing)
-            
+            pending_rows = (await db.execute(
+                select(ClinicalIntelligenceUpdate).where(
+                    ClinicalIntelligenceUpdate.clinical_intelligence_id == ci.id,
+                    ClinicalIntelligenceUpdate.review_status == "pending",
+                )
+            )).scalars().all()
+            pending_updates = [
+                {"section": p.section, "proposed_changes": p.proposed_changes}
+                for p in pending_rows
+            ]
+            updates = await process_clinical_history(patient_id, ch_data, existing, pending_updates)
+
             # Store updates for review
             from clinical_intelligence import merge_intelligence_update
             for update in updates:
@@ -1157,11 +1516,31 @@ async def upload_document(
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
-    
+
+    # Extract text (PDF/DOCX/TXT) so the document's actual content - not just its
+    # filename/category - can be analyzed below. Unsupported types (.doc, .xls/.xlsx,
+    # images) and scanned/image-only PDFs yield None; that's expected, not an error.
+    # The file itself is already committed above - a failure here shouldn't turn
+    # into a 500 for an upload that otherwise succeeded.
+    extracted_text = None
+    try:
+        from storage import extract_document_text
+        extracted_text = await extract_document_text(storage_path)
+        doc.extracted_text = extracted_text
+        doc.processing_status = "completed"
+        await db.commit()
+    except Exception as e:
+        print(f"Document text extraction/commit error: {e}")
+        doc.processing_status = "failed"
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+
     # Trigger Clinical Intelligence processing for document upload
     try:
         from clinical_intelligence import process_document, merge_intelligence_update
-        
+
         ci = (await db.execute(
             select(ClinicalIntelligence).where(ClinicalIntelligence.patient_id == patient_id)
         )).scalar_one_or_none()
@@ -1183,7 +1562,29 @@ async def upload_document(
             "display_name": doc.display_name,
             "created_at": doc.created_at.isoformat() if doc.created_at else None,
         }
-        updates = await process_document(doc_data, None, None)
+        existing = {
+            "patient_summary": ci.patient_summary,
+            "psychological_profile": ci.psychological_profile,
+            "symptoms": ci.symptoms or [],
+            "diagnoses": ci.diagnoses or [],
+            "treatment_goals": ci.treatment_goals or [],
+            "relationships": ci.relationships or [],
+            "life_events": ci.life_events or [],
+            "risk_factors": ci.risk_factors or [],
+            "timeline": ci.timeline or [],
+            "outstanding_questions": ci.outstanding_questions or [],
+        }
+        pending_rows = (await db.execute(
+            select(ClinicalIntelligenceUpdate).where(
+                ClinicalIntelligenceUpdate.clinical_intelligence_id == ci.id,
+                ClinicalIntelligenceUpdate.review_status == "pending",
+            )
+        )).scalars().all()
+        pending_updates = [
+            {"section": p.section, "proposed_changes": p.proposed_changes}
+            for p in pending_rows
+        ]
+        updates = await process_document(doc_data, extracted_text, existing, pending_updates)
         
         for update in updates:
             if update.get("auto_apply"):
@@ -1586,6 +1987,151 @@ def _compute_age_from_dob(dob) -> int:
     return _compute_age(dob)
 
 
+async def _resolve_session_patient_id(db: AsyncSession, session: Session):
+    """
+    Best-effort link from an MMPI-2 Session to a Patient record.
+
+    Sessions are created through the unauthenticated patient-facing intake flow
+    (the patient types their own name/dob against a practitioner's ref link), so
+    there's no patient_id at creation time. This resolves it lazily the first
+    time it's needed — scoped to session.practitioner_id so two practitioners'
+    same-named patients can never cross-link — and persists the match onto the
+    session so later calls are a no-op. Returns None (not an error) when there's
+    no match or more than one candidate; ambiguous matches are left for the
+    practitioner to link manually rather than guessed at.
+    """
+    if session.patient_id:
+        return session.patient_id
+
+    matches = (await db.execute(
+        select(Patient.id).where(
+            Patient.practitioner_id == session.practitioner_id,
+            Patient.full_name == session.name,
+            Patient.date_of_birth == session.dob,
+        ).limit(2)
+    )).scalars().all()
+
+    if len(matches) != 1:
+        return None
+
+    session.patient_id = matches[0]
+    await db.commit()
+    return session.patient_id
+
+
+async def _push_mmpi_interpretation_to_ci(db: AsyncSession, session: Session, result: Result, interpretation: str):
+    """
+    Feed a freshly-generated MMPI-2 interpretation into the patient's Clinical
+    Intelligence record. Best-effort: Clinical Intelligence is keyed by patient,
+    not by session, so this is a no-op if the session can't be linked to a
+    Patient (see _resolve_session_patient_id). Called once, the first time a
+    session is interpreted (see interpret_results) — MMPI-derived updates never
+    auto-apply (see _extract_mmpi_intelligence), so this always lands as a
+    pending review item rather than silently rewriting the patient's profile.
+    """
+    patient_id = await _resolve_session_patient_id(db, session)
+    if not patient_id:
+        return
+
+    from clinical_intelligence import process_mmpi_interpretation, merge_intelligence_update
+    from models import generate_uuid as gen_uuid
+
+    ci = (await db.execute(
+        select(ClinicalIntelligence).where(ClinicalIntelligence.patient_id == patient_id)
+    )).scalar_one_or_none()
+
+    if not ci:
+        ci = ClinicalIntelligence(id=gen_uuid(), patient_id=patient_id, version=1)
+        db.add(ci)
+        await db.commit()
+        await db.refresh(ci)
+
+    pending_rows = (await db.execute(
+        select(ClinicalIntelligenceUpdate).where(
+            ClinicalIntelligenceUpdate.clinical_intelligence_id == ci.id,
+            ClinicalIntelligenceUpdate.review_status == "pending",
+        )
+    )).scalars().all()
+    pending_updates = [
+        {"section": p.section, "proposed_changes": p.proposed_changes}
+        for p in pending_rows
+    ]
+
+    session_data = {
+        "id": session.id,
+        "name": session.name,
+        "dob": session.dob.isoformat() if session.dob else None,
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+    }
+    result_data = {
+        "session_id": session.id,
+        "t_scores": result.t_scores,
+        "raw_scores": result.raw_scores,
+        "k_corrected_scores": result.k_corrected_scores,
+    }
+    existing = {
+        "patient_summary": ci.patient_summary,
+        "psychological_profile": ci.psychological_profile,
+        "symptoms": ci.symptoms or [],
+        "diagnoses": ci.diagnoses or [],
+        "treatment_goals": ci.treatment_goals or [],
+        "relationships": ci.relationships or [],
+        "life_events": ci.life_events or [],
+        "risk_factors": ci.risk_factors or [],
+        "timeline": ci.timeline or [],
+        "outstanding_questions": ci.outstanding_questions or [],
+    }
+
+    updates = await process_mmpi_interpretation(session_data, result_data, interpretation, existing, pending_updates)
+
+    for update in updates:
+        if update.get("auto_apply"):
+            ci_data = {
+                "patient_summary": ci.patient_summary,
+                "psychological_profile": ci.psychological_profile,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
+            }
+            updated_data = merge_intelligence_update(ci_data, update)
+            ci.patient_summary = updated_data.get("patient_summary")
+            ci.psychological_profile = updated_data.get("psychological_profile")
+            ci.symptoms = updated_data.get("symptoms")
+            ci.diagnoses = updated_data.get("diagnoses")
+            ci.treatment_goals = updated_data.get("treatment_goals")
+            ci.relationships = updated_data.get("relationships")
+            ci.life_events = updated_data.get("life_events")
+            ci.risk_factors = updated_data.get("risk_factors")
+            ci.timeline = updated_data.get("timeline")
+            ci.outstanding_questions = updated_data.get("outstanding_questions")
+        else:
+            db.add(ClinicalIntelligenceUpdate(
+                id=gen_uuid(),
+                clinical_intelligence_id=ci.id,
+                update_type=update.get("update_type"),
+                section=update.get("section"),
+                operation=update.get("operation"),
+                proposed_changes=update.get("proposed_changes"),
+                source_type=update.get("source_type"),
+                source_id=update.get("source_id"),
+                source_excerpt=update.get("source_excerpt"),
+                confidence=update.get("confidence", "medium"),
+                reasoning=update.get("reasoning"),
+                review_status="pending",
+                auto_apply=False,
+            ))
+
+    ci.last_processed_at = datetime.now(timezone.utc)
+    ci.last_source_type = "mmpi_result"
+    ci.last_source_id = session.id
+    await db.commit()
+
+
 @app.get("/api/assessments", response_model=list[AssessmentListItem])
 async def list_practitioner_assessments(
     status: str = Query(None),
@@ -1677,17 +2223,11 @@ async def list_practitioner_assessments(
             if search.lower() not in hay:
                 continue
 
-        # Best-effort patient match by name
-        patient_match = (await db.execute(
-            select(Patient).where(
-                Patient.practitioner_id == prac.id,
-                Patient.full_name == s.name,
-            )
-        )).scalar_one_or_none()
+        matched_patient_id = await _resolve_session_patient_id(db, s)
 
         items.append(AssessmentListItem(
             id=s.id,
-            patient_id=patient_match.id if patient_match else s.id,
+            patient_id=matched_patient_id if matched_patient_id else s.id,
             patient_name=s.name,
             patient_age=_compute_age(s.dob),
             patient_gender=s.gender or "—",
@@ -2383,8 +2923,10 @@ async def interpret_results(session_id: str, prac=Depends(get_current_practition
     
     prompt = _build_mmpi_interpretation_prompt(session, age, result)
 
+    used_fallback = False
     if not OPENAI_API_KEY or OPENAI_API_KEY.startswith("sk-your"):
         interpretation = _generate_fallback_interpretation(session, age, result)
+        used_fallback = True
     else:
         try:
             import httpx
@@ -2403,9 +2945,27 @@ async def interpret_results(session_id: str, prac=Depends(get_current_practition
                 interpretation = resp.json()["choices"][0]["message"]["content"]
         except Exception as e:
             interpretation = _generate_fallback_interpretation(session, age, result)
+            used_fallback = True
+
+    # Only push to Clinical Intelligence the first time this session gets a
+    # real, AI-generated interpretation — the endpoint is re-callable (e.g.
+    # to regenerate wording), and re-pushing on every call would keep
+    # re-queuing the same pending review item. Skip pushing on fallback
+    # (templated, non-AI) text entirely: it's not clinically meaningful
+    # content, and if we let it count as "first interpretation" here, a
+    # later retry that succeeds against OpenAI would never get pushed
+    # because result.interpretation would no longer be NULL.
+    is_first_interpretation = result.interpretation is None
 
     result.interpretation = interpretation
     await db.commit()
+
+    if is_first_interpretation and not used_fallback:
+        try:
+            await _push_mmpi_interpretation_to_ci(db, session, result, interpretation)
+        except Exception as e:
+            print(f"Clinical Intelligence processing error (MMPI interpretation): {e}")
+
     return {"interpretation": interpretation}
 
 
@@ -3082,6 +3642,116 @@ async def delete_voice_profile(
 #  SESSION INTELLIGENCE — Therapy Sessions
 # ═════════════════════════════════════════════════════════════════════════════════
 
+async def _apply_clinical_intelligence_from_session(
+    db: AsyncSession,
+    patient_id: str,
+    therapy_session: "TherapySession",
+) -> None:
+    """
+    Feed a processed therapy session (audio- or transcript-sourced) into the
+    patient's Clinical Intelligence: extracts updates from the session's
+    transcript/summary/SOAP notes and either auto-applies them or queues them
+    for practitioner review. Shared by both the audio and transcript upload
+    flows so they stay in sync.
+    """
+    from clinical_intelligence import process_therapy_session as ci_process_session, merge_intelligence_update
+
+    ci = (await db.execute(
+        select(ClinicalIntelligence).where(ClinicalIntelligence.patient_id == patient_id)
+    )).scalar_one_or_none()
+
+    if not ci:
+        from models import generate_uuid
+        ci = ClinicalIntelligence(
+            id=generate_uuid(),
+            patient_id=patient_id,
+            version=1,
+        )
+        db.add(ci)
+        await db.commit()
+        await db.refresh(ci)
+
+    session_data = {
+        "id": therapy_session.id,
+        "session_date": therapy_session.session_date.isoformat() if therapy_session.session_date else None,
+        "transcript_text": therapy_session.transcript_text,
+        "translation_text": therapy_session.translation_text,
+        "summary": therapy_session.summary,
+        "soap_notes": therapy_session.soap_notes,
+    }
+    existing = {
+        "patient_summary": ci.patient_summary,
+        "psychological_profile": ci.psychological_profile,
+        "symptoms": ci.symptoms or [],
+        "diagnoses": ci.diagnoses or [],
+        "treatment_goals": ci.treatment_goals or [],
+        "relationships": ci.relationships or [],
+        "life_events": ci.life_events or [],
+        "risk_factors": ci.risk_factors or [],
+        "timeline": ci.timeline or [],
+        "outstanding_questions": ci.outstanding_questions or [],
+    }
+    pending_rows = (await db.execute(
+        select(ClinicalIntelligenceUpdate).where(
+            ClinicalIntelligenceUpdate.clinical_intelligence_id == ci.id,
+            ClinicalIntelligenceUpdate.review_status == "pending",
+        )
+    )).scalars().all()
+    pending_updates = [
+        {"section": p.section, "proposed_changes": p.proposed_changes}
+        for p in pending_rows
+    ]
+    updates = await ci_process_session(session_data, existing, pending_updates)
+
+    for update in updates:
+        if update.get("auto_apply"):
+            ci_data = {
+                "patient_summary": ci.patient_summary,
+                "psychological_profile": ci.psychological_profile,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
+            }
+            updated_data = merge_intelligence_update(ci_data, update)
+            ci.patient_summary = updated_data.get("patient_summary")
+            ci.psychological_profile = updated_data.get("psychological_profile")
+            ci.symptoms = updated_data.get("symptoms")
+            ci.diagnoses = updated_data.get("diagnoses")
+            ci.treatment_goals = updated_data.get("treatment_goals")
+            ci.relationships = updated_data.get("relationships")
+            ci.life_events = updated_data.get("life_events")
+            ci.risk_factors = updated_data.get("risk_factors")
+            ci.timeline = updated_data.get("timeline")
+            ci.outstanding_questions = updated_data.get("outstanding_questions")
+        else:
+            from models import generate_uuid
+            ci_update = ClinicalIntelligenceUpdate(
+                id=generate_uuid(),
+                clinical_intelligence_id=ci.id,
+                update_type=update.get("update_type"),
+                section=update.get("section"),
+                operation=update.get("operation"),
+                proposed_changes=update.get("proposed_changes"),
+                source_type=update.get("source_type"),
+                source_id=update.get("source_id"),
+                source_excerpt=update.get("source_excerpt"),
+                confidence=update.get("confidence", "medium"),
+                reasoning=update.get("reasoning"),
+                review_status="pending",
+            )
+            db.add(ci_update)
+
+    ci.last_processed_at = datetime.now(timezone.utc)
+    ci.last_source_type = "therapy_session"
+    ci.last_source_id = therapy_session.id
+    await db.commit()
+
+
 @app.post("/api/patients/{patient_id}/therapy-sessions", response_model=TherapySessionResponse)
 async def upload_therapy_session(
     patient_id: str,
@@ -3141,6 +3811,7 @@ async def upload_therapy_session(
         id=therapy_session.id,
         patient_id=therapy_session.patient_id,
         practitioner_id=therapy_session.practitioner_id,
+        input_type=therapy_session.input_type,
         audio_duration=therapy_session.audio_duration,
         original_filename=therapy_session.original_filename,
         file_size=therapy_session.file_size,
@@ -3157,6 +3828,187 @@ async def upload_therapy_session(
         created_at=therapy_session.created_at,
         updated_at=therapy_session.updated_at,
     )
+
+
+async def _finalize_transcript_therapy_session(
+    db: AsyncSession,
+    therapy_session: TherapySession,
+    patient_id: str,
+    transcript_text: str,
+) -> TherapySessionResponse:
+    """
+    Shared tail end of both transcript-based therapy session flows (pasted
+    text and uploaded PDF/DOCX/TXT): generate summary + SOAP notes, feed
+    Clinical Intelligence, and build the response. Runs synchronously since
+    there's no transcription step to defer — a full 50-60 min transcript
+    still completes in one request (see session_intelligence timeouts).
+    """
+    from session_intelligence import process_transcript_session
+    try:
+        result = await process_transcript_session(transcript_text, session_date=therapy_session.session_date)
+
+        therapy_session.summary = result.get("summary")
+        therapy_session.soap_notes = result.get("soap_notes")
+        therapy_session.processing_status = "completed"
+        await db.commit()
+        await db.refresh(therapy_session)
+
+        try:
+            await _apply_clinical_intelligence_from_session(db, patient_id, therapy_session)
+        except Exception as e:
+            print(f"Clinical Intelligence processing error: {e}")
+
+        # Build the response inside the same try so that a failure here (e.g.
+        # malformed data slipping past validation) also marks the session
+        # "failed" instead of leaving an orphaned "completed" row the client
+        # never got a response for and the UI can't surface.
+        return TherapySessionResponse(
+            id=therapy_session.id,
+            patient_id=therapy_session.patient_id,
+            practitioner_id=therapy_session.practitioner_id,
+            input_type=therapy_session.input_type,
+            audio_duration=therapy_session.audio_duration,
+            original_filename=therapy_session.original_filename,
+            file_size=therapy_session.file_size,
+            session_date=therapy_session.session_date,
+            detected_language=therapy_session.detected_language,
+            transcript=therapy_session.transcript,
+            transcript_text=therapy_session.transcript_text,
+            translation=therapy_session.translation,
+            translation_text=therapy_session.translation_text,
+            summary=therapy_session.summary,
+            soap_notes=therapy_session.soap_notes,
+            processing_status=therapy_session.processing_status,
+            processing_error=therapy_session.processing_error,
+            created_at=therapy_session.created_at,
+            updated_at=therapy_session.updated_at,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        therapy_session.processing_status = "failed"
+        therapy_session.processing_error = str(e)
+        await db.commit()
+        raise HTTPException(500, f"Processing failed: {str(e)}")
+
+
+@app.post("/api/patients/{patient_id}/therapy-sessions/transcript", response_model=TherapySessionResponse)
+async def upload_therapy_session_transcript(
+    patient_id: str,
+    payload: TranscriptSessionCreate,
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a therapy session from a manually-provided transcript (no audio
+    upload/recording) and immediately generate its summary + SOAP notes,
+    feeding the result into Clinical Intelligence.
+    """
+    patient = await db.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+    if patient.practitioner_id != prac.id and prac.role != "owner":
+        raise HTTPException(403, "Access denied")
+
+    transcript_text = payload.transcript_text.strip()
+    if not transcript_text:
+        raise HTTPException(400, "Transcript text cannot be empty")
+
+    from models import generate_uuid
+    session_id = generate_uuid()
+
+    therapy_session = TherapySession(
+        id=session_id,
+        patient_id=patient_id,
+        practitioner_id=prac.id,
+        input_type="transcript",
+        # No audio file for a manually-provided transcript — these columns
+        # are NOT NULL on TherapySession, so use sentinel values rather than
+        # a real storage path. Must not be "" (delete_file resolves "" to the
+        # storage root directory itself).
+        audio_storage_path="N/A",
+        audio_duration=None,
+        original_filename="manual-transcript.txt",
+        file_size=len(transcript_text.encode("utf-8")),
+        mime_type="text/plain",
+        session_date=payload.session_date,
+        transcript_text=transcript_text,
+        processing_status="processing",
+    )
+    db.add(therapy_session)
+    await db.commit()
+    await db.refresh(therapy_session)
+
+    return await _finalize_transcript_therapy_session(db, therapy_session, patient_id, transcript_text)
+
+
+@app.post("/api/patients/{patient_id}/therapy-sessions/transcript/file", response_model=TherapySessionResponse)
+async def upload_therapy_session_transcript_file(
+    patient_id: str,
+    file: UploadFile = File(...),
+    session_date: str = Form(...),
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a therapy session from an uploaded transcript document (PDF/DOCX/TXT)
+    instead of pasted text — extracts text server-side (see
+    storage.extract_document_text), then runs the same summary + SOAP +
+    Clinical Intelligence pipeline as the paste-text flow above. The original
+    file is kept in storage alongside audio recordings, so it isn't just
+    "typed text that came from a file" — it's retained like any other upload.
+    """
+    patient = await db.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+    if patient.practitioner_id != prac.id and prac.role != "owner":
+        raise HTTPException(403, "Access denied")
+
+    is_valid, error_msg = validate_transcript_document(file.filename, file.content_type)
+    if not is_valid:
+        raise HTTPException(400, error_msg)
+
+    try:
+        parsed_date = datetime.fromisoformat(session_date.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(400, "Invalid session date format. Use ISO format.")
+
+    from models import generate_uuid
+    session_id = generate_uuid()
+
+    storage_path, file_size = await save_therapy_session_document(file, patient_id, session_id)
+
+    from storage import extract_document_text
+    extracted_text = await extract_document_text(storage_path)
+    if not extracted_text:
+        # File was already written to disk above — nothing will ever reference
+        # it (no TherapySession row gets created), so clean it up before erroring.
+        await delete_file(storage_path)
+        raise HTTPException(
+            400,
+            "Couldn't read any text from that file — it may be a scanned/image-only "
+            "document. Try a text-based PDF/DOCX, or paste the transcript directly instead."
+        )
+
+    therapy_session = TherapySession(
+        id=session_id,
+        patient_id=patient_id,
+        practitioner_id=prac.id,
+        input_type="transcript",
+        audio_storage_path=storage_path,
+        audio_duration=None,
+        original_filename=file.filename,
+        file_size=file_size,
+        mime_type=file.content_type or get_mime_type(file.filename),
+        session_date=parsed_date,
+        transcript_text=extracted_text,
+        processing_status="processing",
+    )
+    db.add(therapy_session)
+    await db.commit()
+    await db.refresh(therapy_session)
+
+    return await _finalize_transcript_therapy_session(db, therapy_session, patient_id, extracted_text)
 
 
 @app.post("/api/patients/{patient_id}/therapy-sessions/{session_id}/process")
@@ -3221,92 +4073,13 @@ async def process_therapy_session(
         
         await db.commit()
         await db.refresh(therapy_session)
-        
+
         # Trigger Clinical Intelligence processing
         try:
-            from clinical_intelligence import process_therapy_session as ci_process_session, merge_intelligence_update
-            
-            ci = (await db.execute(
-                select(ClinicalIntelligence).where(ClinicalIntelligence.patient_id == patient_id)
-            )).scalar_one_or_none()
-            
-            if not ci:
-                from models import generate_uuid
-                ci = ClinicalIntelligence(
-                    id=generate_uuid(),
-                    patient_id=patient_id,
-                    version=1,
-                )
-                db.add(ci)
-                await db.commit()
-                await db.refresh(ci)
-            
-            session_data = {
-                "id": therapy_session.id,
-                "session_date": therapy_session.session_date.isoformat() if therapy_session.session_date else None,
-                "transcript_text": therapy_session.transcript_text,
-                "translation_text": therapy_session.translation_text,
-                "summary": therapy_session.summary,
-                "soap_notes": therapy_session.soap_notes,
-            }
-            existing = {
-                "patient_summary": ci.patient_summary,
-                "symptoms": ci.symptoms,
-                "treatment_goals": ci.treatment_goals,
-                "outstanding_questions": ci.outstanding_questions,
-            }
-            updates = await ci_process_session(session_data, existing)
-            
-            for update in updates:
-                if update.get("auto_apply"):
-                    ci_data = {
-                        "patient_summary": ci.patient_summary,
-                        "psychological_profile": ci.psychological_profile,
-                        "symptoms": ci.symptoms or [],
-                        "diagnoses": ci.diagnoses or [],
-                        "treatment_goals": ci.treatment_goals or [],
-                        "relationships": ci.relationships or [],
-                        "life_events": ci.life_events or [],
-                        "risk_factors": ci.risk_factors or [],
-                        "timeline": ci.timeline or [],
-                        "outstanding_questions": ci.outstanding_questions or [],
-                    }
-                    updated_data = merge_intelligence_update(ci_data, update)
-                    ci.patient_summary = updated_data.get("patient_summary")
-                    ci.psychological_profile = updated_data.get("psychological_profile")
-                    ci.symptoms = updated_data.get("symptoms")
-                    ci.diagnoses = updated_data.get("diagnoses")
-                    ci.treatment_goals = updated_data.get("treatment_goals")
-                    ci.relationships = updated_data.get("relationships")
-                    ci.life_events = updated_data.get("life_events")
-                    ci.risk_factors = updated_data.get("risk_factors")
-                    ci.timeline = updated_data.get("timeline")
-                    ci.outstanding_questions = updated_data.get("outstanding_questions")
-                else:
-                    from models import generate_uuid
-                    ci_update = ClinicalIntelligenceUpdate(
-                        id=generate_uuid(),
-                        clinical_intelligence_id=ci.id,
-                        update_type=update.get("update_type"),
-                        section=update.get("section"),
-                        operation=update.get("operation"),
-                        proposed_changes=update.get("proposed_changes"),
-                        source_type=update.get("source_type"),
-                        source_id=update.get("source_id"),
-                        source_excerpt=update.get("source_excerpt"),
-                        confidence=update.get("confidence", "medium"),
-                        reasoning=update.get("reasoning"),
-                        review_status="pending",
-                    )
-                    db.add(ci_update)
-            
-            ci.last_processed_at = datetime.now(timezone.utc)
-            ci.last_source_type = "therapy_session"
-            ci.last_source_id = therapy_session.id
-            await db.commit()
+            await _apply_clinical_intelligence_from_session(db, patient_id, therapy_session)
         except Exception as e:
             print(f"Clinical Intelligence processing error: {e}")
-        
+
         return {"message": "Processing completed successfully"}
     except Exception as e:
         therapy_session.processing_status = "failed"
@@ -3361,6 +4134,7 @@ async def list_therapy_sessions(
         TherapySessionListItem(
             id=s.id,
             patient_id=s.patient_id,
+            input_type=s.input_type,
             session_date=s.session_date,
             audio_duration=s.audio_duration,
             detected_language=s.detected_language,
@@ -3394,6 +4168,7 @@ async def get_therapy_session(
         id=therapy_session.id,
         patient_id=therapy_session.patient_id,
         practitioner_id=therapy_session.practitioner_id,
+        input_type=therapy_session.input_type,
         audio_duration=therapy_session.audio_duration,
         original_filename=therapy_session.original_filename,
         file_size=therapy_session.file_size,
@@ -3708,7 +4483,18 @@ async def trigger_clinical_intelligence_processing(
         process_assessment,
         process_document,
     )
-    
+
+    pending_rows = (await db.execute(
+        select(ClinicalIntelligenceUpdate).where(
+            ClinicalIntelligenceUpdate.clinical_intelligence_id == ci.id,
+            ClinicalIntelligenceUpdate.review_status == "pending",
+        )
+    )).scalars().all()
+    pending_updates = [
+        {"section": p.section, "proposed_changes": p.proposed_changes}
+        for p in pending_rows
+    ]
+
     updates = []
     
     # Process based on source type or all sources
@@ -3732,10 +4518,16 @@ async def trigger_clinical_intelligence_processing(
             existing = {
                 "patient_summary": ci.patient_summary,
                 "psychological_profile": ci.psychological_profile,
-                "symptoms": ci.symptoms,
-                "diagnoses": ci.diagnoses,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
             }
-            ch_updates = await process_clinical_history(patient_id, ch_data, existing)
+            ch_updates = await process_clinical_history(patient_id, ch_data, existing, pending_updates)
             updates.extend(ch_updates)
     
     if source_type == "therapy_session" or source_type is None:
@@ -3759,11 +4551,17 @@ async def trigger_clinical_intelligence_processing(
             }
             existing = {
                 "patient_summary": ci.patient_summary,
-                "symptoms": ci.symptoms,
-                "treatment_goals": ci.treatment_goals,
-                "outstanding_questions": ci.outstanding_questions,
+                "psychological_profile": ci.psychological_profile,
+                "symptoms": ci.symptoms or [],
+                "diagnoses": ci.diagnoses or [],
+                "treatment_goals": ci.treatment_goals or [],
+                "relationships": ci.relationships or [],
+                "life_events": ci.life_events or [],
+                "risk_factors": ci.risk_factors or [],
+                "timeline": ci.timeline or [],
+                "outstanding_questions": ci.outstanding_questions or [],
             }
-            session_updates = await process_therapy_session(session_data, existing)
+            session_updates = await process_therapy_session(session_data, existing, pending_updates)
             updates.extend(session_updates)
     
     # Store updates for review
@@ -4223,6 +5021,132 @@ async def restore_version(
     await db.commit()
     
     return {"message": f"Restored to version {version.version}"}
+
+
+# ─── Clinical Intelligence Chat ("ask about this patient") ─────────────────────
+# Every route below filters strictly on patient_id taken from the URL - never
+# by joining through clinical_intelligence_id alone - so a patient's chat
+# history can never be reached via another patient's record. See
+# clinical_chat_service.py and ClinicalIntelligenceChatMessage in models.py.
+
+@app.get("/api/patients/{patient_id}/clinical-intelligence/chat", response_model=list[ClinicalChatMessageResponse])
+async def get_clinical_intelligence_chat(
+    patient_id: str,
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Chat history for this patient's Clinical Intelligence assistant."""
+    from clinical_chat_service import clean_display_text
+
+    patient = await db.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+    if patient.practitioner_id != prac.id and prac.role != "owner":
+        raise HTTPException(403, "Access denied")
+
+    messages = (await db.execute(
+        select(ClinicalIntelligenceChatMessage)
+        .where(ClinicalIntelligenceChatMessage.patient_id == patient_id)
+        .order_by(ClinicalIntelligenceChatMessage.created_at.asc())
+    )).scalars().all()
+
+    return [
+        ClinicalChatMessageResponse(
+            id=m.id, role=m.role,
+            content=clean_display_text(m.content) if m.role == "assistant" else m.content,
+            citations=m.citations, grounded=m.grounded, created_at=m.created_at,
+        )
+        for m in messages
+    ]
+
+
+@app.post("/api/patients/{patient_id}/clinical-intelligence/chat", response_model=ClinicalChatMessageResponse)
+async def ask_clinical_intelligence_chat(
+    patient_id: str,
+    body: ClinicalChatAskRequest,
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ask a question about this patient's approved Clinical Intelligence record."""
+    patient = await db.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+    if patient.practitioner_id != prac.id and prac.role != "owner":
+        raise HTTPException(403, "Access denied")
+
+    question = (body.message or "").strip()
+    if not question:
+        raise HTTPException(400, "Message is required")
+
+    ci = (await db.execute(
+        select(ClinicalIntelligence).where(ClinicalIntelligence.patient_id == patient_id)
+    )).scalar_one_or_none()
+
+    has_data = ci and any([
+        ci.patient_summary, ci.symptoms, ci.diagnoses, ci.treatment_goals,
+        ci.relationships, ci.life_events, ci.risk_factors, ci.outstanding_questions,
+    ])
+    if not has_data:
+        raise HTTPException(409, "No Clinical Intelligence data yet for this patient - process sources first.")
+
+    user_msg = ClinicalIntelligenceChatMessage(
+        id=generate_uuid(),
+        clinical_intelligence_id=ci.id,
+        patient_id=patient_id,
+        practitioner_id=prac.id,
+        role="user",
+        content=question,
+    )
+    db.add(user_msg)
+    await db.flush()
+
+    from clinical_chat_service import answer_clinical_question, clean_display_text, MAX_HISTORY_TURNS
+
+    history_rows = (await db.execute(
+        select(ClinicalIntelligenceChatMessage)
+        .where(
+            ClinicalIntelligenceChatMessage.patient_id == patient_id,
+            ClinicalIntelligenceChatMessage.id != user_msg.id,
+        )
+        .order_by(ClinicalIntelligenceChatMessage.created_at.desc())
+        .limit(MAX_HISTORY_TURNS)
+    )).scalars().all()
+    history = [{"role": m.role, "content": m.content} for m in reversed(history_rows)]
+
+    result = await answer_clinical_question(
+        question=question,
+        patient_name=patient.full_name,
+        patient_age=patient.age,
+        patient_gender=patient.gender,
+        patient_id=patient.id,
+        ci=ci,
+        history=history,
+    )
+
+    assistant_msg = ClinicalIntelligenceChatMessage(
+        id=generate_uuid(),
+        clinical_intelligence_id=ci.id,
+        patient_id=patient_id,
+        practitioner_id=prac.id,
+        role="assistant",
+        # Stored with [S#] markers intact (not display-cleaned) - see
+        # clean_display_text's docstring for why: history replay needs the
+        # model's own prior turns to still show markers, or it stops
+        # including them in new answers.
+        content=result["content"],
+        citations=result["citations"],
+        grounded=result["grounded"],
+    )
+    db.add(assistant_msg)
+    await db.commit()
+    await db.refresh(assistant_msg)
+
+    return ClinicalChatMessageResponse(
+        id=assistant_msg.id, role=assistant_msg.role,
+        content=clean_display_text(assistant_msg.content),
+        citations=assistant_msg.citations, grounded=assistant_msg.grounded,
+        created_at=assistant_msg.created_at,
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════════
@@ -6004,6 +6928,7 @@ async def _generate_receipt(db: AsyncSession, payment: Payment) -> Receipt:
         payment_id=payment.id,
         patient_name=patient.full_name if patient else "Unknown",
         patient_email=patient.email if patient else None,
+        patient_dob=patient.date_of_birth if patient else None,
         practitioner_name=practitioner.name if practitioner else "Unknown",
         session_fee=payment.session_fee,
         discount_amount=payment.discount_amount,
@@ -6039,7 +6964,7 @@ async def get_receipt(
         raise HTTPException(403, "Access denied")
     
     if payment.status != "paid" and payment.status != "refunded":
-        raise HTTPException(400, "Receipt only available for paid payments")
+        raise HTTPException(400, "Invoice only available for paid payments")
     
     receipt = (await db.execute(
         select(Receipt).where(Receipt.payment_id == payment.id)
@@ -6055,6 +6980,7 @@ async def get_receipt(
         receipt_number=receipt.receipt_number,
         patient_name=receipt.patient_name,
         patient_email=receipt.patient_email,
+        patient_dob=receipt.patient_dob,
         practitioner_name=receipt.practitioner_name,
         session_fee=receipt.session_fee,
         discount_amount=receipt.discount_amount,
@@ -6066,6 +6992,214 @@ async def get_receipt(
         payment_method=receipt.payment_method,
         payment_date=receipt.payment_date,
         generated_at=receipt.generated_at,
+    )
+
+
+def _format_qualifications_line(qualifications) -> str | None:
+    """Join a PractitionerProfile.qualifications JSON list into one display line
+    (e.g. "M.A. Clinical Psychology, Ph.D. Psychology"). Tolerates legacy rows
+    where an entry is a plain string rather than a {degree, institution, year} dict."""
+    if not qualifications:
+        return None
+    degrees = []
+    for q in qualifications:
+        degree = q.get("degree") if isinstance(q, dict) else str(q)
+        if degree:
+            degrees.append(degree)
+    return ", ".join(degrees) if degrees else None
+
+
+@app.get("/api/payments/{payment_id}/invoice.pdf")
+async def get_invoice_pdf(
+    payment_id: str,
+    token: str = Query(...),
+    inline: bool = Query(False, description="Serve inline for in-app preview instead of forcing a download"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Downloadable invoice PDF for a paid payment — used for insurance/employer
+    reimbursement claims. Token-based auth (query param, not header) since this
+    is hit via direct browser navigation/<a href>/<iframe>, matching the report/pdf
+    and document-download endpoints elsewhere in this file."""
+    from auth import decode_token
+    from fpdf import FPDF
+
+    payload = decode_token(token)
+    prac = await db.get(Practitioner, payload["sub"])
+    if not prac or not prac.is_active:
+        raise HTTPException(401, "Invalid token")
+
+    payment = await db.get(Payment, payment_id)
+    if not payment:
+        raise HTTPException(404, "Payment not found")
+    if prac.role != "owner" and payment.practitioner_id != prac.id:
+        raise HTTPException(403, "Access denied")
+    if payment.status not in ("paid", "refunded"):
+        raise HTTPException(400, "Invoice only available for paid payments")
+
+    receipt = (await db.execute(
+        select(Receipt).where(Receipt.payment_id == payment.id)
+    )).scalar_one_or_none()
+    if not receipt:
+        receipt = await _generate_receipt(db, payment)
+
+    # Header info (name, credentials, clinic address) and the signature/stamp
+    # images come from the practitioner who actually did the session — not the
+    # viewer, which may be an owner looking at another practitioner's invoice.
+    profile = (await db.execute(
+        select(PractitionerProfile).where(
+            PractitionerProfile.practitioner_id == payment.practitioner_id
+        )
+    )).scalar_one_or_none()
+    appt = await db.get(Appointment, payment.appointment_id)
+
+    title_name = receipt.practitioner_name
+    qualifications_line = None
+    license_line = None
+    clinic_address = None
+    signature_path = None
+    stamp_path = None
+    if profile:
+        name_part = profile.display_name or receipt.practitioner_name
+        title_name = f"{profile.title} {name_part}".strip() if profile.title else name_part
+        qualifications_line = _format_qualifications_line(profile.qualifications)
+        if profile.license_number:
+            license_line = f"License No: {profile.license_number}"
+        clinic_address = profile.clinic_address
+        if profile.signature_image_path:
+            signature_path = await get_file_path(profile.signature_image_path)
+        if profile.stamp_image_path:
+            stamp_path = await get_file_path(profile.stamp_image_path)
+
+    mode_label = None
+    if appt and appt.session_mode:
+        mode_label = "Online" if appt.session_mode == "online" else "In-person"
+
+    # Core Helvetica font is Windows-1252 only and has no Rupee sign glyph —
+    # spell it out instead of risking an encoding error, same workaround as
+    # the em-dash/quote sanitize() map used for the MMPI-2 report PDF above.
+    amount = f"Rs. {receipt.final_amount / 100:,.2f}"
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_margins(15, 15, 15)
+    pdf.add_page()
+
+    left_x, left_w = 15, 110
+    right_x, right_w = 130, 65  # ends at page x=195
+    top_y = pdf.get_y()
+
+    # ─── Left: practitioner header (name / credentials / license / clinic address) ───
+    pdf.set_xy(left_x, top_y)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.multi_cell(left_w, 6.5, title_name)
+    if qualifications_line:
+        pdf.set_x(left_x)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(left_w, 5, qualifications_line)
+    if license_line:
+        pdf.set_x(left_x)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(left_w, 5, license_line)
+    if clinic_address:
+        pdf.set_x(left_x)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(left_w, 5, clinic_address)
+    left_bottom_y = pdf.get_y()
+
+    # ─── Right: "INVOICE" + invoice number/date ───
+    pdf.set_xy(right_x, top_y)
+    pdf.set_font("Helvetica", "B", 22)
+    pdf.cell(right_w, 10, "INVOICE", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(right_x)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(right_w, 5, receipt.receipt_number, align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(right_x)
+    pdf.cell(right_w, 5, receipt.generated_at.strftime("%d %b %Y"), align="R", new_x="LMARGIN", new_y="NEXT")
+    right_bottom_y = pdf.get_y()
+
+    pdf.set_y(max(left_bottom_y, right_bottom_y) + 4)
+    pdf.set_draw_color(41, 98, 255)
+    pdf.set_line_width(0.6)
+    pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(10)
+
+    # ─── Patient/session box (left) and amount box (right) ───
+    box_top = pdf.get_y()
+    left_box_x, left_box_w = 15, 115
+    right_box_x, right_box_w = 135, 60
+
+    left_rows = [("Patient:", receipt.patient_name)]
+    if receipt.patient_dob:
+        left_rows.append(("Date of Birth:", receipt.patient_dob.strftime("%d %b %Y")))
+    left_rows.append(("Session Date:", receipt.appointment_date.strftime("%d %b %Y")))
+    left_rows.append(("Session Type:", receipt.session_type.replace("_", " ").title()))
+    if mode_label:
+        left_rows.append(("Mode:", mode_label))
+    left_rows.append(("Payment Date:", receipt.payment_date.strftime("%d %b %Y")))
+    left_rows.append(("Status:", "Refunded" if payment.status == "refunded" else "Paid"))
+
+    row_h = 8
+    pad = 6
+    box_h = max(pad * 2 + row_h * len(left_rows), 50)
+
+    pdf.set_draw_color(210, 210, 210)
+    pdf.set_line_width(0.3)
+    pdf.rect(left_box_x, box_top, left_box_w, box_h)
+    pdf.rect(right_box_x, box_top, right_box_w, box_h)
+
+    label_w = 42
+    y = box_top + pad
+    for label, value in left_rows:
+        pdf.set_xy(left_box_x + 6, y)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(label_w, row_h - 2, label)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(left_box_w - label_w - 12, row_h - 2, value)
+        y += row_h
+
+    pdf.set_xy(right_box_x + 6, box_top + pad)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(right_box_w - 12, 6, "Session Fee")
+    pdf.set_xy(right_box_x + 6, box_top + pad + 12)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.multi_cell(right_box_w - 12, 8, amount)
+
+    pdf.set_y(box_top + box_h + 20)
+
+    # ─── Bottom-right: signature/stamp space above the printed name ───
+    # Most practitioners won't upload either — the gap is reserved either way so
+    # the invoice can be signed/stamped by hand on a printout too.
+    sig_box_x, sig_box_w = 130, 65
+    gap_h = 22
+    line_y = pdf.get_y() + gap_h
+
+    if stamp_path:
+        try:
+            pdf.image(str(stamp_path), x=sig_box_x, y=line_y - 20, h=20)
+        except Exception:
+            pass
+    if signature_path:
+        try:
+            pdf.image(str(signature_path), x=sig_box_x + 28, y=line_y - 15, h=15)
+        except Exception:
+            pass
+
+    pdf.set_draw_color(120, 120, 120)
+    pdf.set_line_width(0.3)
+    pdf.line(sig_box_x, line_y, sig_box_x + sig_box_w, line_y)
+    pdf.set_xy(sig_box_x, line_y + 2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(sig_box_w, 6, title_name, align="C")
+
+    buf = io.BytesIO()
+    pdf.output(buf)
+    buf.seek(0)
+
+    safe_name = receipt.patient_name.replace(' ', '_')
+    disposition = "inline" if inline else "attachment"
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f"{disposition}; filename=Invoice_{safe_name}_{receipt.receipt_number}.pdf"},
     )
 
 
@@ -6435,6 +7569,16 @@ def _get_file_url(storage_path: str | None) -> str | None:
     return f"/api/files/{storage_path}"
 
 
+def _get_public_file_url(storage_path: str | None) -> str | None:
+    """Convert storage path to a URL served by the unauthenticated /api/uploads
+    endpoint (allowlists the "profiles/" prefix — see serve_upload). Used for
+    signature/stamp images so plain <img src> tags (which can't send an auth
+    header) can load them without needing a ?token= workaround."""
+    if not storage_path:
+        return None
+    return f"/api/uploads/{storage_path}"
+
+
 def _profile_to_response(profile: PractitionerProfile) -> PractitionerProfileResponse:
     """Convert profile model to response."""
     return PractitionerProfileResponse(
@@ -6467,6 +7611,8 @@ def _profile_to_response(profile: PractitionerProfile) -> PractitionerProfileRes
         profile_photo_url=_get_file_url(profile.profile_photo_path),
         cover_image_url=_get_file_url(profile.cover_image_path),
         clinic_logo_url=_get_file_url(profile.clinic_logo_path),
+        signature_image_url=_get_public_file_url(profile.signature_image_path),
+        stamp_image_url=_get_public_file_url(profile.stamp_image_path),
         welcome_message=profile.welcome_message,
         what_to_expect=profile.what_to_expect,
         how_therapy_works=profile.how_therapy_works,
@@ -7019,8 +8165,132 @@ async def upload_clinic_logo(
     
     profile.clinic_logo_path = storage_path
     await db.commit()
-    
+
     return {"message": "Clinic logo uploaded", "url": _get_file_url(storage_path)}
+
+
+@app.post("/api/profile/me/signature")
+async def upload_signature_image(
+    file: UploadFile = File(...),
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a scanned digital signature, rendered above the practitioner's
+    printed name on invoice PDFs. Optional — most practitioners won't set one."""
+    from models import generate_uuid
+
+    profile = (await db.execute(
+        select(PractitionerProfile).where(
+            PractitionerProfile.practitioner_id == prac.id
+        )
+    )).scalar_one_or_none()
+
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+
+    allowed_types = ["image/jpeg", "image/png", "image/jpg", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(400, f"Invalid file type. Allowed: {', '.join(allowed_types)}")
+
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:  # 2MB limit
+        raise HTTPException(400, "File size exceeds 2MB limit")
+    await file.seek(0)
+
+    storage_path, _, _ = await save_file(file, f"profiles/{profile.id}", f"signature_{generate_uuid()}")
+
+    if profile.signature_image_path:
+        await delete_file(profile.signature_image_path)
+
+    profile.signature_image_path = storage_path
+    await db.commit()
+
+    return {"message": "Signature uploaded", "url": _get_public_file_url(storage_path)}
+
+
+@app.delete("/api/profile/me/signature")
+async def delete_signature_image(
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the practitioner's uploaded signature image."""
+    profile = (await db.execute(
+        select(PractitionerProfile).where(
+            PractitionerProfile.practitioner_id == prac.id
+        )
+    )).scalar_one_or_none()
+
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+
+    if profile.signature_image_path:
+        await delete_file(profile.signature_image_path)
+        profile.signature_image_path = None
+        await db.commit()
+
+    return {"message": "Signature removed"}
+
+
+@app.post("/api/profile/me/stamp")
+async def upload_stamp_image(
+    file: UploadFile = File(...),
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a scanned practice stamp/seal, rendered above the practitioner's
+    printed name on invoice PDFs alongside the signature. Optional."""
+    from models import generate_uuid
+
+    profile = (await db.execute(
+        select(PractitionerProfile).where(
+            PractitionerProfile.practitioner_id == prac.id
+        )
+    )).scalar_one_or_none()
+
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+
+    allowed_types = ["image/jpeg", "image/png", "image/jpg", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(400, f"Invalid file type. Allowed: {', '.join(allowed_types)}")
+
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:  # 2MB limit
+        raise HTTPException(400, "File size exceeds 2MB limit")
+    await file.seek(0)
+
+    storage_path, _, _ = await save_file(file, f"profiles/{profile.id}", f"stamp_{generate_uuid()}")
+
+    if profile.stamp_image_path:
+        await delete_file(profile.stamp_image_path)
+
+    profile.stamp_image_path = storage_path
+    await db.commit()
+
+    return {"message": "Stamp uploaded", "url": _get_public_file_url(storage_path)}
+
+
+@app.delete("/api/profile/me/stamp")
+async def delete_stamp_image(
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the practitioner's uploaded stamp image."""
+    profile = (await db.execute(
+        select(PractitionerProfile).where(
+            PractitionerProfile.practitioner_id == prac.id
+        )
+    )).scalar_one_or_none()
+
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+
+    if profile.stamp_image_path:
+        await delete_file(profile.stamp_image_path)
+        profile.stamp_image_path = None
+        await db.commit()
+
+    return {"message": "Stamp removed"}
 
 
 # ─── Resource Management ─────────────────────────────────────────────────────────
@@ -7806,8 +9076,8 @@ async def get_booking_receipt(
     )).scalar_one_or_none()
     
     if not receipt:
-        raise HTTPException(404, "Receipt not found")
-    
+        raise HTTPException(404, "Invoice not found")
+
     return PatientReceiptView(
         receipt_number=receipt.receipt_number,
         patient_name=receipt.patient_name,
@@ -9449,15 +10719,15 @@ async def serve_file(
 ):
     """Serve static files from uploads directory (authenticated)."""
     import os
-    
+
     full_path = os.path.join("uploads", file_path)
-    
+
     if not os.path.exists(full_path):
         raise HTTPException(404, "File not found")
-    
+
     if ".." in file_path or file_path.startswith("/"):
         raise HTTPException(403, "Invalid file path")
-    
+
     return FileResponse(full_path)
 
 

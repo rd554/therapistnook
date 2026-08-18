@@ -147,6 +147,13 @@ class Session(Base):
     education = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     completed = Column(Boolean, default=False)
+    # Nullable: sessions are created through the unauthenticated patient-facing
+    # intake flow (name/dob typed by the patient via a practitioner's ref link),
+    # so there's no Patient record to point at yet. Resolved + persisted lazily
+    # by _resolve_session_patient_id() in main.py the first time it's needed
+    # (assessment list, MMPI->Clinical Intelligence wiring), scoped to
+    # practitioner_id so two practitioners' same-named patients never cross-link.
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=True, index=True)
 
     practitioner = relationship("Practitioner", back_populates="sessions")
     answers = relationship("Answer", back_populates="session", cascade="all, delete-orphan")
@@ -240,8 +247,14 @@ class ClinicalDocument(Base):
     
     # Optional notes
     notes = Column(Text, nullable=True)
-    
-    # Processing status for future AI
+
+    # Text extracted from the file (PDF/DOCX/TXT) for Clinical Intelligence analysis.
+    # Null for unsupported types (.doc, .xls/.xlsx, images) or if extraction found no text
+    # (e.g. a scanned/image-only PDF).
+    extracted_text = Column(Text, nullable=True)
+
+    # Processing status: pending -> completed/failed once text extraction + Clinical
+    # Intelligence processing has run (see upload_document in main.py).
     processing_status = Column(String, nullable=False, default="pending")  # pending, processing, completed, failed
     
     # Timestamps
@@ -342,6 +355,7 @@ class TherapySession(Base):
     # Session metadata
     session_date = Column(DateTime(timezone=True), nullable=False)
     detected_language = Column(String, nullable=True)  # e.g., "en", "hi", "es"
+    input_type = Column(String, nullable=False, default="audio")  # "audio" or "transcript"
     
     # Transcript
     transcript = Column(JSON, nullable=True)  # [{speaker, timestamp, text}, ...]
@@ -635,6 +649,43 @@ class ClinicalIntelligenceUpdate(Base):
     reviewer = relationship("Practitioner", foreign_keys=[reviewed_by])
 
 
+class ClinicalIntelligenceChatMessage(Base):
+    """
+    Messages in the per-patient "ask about this patient" Q&A chat.
+
+    Every row carries patient_id in addition to clinical_intelligence_id even
+    though the two are 1:1 today. This is deliberate: every query in main.py
+    filters on patient_id taken straight from the URL, never by joining
+    through clinical_intelligence_id alone, so a join bug can't leak one
+    patient's conversation into another's. See main.py's chat endpoints.
+    """
+    __tablename__ = "clinical_intelligence_chat_messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    clinical_intelligence_id = Column(String, ForeignKey("clinical_intelligence.id"), nullable=False, index=True)
+    patient_id = Column(String, ForeignKey("patients.id"), nullable=False, index=True)
+    practitioner_id = Column(String, ForeignKey("practitioners.id"), nullable=True)
+
+    role = Column(String, nullable=False)  # user, assistant
+    content = Column(Text, nullable=False)
+
+    # Structured citations for assistant messages, resolved server-side from
+    # the patient's own record (see clinical_chat_service.py) - never
+    # freehand text from the model.
+    citations = Column(JSON, nullable=True)
+    # [{source_type, source_id, excerpt, date, section}]
+
+    # False when the assistant's answer contained no verifiable citation
+    # back to the record (e.g. "I don't have that information"). Lets the
+    # UI visually distinguish a grounded answer from an unverified one.
+    grounded = Column(Boolean, nullable=True)  # null for user messages
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    intelligence = relationship("ClinicalIntelligence", backref="chat_messages")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CALENDAR & SCHEDULING — Appointments and Availability
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -793,13 +844,21 @@ PAYMENT_METHODS = [
 
 
 def generate_receipt_number():
-    """Generate a unique receipt number with format: RCP-YYYYMMDD-XXXX"""
+    """Generate a unique invoice number with format: INV-YYYYMMDD-XXXX.
+
+    The model/table/column are still named "Receipt"/"receipt_number" — only
+    the user-facing label changed from Receipt to Invoice, and this prefix
+    with it. Renaming the table itself would need a migration this codebase
+    has no framework for (see database.py), and buys nothing the rename
+    actually needs. Numbers already issued with the old "RCP-" prefix are
+    left untouched; only new ones get "INV-".
+    """
     from datetime import datetime
     import random
     import string
     date_part = datetime.now().strftime("%Y%m%d")
     random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"RCP-{date_part}-{random_part}"
+    return f"INV-{date_part}-{random_part}"
 
 
 def generate_payment_link_token():
@@ -878,6 +937,7 @@ class Receipt(Base):
     # Snapshot of payment details at receipt generation time
     patient_name = Column(String, nullable=False)
     patient_email = Column(String, nullable=True)
+    patient_dob = Column(Date, nullable=True)  # for insurance/reimbursement claims
     practitioner_name = Column(String, nullable=False)
     
     # Amount details (snapshot)
@@ -890,7 +950,7 @@ class Receipt(Base):
     # Appointment details (snapshot)
     appointment_date = Column(Date, nullable=False)
     session_type = Column(String, nullable=False)
-    
+
     # Payment method used
     payment_method = Column(String, nullable=True)
     payment_date = Column(DateTime(timezone=True), nullable=False)
@@ -1062,7 +1122,12 @@ class PractitionerProfile(Base):
     profile_photo_path = Column(String, nullable=True)
     cover_image_path = Column(String, nullable=True)
     clinic_logo_path = Column(String, nullable=True)
-    
+
+    # Digital signature/stamp — rendered on invoice PDFs above the practitioner's
+    # printed name. Optional; most practitioners won't upload one.
+    signature_image_path = Column(String, nullable=True)
+    stamp_image_path = Column(String, nullable=True)
+
     # Onboarding Content
     welcome_message = Column(Text, nullable=True)
     what_to_expect = Column(Text, nullable=True)

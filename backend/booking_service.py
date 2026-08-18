@@ -645,6 +645,7 @@ class BookingService:
                 receipt_number=generate_receipt_number(),
                 patient_name=booking.patient_name,
                 patient_email=booking.patient_email,
+                patient_dob=patient.date_of_birth if patient else None,
                 practitioner_name=practitioner.name if practitioner else "",
                 session_fee=payment.session_fee,
                 discount_amount=payment.discount_amount,
