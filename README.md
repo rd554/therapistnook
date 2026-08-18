@@ -65,11 +65,7 @@ cd backend
 python seed.py
 ```
 
-Default credentials:
-- Email: admin@example.com
-- Password: admin123
-
-**Change this immediately in production!**
+By default this creates a local-only development account. Set `OWNER_EMAIL` and `OWNER_PASSWORD` in your `.env` before running the seed script to choose your own credentials instead — **do this before any non-local deployment.**
 
 ## Project Structure
 

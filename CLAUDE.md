@@ -16,7 +16,7 @@ pip install -r requirements.txt
 cp .env.example .env          # then edit .env
 
 uvicorn main:app --reload --port 8002    # dev server
-python seed.py                            # seeds 567 MMPI-2 questions + owner account (admin@mmpi.local / admin123)
+python seed.py                            # seeds 567 MMPI-2 questions + a local dev owner account (defaults to `admin@mmpi.local`; override via OWNER_EMAIL/OWNER_PASSWORD in .env)
 ```
 There is no pytest suite and no `backend/test_*.py` scratch scripts are kept in the repo (they contained one-off/demo patient data and were removed before the repo went public). Exercise the API by running the dev server and hitting endpoints directly, or write a throwaway script locally.
 
