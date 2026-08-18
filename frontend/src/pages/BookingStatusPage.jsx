@@ -292,7 +292,7 @@ export default function BookingStatusPage() {
               </div>
               {booking.receipt_number && (
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Receipt #</span>
+                  <span className="text-gray-600">Invoice #</span>
                   <span className="font-mono text-gray-900">{booking.receipt_number}</span>
                 </div>
               )}
@@ -304,7 +304,7 @@ export default function BookingStatusPage() {
                 className="inline-flex items-center gap-2 mt-4 text-blue-600 hover:underline text-sm"
               >
                 <Download className="w-4 h-4" />
-                View Receipt
+                View Invoice
               </Link>
             )}
           </div>

@@ -103,3 +103,5 @@ export {
   RowCard,
   RowCardHeader,
 } from './SectionDropdown'
+
+export { default as PhoneInput, splitPhone, joinPhone } from './PhoneInput'

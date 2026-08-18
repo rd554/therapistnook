@@ -7,33 +7,9 @@ import {
 } from 'lucide-react'
 import { getPublicOnboarding, submitPublicIntake } from '../api/client'
 import { getOnboardingDefaults } from '../constants/onboardingDefaults'
+import { COUNTRY_CODES } from '../constants/countryCodes'
 
 const EMPTY_INTAKE_FORM = { full_name: '', age: '', gender: '', country_code: '+91', phone: '', chief_complaint: '' }
-
-// Common dial codes — covers the geographies practitioners here see international
-// clients from most often. Not exhaustive; +91 (India) is the default.
-const COUNTRY_CODES = [
-  { code: '+91', label: 'India (+91)' },
-  { code: '+1', label: 'US/Canada (+1)' },
-  { code: '+44', label: 'UK (+44)' },
-  { code: '+61', label: 'Australia (+61)' },
-  { code: '+971', label: 'UAE (+971)' },
-  { code: '+65', label: 'Singapore (+65)' },
-  { code: '+60', label: 'Malaysia (+60)' },
-  { code: '+974', label: 'Qatar (+974)' },
-  { code: '+966', label: 'Saudi Arabia (+966)' },
-  { code: '+49', label: 'Germany (+49)' },
-  { code: '+33', label: 'France (+33)' },
-  { code: '+41', label: 'Switzerland (+41)' },
-  { code: '+31', label: 'Netherlands (+31)' },
-  { code: '+64', label: 'New Zealand (+64)' },
-  { code: '+81', label: 'Japan (+81)' },
-  { code: '+86', label: 'China (+86)' },
-  { code: '+92', label: 'Pakistan (+92)' },
-  { code: '+880', label: 'Bangladesh (+880)' },
-  { code: '+94', label: 'Sri Lanka (+94)' },
-  { code: '+27', label: 'South Africa (+27)' },
-]
 
 export default function PatientOnboarding() {
   const { slug } = useParams()
@@ -515,7 +491,7 @@ export default function PatientOnboarding() {
                       onChange={(e) => setIntakeForm(p => ({ ...p, country_code: e.target.value }))}
                     >
                       {COUNTRY_CODES.map(c => (
-                        <option key={c.code} value={c.code}>{c.label}</option>
+                        <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
                       ))}
                     </select>
                     <input

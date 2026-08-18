@@ -10,6 +10,7 @@ import {
   PageLoader,
   Alert,
   Button,
+  PhoneInput,
 } from '../components/ui'
 
 export default function PatientEdit() {
@@ -137,12 +138,9 @@ export default function PatientEdit() {
               </select>
             </FormField>
             <FormField label="Phone">
-              <input
-                type="tel"
-                className="input-field"
-                placeholder="+91 98765 43210"
+              <PhoneInput
                 value={form.phone}
-                onChange={(e) => setForm(p => ({ ...p, phone: e.target.value }))}
+                onChange={(phone) => setForm(p => ({ ...p, phone }))}
               />
             </FormField>
             <FormField label="Email">

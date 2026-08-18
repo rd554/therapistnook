@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Users, Plus, Search, Loader2, Archive, RotateCcw, Edit, Eye,
-  ArrowUpDown, ChevronDown, Check, X,
+  ArrowUpDown, ChevronDown, Check, X, Upload, Download, FileSpreadsheet,
 } from 'lucide-react'
 import {
   listPatients, createPatient, archivePatient, restorePatient,
   listIntakeSubmissions, acceptIntakeSubmission, declineIntakeSubmission,
+  downloadPatientBulkTemplate, bulkImportPatients,
 } from '../api/client'
 import {
   StatusChip,
@@ -22,6 +23,7 @@ import {
   Button,
   IconButton,
   RowCard,
+  PhoneInput,
 } from '../components/ui'
 
 export default function PractitionerPatients() {
@@ -47,6 +49,14 @@ export default function PractitionerPatients() {
   })
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+
+  const [showBulkModal, setShowBulkModal] = useState(false)
+  const [bulkFile, setBulkFile] = useState(null)
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false)
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [bulkResult, setBulkResult] = useState(null)
+  const [bulkError, setBulkError] = useState('')
+  const bulkFileInputRef = useRef(null)
 
   const load = async () => {
     try {
@@ -106,7 +116,7 @@ export default function PractitionerPatients() {
       setShowForm(false)
       await load()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to create patient')
+      setError(err.userMessage || 'Failed to create patient')
     } finally {
       setCreating(false)
     }
@@ -118,7 +128,7 @@ export default function PractitionerPatients() {
       await archivePatient(patient.id)
       await load()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to archive patient')
+      alert(err.userMessage || 'Failed to archive patient')
     }
   }
 
@@ -127,7 +137,7 @@ export default function PractitionerPatients() {
       await restorePatient(patient.id)
       await load()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to restore patient')
+      alert(err.userMessage || 'Failed to restore patient')
     }
   }
 
@@ -138,7 +148,7 @@ export default function PractitionerPatients() {
       setIntakeSubmissions(prev => prev.filter(s => s.id !== submission.id))
       await load()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to accept intake submission')
+      alert(err.userMessage || 'Failed to accept intake submission')
     } finally {
       setResolvingIntakeId(null)
     }
@@ -151,7 +161,7 @@ export default function PractitionerPatients() {
       await declineIntakeSubmission(submission.id)
       setIntakeSubmissions(prev => prev.filter(s => s.id !== submission.id))
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to remove intake submission')
+      alert(err.userMessage || 'Failed to remove intake submission')
     } finally {
       setResolvingIntakeId(null)
     }
@@ -169,6 +179,43 @@ export default function PractitionerPatients() {
     })
     setError('')
     setShowForm(false)
+  }
+
+  const handleDownloadTemplate = async () => {
+    setDownloadingTemplate(true)
+    setBulkError('')
+    try {
+      await downloadPatientBulkTemplate()
+    } catch (err) {
+      setBulkError(err.userMessage || 'Failed to download template')
+    } finally {
+      setDownloadingTemplate(false)
+    }
+  }
+
+  const handleBulkUpload = async (e) => {
+    e.preventDefault()
+    if (!bulkFile) return
+    setBulkUploading(true)
+    setBulkError('')
+    setBulkResult(null)
+    try {
+      const result = await bulkImportPatients(bulkFile)
+      setBulkResult(result)
+      if (result.created_count > 0) await load()
+    } catch (err) {
+      setBulkError(err.userMessage || 'Failed to upload file')
+    } finally {
+      setBulkUploading(false)
+    }
+  }
+
+  const resetBulkModal = () => {
+    setShowBulkModal(false)
+    setBulkFile(null)
+    setBulkResult(null)
+    setBulkError('')
+    if (bulkFileInputRef.current) bulkFileInputRef.current.value = ''
   }
 
   const formatDate = (dateStr) => {
@@ -224,6 +271,15 @@ export default function PractitionerPatients() {
             <Plus size={16} strokeWidth={1.5} />
             <span>Add Patient</span>
           </button>
+
+          {/* Bulk Upload Button */}
+          <button
+            onClick={() => setShowBulkModal(true)}
+            className="workspace-header__btn workspace-header__btn--soft"
+          >
+            <Upload size={16} strokeWidth={1.5} />
+            <span>Bulk Upload</span>
+          </button>
         </div>
       </div>
 
@@ -274,12 +330,9 @@ export default function PractitionerPatients() {
                     </select>
                   </FormField>
                   <FormField label="Phone">
-                    <input
-                      type="tel"
-                      className="input-field"
-                      placeholder="+91 98765 43210"
+                    <PhoneInput
                       value={form.phone}
-                      onChange={(e) => setForm(p => ({ ...p, phone: e.target.value }))}
+                      onChange={(phone) => setForm(p => ({ ...p, phone }))}
                     />
                   </FormField>
                   <FormField label="Email">
@@ -321,6 +374,101 @@ export default function PractitionerPatients() {
                   </Button>
                 </FormActions>
               </form>
+            </FormCard>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Upload Modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg animate-in zoom-in-95">
+            <FormCard
+              title="Bulk Upload Patients"
+              subtitle="Import multiple patients at once from a spreadsheet"
+            >
+              {bulkError && (
+                <Alert variant="error" className="mb-4">{bulkError}</Alert>
+              )}
+
+              {!bulkResult ? (
+                <form onSubmit={handleBulkUpload} className="space-y-4">
+                  <div className="text-sm text-content-secondary space-y-3">
+                    <p>
+                      Download the template, fill in one row per patient, then upload
+                      the completed file. Patient Name, Date of Birth and Gender are
+                      required — everything else is optional.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      leftIcon={Download}
+                      isLoading={downloadingTemplate}
+                      onClick={handleDownloadTemplate}
+                    >
+                      Download Template
+                    </Button>
+                  </div>
+
+                  <FormField label="Completed File">
+                    <input
+                      ref={bulkFileInputRef}
+                      type="file"
+                      accept=".xlsx"
+                      className="input-field"
+                      onChange={(e) => setBulkFile(e.target.files?.[0] || null)}
+                    />
+                  </FormField>
+
+                  <FormActions>
+                    <Button type="submit" isLoading={bulkUploading} leftIcon={Upload} disabled={!bulkFile}>
+                      Upload
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={resetBulkModal}>
+                      Cancel
+                    </Button>
+                  </FormActions>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <Alert variant={bulkResult.error_count === 0 ? 'success' : 'warning'}>
+                    {bulkResult.created_count} of {bulkResult.total_rows} patient
+                    {bulkResult.total_rows === 1 ? '' : 's'} added
+                    {bulkResult.error_count > 0
+                      ? `. ${bulkResult.error_count} row${bulkResult.error_count === 1 ? '' : 's'} had errors and were skipped.`
+                      : '.'}
+                  </Alert>
+
+                  {bulkResult.results.some(r => r.status === 'error') && (
+                    <div className="max-h-64 overflow-y-auto space-y-2 border border-border-subtle rounded-card p-3">
+                      {bulkResult.results.filter(r => r.status === 'error').map(r => (
+                        <div key={r.row_number} className="text-sm">
+                          <div className="font-medium text-content-primary flex items-center gap-1.5">
+                            <FileSpreadsheet size={14} strokeWidth={1.5} className="text-content-muted" />
+                            Row {r.row_number}{r.full_name ? ` — ${r.full_name}` : ''}
+                          </div>
+                          <ul className="ml-5 list-disc text-error-text text-xs">
+                            {r.errors.map((msg, i) => <li key={i}>{msg}</li>)}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <FormActions>
+                    <Button type="button" onClick={resetBulkModal}>
+                      Done
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => { setBulkResult(null); setBulkFile(null); if (bulkFileInputRef.current) bulkFileInputRef.current.value = '' }}
+                    >
+                      Upload Another File
+                    </Button>
+                  </FormActions>
+                </div>
+              )}
             </FormCard>
           </div>
         </div>

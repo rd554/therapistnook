@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   User, ArrowLeft, Phone, Mail, AlertCircle, Calendar, 
   FileText, Brain, Activity, FolderOpen, Edit, Clock, CheckCircle, Upload,
-  Mic, Video, Building, Plus, ExternalLink, CreditCard, IndianRupee, Receipt, Loader2,
+  Video, Building, Plus, ExternalLink, CreditCard, IndianRupee, Receipt, Loader2,
 } from 'lucide-react'
-import { getPatient, getClinicalHistorySummary, getVoiceProfileStatus, getPatientAppointments, createAppointment, getPatientPaymentHistory } from '../api/client'
+import { getPatient, getClinicalHistorySummary, getPatientAppointments, createAppointment, getPatientPaymentHistory, getInvoicePdfUrl } from '../api/client'
 import ClinicalHistoryWizard from '../components/ClinicalHistoryWizard'
 import DocumentUpload from '../components/DocumentUpload'
 import DocumentsList from '../components/DocumentsList'
 import DocumentPreview from '../components/DocumentPreview'
-import SessionUpload from '../components/SessionUpload'
+// Audio session recording/upload is disabled for now in favor of transcript
+// upload (see TranscriptUpload.jsx) — kept here, unused, in case it's revisited.
+// import SessionUpload from '../components/SessionUpload'
+import TranscriptUpload from '../components/TranscriptUpload'
 import SessionsList from '../components/SessionsList'
 import SessionDetail from '../components/SessionDetail'
 import ClinicalIntelligenceTab from '../components/ClinicalIntelligenceTab'
@@ -25,7 +28,6 @@ import {
   NoDocuments,
   NoSessionRecordings,
   PageLoader,
-  Alert,
   Button,
   IconButton,
   SectionDropdown,
@@ -49,8 +51,27 @@ export default function PatientProfile() {
   const [patient, setPatient] = useState(null)
   const [clinicalHistorySummary, setClinicalHistorySummary] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('overview')
   const [error, setError] = useState('')
+
+  // Active tab lives in the URL (?tab=...) rather than plain component state so
+  // a refresh (or a shared/back-button link) lands back on the module the
+  // practitioner was actually viewing instead of always resetting to Overview.
+  // `replace: true` keeps tab switches out of browser history so Back still
+  // goes to the patient list, not through every tab visited.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const activeTab = TABS.some(tab => tab.value === tabParam) ? tabParam : 'overview'
+  const setActiveTab = (tab) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      if (tab === 'overview') {
+        next.delete('tab')
+      } else {
+        next.set('tab', tab)
+      }
+      return next
+    }, { replace: true })
+  }
 
   const loadData = async () => {
     try {
@@ -283,22 +304,7 @@ function formatDate(dateStr) {
 function SessionIntelligenceTab({ patientId }) {
   const [showUpload, setShowUpload] = useState(false)
   const [selectedSession, setSelectedSession] = useState(null)
-  const [voiceProfileStatus, setVoiceProfileStatus] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    loadVoiceProfileStatus()
-  }, [])
-
-  const loadVoiceProfileStatus = async () => {
-    try {
-      const status = await getVoiceProfileStatus()
-      setVoiceProfileStatus(status)
-    } catch (err) {
-      console.error('Failed to load voice profile status:', err)
-    }
-  }
 
   const handleUploadComplete = () => {
     setShowUpload(false)
@@ -314,8 +320,6 @@ function SessionIntelligenceTab({ patientId }) {
     setRefreshKey(k => k + 1)
   }
 
-  const needsVoiceProfile = voiceProfileStatus && !voiceProfileStatus.has_voice_profile
-
   if (selectedSession) {
     return (
       <SessionDetail
@@ -329,41 +333,21 @@ function SessionIntelligenceTab({ patientId }) {
 
   return (
     <div className="space-y-6 pt-2">
-      {/* Voice Profile Warning */}
-      {needsVoiceProfile && (
-        <Alert variant="warning">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <Mic className="h-5 w-5" />
-              <div>
-                <p className="font-medium">Voice Profile Not Set Up</p>
-                <p className="text-sm opacity-90">
-                  Set up your voice profile in Settings to enable automatic speaker identification.
-                </p>
-              </div>
-            </div>
-            <Button variant="secondary" onClick={() => navigate('/settings')}>
-              Go to Settings
-            </Button>
-          </div>
-        </Alert>
-      )}
-
       {/* Section Header - Outside Card */}
       <div className="flex items-center justify-between gap-8">
         <h2 className="text-section-title text-content-primary">Session Intelligence</h2>
-        <button 
+        <button
           onClick={() => setShowUpload(true)}
           className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
-          Upload Session
+          Upload Transcript
         </button>
       </div>
 
       {/* Upload Panel */}
       {showUpload && (
-        <SessionUpload
+        <TranscriptUpload
           patientId={patientId}
           onUploadComplete={handleUploadComplete}
           onClose={() => setShowUpload(false)}
@@ -702,9 +686,12 @@ function PatientPaymentsTab({ patientId }) {
                     <div className="w-16 text-right">
                       {payment.status === 'paid' ? (
                         payment.receipt_number ? (
-                          <span className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer">
-                            Receipt →
-                          </span>
+                          <a
+                            href={getInvoicePdfUrl(payment.id)}
+                            className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer"
+                          >
+                            Invoice →
+                          </a>
                         ) : (
                           <span className="text-content-muted">—</span>
                         )
