@@ -22,6 +22,7 @@ import {
 
 import * as api from '../api/client'
 import { SettingsSection, ToggleControl, FormField, IntegrationCard, ApiCredentialForm, SaveBar } from '../components/settings'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import AvailabilitySettings from '../components/AvailabilitySettings'
 import VoiceProfile from '../components/VoiceProfile'
 
@@ -1726,6 +1727,9 @@ function PublicProfileSection() {
 function PractitionerSecuritySection() {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     loadSessions()
@@ -1759,6 +1763,23 @@ function PractitionerSecuritySection() {
       loadSessions()
     } catch (err) {
       console.error('Failed to logout sessions:', err)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await api.deleteMyAccount()
+      localStorage.removeItem('mmpi_token')
+      localStorage.removeItem('mmpi_role')
+      localStorage.removeItem('mmpi_prac_name')
+      localStorage.removeItem('mmpi_must_change_password')
+      localStorage.removeItem('mmpi_profile_setup_complete')
+      window.location.href = '/login?account_deleted=true'
+    } catch (err) {
+      setDeleteError(err.userMessage || err.response?.data?.detail || 'Failed to delete account')
+      setDeleting(false)
     }
   }
 
@@ -1827,6 +1848,42 @@ function PractitionerSecuritySection() {
           )}
         </div>
       </SettingsSection>
+
+      <SettingsSection
+        title="Delete Account"
+        description="Permanently give up access to your account"
+      >
+        {deleteError && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+            {deleteError}
+          </div>
+        )}
+        <p className="text-sm text-gray-600">
+          You'll be logged out immediately and this account can't be used to sign in again.
+          Your patients and session records aren't deleted — they stay part of the practice and
+          remain accessible to your practice administrator. If you'd like to come back, you can
+          sign up again later with this same email. This can't be undone.
+        </p>
+        <div className="pt-4">
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="text-sm font-medium text-red-600 hover:text-red-700"
+          >
+            Delete my account
+          </button>
+        </div>
+      </SettingsSection>
+
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        onClose={() => !deleting && setShowDeleteConfirm(false)}
+        onConfirm={handleDeleteAccount}
+        title="Delete your account?"
+        message="You'll be logged out immediately and this account can't be used to sign in again. Your patients and session records stay with the practice, and you can sign up again later with this same email if you come back. This can't be undone."
+        confirmLabel="Delete account"
+        variant="danger"
+        isLoading={deleting}
+      />
     </div>
   )
 }

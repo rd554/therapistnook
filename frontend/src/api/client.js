@@ -1389,6 +1389,11 @@ export async function logoutAllSessions() {
   return res.data
 }
 
+export async function deleteMyAccount() {
+  const res = await api.delete('/settings/account')
+  return res.data
+}
+
 // ─── Data Management (Admin Only) ──────────────────────────────────────────────
 
 export async function exportData(exportType, format = 'csv', includeArchived = false) {

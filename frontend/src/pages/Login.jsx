@@ -167,6 +167,14 @@ export default function Login({ onLogin, onLogout }) {
             </div>
           )}
 
+          {searchParams.get('account_deleted') === 'true' && (
+            <div className="mb-6">
+              <Alert variant="success">
+                Your account has been deleted and you've been logged out.
+              </Alert>
+            </div>
+          )}
+
           {mode === 'signup' && signupDone ? (
             <div className="space-y-4 text-center">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary-100">

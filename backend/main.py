@@ -11259,6 +11259,44 @@ async def logout_all_other_sessions(
     return {"success": True, "message": f"Logged out {count} other sessions"}
 
 
+@app.delete("/api/settings/account")
+async def delete_my_account(
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Self-service account deletion. Always deactivates rather than hard-deleting:
+    practitioners.id is referenced by patients, sessions, appointments, payments,
+    notification prefs and more, none of it cascade-configured, so a real DELETE
+    would throw an IntegrityError in Postgres the moment any of that exists (SQLite
+    won't catch this in dev — it doesn't enforce foreign keys by default). Patient
+    and clinical records are practice data, not personal data, and need to stay
+    accessible to the practice owner even after the practitioner who created them
+    is gone.
+
+    The account's email is also freed up (rewritten to an unreachable placeholder)
+    so the address isn't locked out of ever signing up again — otherwise it would
+    keep failing /api/auth/signup's uniqueness check forever."""
+    if prac.role == "owner":
+        raise HTTPException(403, "Owner accounts can't be deleted from here. Contact support.")
+
+    # Log the real email before it's overwritten below.
+    await settings_service.create_audit_log(
+        db=db,
+        action="delete_account",
+        description="Practitioner deleted their own account",
+        practitioner=prac,
+    )
+
+    prac.is_active = False
+    prac.password_hash = hash_password(generate_verification_token())
+    prac.email = f"deleted-{prac.id}@deleted.therapistnook.local"
+    prac.email_verification_token = None
+
+    await db.commit()
+
+    return {"success": True, "message": "Your account has been deleted and you've been logged out."}
+
+
 # ─── Data Management (Admin Only) ──────────────────────────────────────────────
 
 @app.post("/api/settings/data/export", response_model=DataExportResponse)
