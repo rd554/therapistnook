@@ -377,7 +377,7 @@ export default function Landing() {
             <Link to="/privacy" className="transition hover:text-content-secondary">Privacy Policy</Link>
             <Link to="/terms" className="transition hover:text-content-secondary">Terms of Service</Link>
           </div>
-          <span>© Therapistnook. All rights reserved.</span>
+          <span>Made with care ❤️. All rights reserved.</span>
         </div>
       </footer>
     </div>
