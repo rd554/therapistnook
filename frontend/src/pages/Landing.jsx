@@ -104,7 +104,7 @@ export default function Landing() {
           <div className="text-center lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-badge bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-700">
               <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} />
-              Built for licensed practitioners
+              Built for licensed psychologists
             </span>
             <h1 className="mx-auto mt-6 max-w-xl text-page-title text-content-primary sm:text-5xl lg:mx-0">
               Manage your practice and score clinical assessments in one place
