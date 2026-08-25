@@ -99,7 +99,7 @@ export default function Landing() {
           <div className="absolute top-16 -right-20 h-80 w-80 rounded-full bg-lavender-200/50 blur-3xl" />
         </div>
 
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-20 pt-16 sm:pt-24 lg:grid-cols-2 lg:gap-10">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-20 pt-6 sm:pt-10 lg:grid-cols-2 lg:gap-10">
           {/* Copy */}
           <div className="text-center lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-badge bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-700">
