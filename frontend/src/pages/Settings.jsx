@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 
 import * as api from '../api/client'
-import { SettingsSection, ToggleControl, FormField, IntegrationCard, SaveBar } from '../components/settings'
+import { SettingsSection, ToggleControl, FormField, IntegrationCard, ApiCredentialForm, SaveBar } from '../components/settings'
 import AvailabilitySettings from '../components/AvailabilitySettings'
 import VoiceProfile from '../components/VoiceProfile'
 
@@ -996,27 +996,242 @@ function EmailConfigSection() {
 
 
 function WhatsAppConfigSection() {
-  return (
-    <SettingsSection
-      title="WhatsApp Configuration"
-      description="Configure WhatsApp Business API for notifications"
-    >
-      <div className="space-y-6">
-        <IntegrationCard
-          name="WhatsApp Business API"
-          description="Send appointment reminders and notifications via WhatsApp"
-          icon={MessageCircle}
-          connected={false}
-          onConnect={() => {/* Implement */}}
-        />
+  const [config, setConfig] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const [hasChanges, setHasChanges] = useState(false)
+  const [credentials, setCredentials] = useState({})
+  const [testPhone, setTestPhone] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [testStatus, setTestStatus] = useState(null)
+  const [testError, setTestError] = useState('')
 
-        <div className="rounded-lg bg-gray-50 p-4">
-          <p className="text-sm text-gray-600">
-            WhatsApp Business API requires approval from Meta. Once approved, you can configure your business account credentials here to send notifications to patients.
-          </p>
-        </div>
-      </div>
-    </SettingsSection>
+  useEffect(() => {
+    loadConfig()
+  }, [])
+
+  const loadConfig = async () => {
+    try {
+      const data = await api.getWhatsAppConfig()
+      setConfig(data)
+      setTestStatus(data.last_test_status || null)
+      setTestError(data.last_test_error || '')
+    } catch (err) {
+      setError('Failed to load configuration')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleToggle = (checked) => {
+    setConfig((prev) => ({ ...prev, is_enabled: checked }))
+    setHasChanges(true)
+    setSaved(false)
+  }
+
+  const handleCredentialChange = (field, value) => {
+    setCredentials((prev) => ({ ...prev, [field]: value }))
+    setHasChanges(true)
+    setSaved(false)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      const data = await api.updateWhatsAppConfig({
+        is_enabled: config.is_enabled,
+        phone_number_id: credentials.phone_number_id ?? config.phone_number_id,
+        business_account_id: credentials.business_account_id ?? config.business_account_id,
+        // Omitted entirely (not even as "") unless the practitioner actually typed
+        // a new one — the backend also guards against an empty string clobbering
+        // a saved token, but keeping it out of the payload avoids relying on that.
+        ...(credentials.access_token ? { access_token: credentials.access_token } : {}),
+      })
+      setConfig(data)
+      setCredentials({})
+      setHasChanges(false)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (err) {
+      setError('Failed to save configuration')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTest = async () => {
+    if (!testPhone) {
+      alert('Please enter a phone number to send the test message to')
+      return
+    }
+    setTesting(true)
+    try {
+      // The test endpoint reads the saved configuration from the database,
+      // so unsaved edits (e.g. a freshly typed access token) must be persisted
+      // first. Built inline rather than via handleSave() since that helper
+      // swallows its own errors (sets `error` state) instead of rejecting,
+      // so a caught failure here would never actually be reachable.
+      if (hasChanges) {
+        try {
+          const saved = await api.updateWhatsAppConfig({
+            is_enabled: config.is_enabled,
+            phone_number_id: credentials.phone_number_id ?? config.phone_number_id,
+            business_account_id: credentials.business_account_id ?? config.business_account_id,
+            ...(credentials.access_token ? { access_token: credentials.access_token } : {}),
+          })
+          setConfig(saved)
+          setCredentials({})
+          setHasChanges(false)
+        } catch (err) {
+          alert('Failed to save configuration before testing')
+          return
+        }
+      }
+      const result = await api.testWhatsAppConfig(testPhone)
+      setTestStatus(result.success ? 'success' : 'failed')
+      setTestError(result.error || '')
+      if (result.success) {
+        alert('Test WhatsApp message sent! It uses Meta\'s built-in "hello_world" template, so it may take a few seconds to arrive.')
+      } else {
+        alert(`Failed: ${result.error || result.message}`)
+      }
+    } catch (err) {
+      setTestStatus('failed')
+      setTestError('Request failed')
+      alert('Test failed')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const credentialFields = [
+    {
+      id: 'phone_number_id',
+      label: 'Phone Number ID',
+      description: 'From your WhatsApp Business Platform app, under WhatsApp > API Setup',
+      placeholder: '109876543212345',
+      hasValue: !!config?.phone_number_id,
+    },
+    {
+      id: 'business_account_id',
+      label: 'WhatsApp Business Account ID',
+      description: 'Optional — used for template management',
+      placeholder: '108765432198765',
+      hasValue: !!config?.business_account_id,
+    },
+    {
+      id: 'access_token',
+      label: 'Access Token',
+      description: 'Temporary tokens expire in 24h — generate a permanent one via a System User for production use',
+      secret: true,
+      required: true,
+      hasValue: !!config?.has_access_token,
+    },
+  ]
+
+  const credentialValues = {
+    phone_number_id: credentials.phone_number_id ?? config?.phone_number_id ?? '',
+    business_account_id: credentials.business_account_id ?? config?.business_account_id ?? '',
+    access_token: credentials.access_token ?? '',
+  }
+
+  return (
+    <>
+      <SettingsSection
+        title="WhatsApp Configuration"
+        description="Configure WhatsApp Business API for notifications"
+        loading={loading}
+      >
+        {config && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between rounded-lg bg-gray-50 p-4">
+              <div>
+                <h3 className="font-medium text-gray-900">Enable WhatsApp Notifications</h3>
+                <p className="text-sm text-gray-500">Send appointment and payment notifications via WhatsApp</p>
+              </div>
+              <ToggleControl
+                checked={config.is_enabled || false}
+                onChange={handleToggle}
+              />
+            </div>
+
+            <div className="border-t pt-6">
+              <h3 className="mb-1 font-medium text-gray-900">Meta Cloud API Credentials</h3>
+              <p className="mb-4 text-sm text-gray-500">
+                Create a WhatsApp Business Platform app at{' '}
+                <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-primary-600 underline">
+                  developers.facebook.com
+                </a>{' '}
+                to get these. No Meta approval is needed to test — the app's built-in test number can send
+                to a handful of pre-registered recipients immediately. Approval is only required before
+                sending to arbitrary patient numbers in production.
+              </p>
+              <ApiCredentialForm
+                fields={credentialFields}
+                values={credentialValues}
+                onChange={handleCredentialChange}
+                showTestButton={false}
+              />
+            </div>
+
+            <div className="border-t pt-6">
+              <h3 className="mb-4 font-medium text-gray-900">Test WhatsApp Message</h3>
+              <div className="flex gap-4">
+                <input
+                  type="tel"
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  placeholder="+14155551234"
+                  className="input-field max-w-xs"
+                />
+                <button
+                  onClick={handleTest}
+                  disabled={testing}
+                  className="btn-secondary"
+                >
+                  {testing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    'Send Test'
+                  )}
+                </button>
+                {testStatus === 'success' && (
+                  <span className="flex items-center gap-1.5 text-sm text-green-600">
+                    <Check className="h-4 w-4" />
+                    Last test succeeded
+                  </span>
+                )}
+                {testStatus === 'failed' && (
+                  <span className="flex items-center gap-1.5 text-sm text-red-600">
+                    <AlertCircle className="h-4 w-4" />
+                    {testError || 'Last test failed'}
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Sends Meta's pre-approved "hello_world" template — recipients must be added as test numbers in your
+                Meta app unless you've completed Business Verification.
+              </p>
+            </div>
+          </div>
+        )}
+      </SettingsSection>
+
+      <SaveBar
+        show={hasChanges}
+        saving={saving}
+        saved={saved}
+        error={error}
+        onSave={handleSave}
+        onCancel={() => { setCredentials({}); loadConfig().then(() => setHasChanges(false)) }}
+      />
+    </>
   )
 }
 

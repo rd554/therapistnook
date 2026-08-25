@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Search, Filter, FileText, Image, File, Download, Eye, Edit2, Trash2,
   MoreVertical, Clock, User, Tag, ChevronDown, X, Loader2, ClipboardList,
@@ -69,6 +70,25 @@ export default function DocumentsList({ patientId, onPreview, onViewAssessment }
   const [editingItem, setEditingItem] = useState(null)
   const [editForm, setEditForm] = useState({ display_name: '', notes: '' })
   const [menuOpen, setMenuOpen] = useState(null)
+  // Screen coordinates for the currently-open row menu, captured from the
+  // trigger button at click time. The menu itself is portaled to <body> and
+  // positioned with `fixed` so it can never be clipped by the table's
+  // rounded-corner wrapper (or any other ancestor's overflow) - it isn't a
+  // DOM descendant of that wrapper anymore.
+  const [menuPos, setMenuPos] = useState(null)
+
+  // A background scroll/resize would leave a portaled menu pointing at the
+  // wrong spot on screen, so just close it rather than track the button.
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = () => { setMenuOpen(null); setMenuPos(null) }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [menuOpen])
 
   const load = async () => {
     try {
@@ -304,48 +324,20 @@ export default function DocumentsList({ patientId, onPreview, onViewAssessment }
                     <td className="px-4 py-3">
                       <div className="relative">
                         <button
-                          onClick={() => setMenuOpen(menuOpen === item.id ? null : item.id)}
+                          onClick={(e) => {
+                            if (menuOpen === item.id) {
+                              setMenuOpen(null)
+                              setMenuPos(null)
+                            } else {
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+                              setMenuOpen(item.id)
+                            }
+                          }}
                           className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
                         >
                           <MoreVertical className="h-4 w-4" />
                         </button>
-                        
-                        {menuOpen === item.id && (
-                          <div className="absolute right-0 top-full z-10 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-                            <button
-                              onClick={() => handleView(item)}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                              <Eye className="h-4 w-4" />
-                              View
-                            </button>
-                            {item.type === 'document' && (
-                              <>
-                                <button
-                                  onClick={() => handleDownload(item)}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                                >
-                                  <Download className="h-4 w-4" />
-                                  Download
-                                </button>
-                                <button
-                                  onClick={() => openEdit(item)}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                                >
-                                  <Edit2 className="h-4 w-4" />
-                                  Edit
-                                </button>
-                              </>
-                            )}
-                            <button
-                              onClick={() => handleDelete(item)}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Delete
-                            </button>
-                          </div>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -400,9 +392,60 @@ export default function DocumentsList({ patientId, onPreview, onViewAssessment }
       {/* Click outside to close menu */}
       {menuOpen && (
         <div
-          className="fixed inset-0 z-0"
-          onClick={() => setMenuOpen(null)}
+          className="fixed inset-0 z-40"
+          onClick={() => { setMenuOpen(null); setMenuPos(null) }}
         />
+      )}
+
+      {/* Row action menu - portaled to <body> and positioned `fixed` from the
+          trigger button's own coordinates so it renders on top of the page
+          instead of being clipped by the table wrapper's rounded corners. */}
+      {menuOpen && menuPos && createPortal(
+        (() => {
+          const item = items.find(i => i.id === menuOpen)
+          if (!item) return null
+          return (
+            <div
+              className="fixed z-50 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+              style={{ top: menuPos.top, right: menuPos.right }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => handleView(item)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <Eye className="h-4 w-4" />
+                View
+              </button>
+              {item.type === 'document' && (
+                <>
+                  <button
+                    onClick={() => handleDownload(item)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </button>
+                  <button
+                    onClick={() => openEdit(item)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                    Edit
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => handleDelete(item)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </div>
+          )
+        })(),
+        document.body
       )}
     </div>
   )

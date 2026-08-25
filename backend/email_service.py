@@ -114,3 +114,51 @@ def send_practitioner_welcome(
     """
 
     return _send(to_email, f"Your MMPI-2 Practitioner Account — {OWNER_NAME}", html)
+
+
+def send_verification_email(to_email: str, name: str, token: str):
+    """Sent on self-signup (email/password). Login is blocked until this link
+    is clicked — see /api/auth/verify-email in main.py."""
+    verify_link = f"{SITE_URL}/verify-email?token={token}"
+
+    html = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; color: #1f2937;">
+      <div style="text-align: center; margin-bottom: 32px;">
+        <div style="display: inline-block; background: #eff6ff; border-radius: 16px; padding: 16px;">
+          <span style="font-size: 28px;">✉️</span>
+        </div>
+        <h1 style="font-size: 24px; color: #111827; margin: 16px 0 4px;">Verify your email</h1>
+        <p style="color: #6b7280; font-size: 14px; margin: 0;">One more step to activate your Therapistnook account</p>
+      </div>
+
+      <p style="font-size: 15px; line-height: 1.7;">
+        Hi <strong>{name}</strong>,
+      </p>
+      <p style="font-size: 15px; line-height: 1.7;">
+        Thanks for signing up for Therapistnook. Please confirm this is your email address
+        so you can sign in to your practitioner account.
+      </p>
+
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="{verify_link}" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-size: 15px; font-weight: 600;">
+          Verify Email Address →
+        </a>
+      </div>
+
+      <p style="font-size: 13px; color: #6b7280; line-height: 1.6;">
+        Or paste this link into your browser:<br>
+        <a href="{verify_link}" style="color: #2563eb; word-break: break-all;">{verify_link}</a>
+      </p>
+
+      <p style="font-size: 13px; color: #9ca3af; margin-top: 24px;">
+        This link expires in 24 hours. If you didn't create this account, you can ignore this email.
+      </p>
+
+      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
+      <p style="font-size: 12px; color: #9ca3af; text-align: center;">
+        This email was sent from the MMPI-2 Assessment Platform managed by {OWNER_NAME}.
+      </p>
+    </div>
+    """
+
+    return _send(to_email, "Verify your email — Therapistnook", html)

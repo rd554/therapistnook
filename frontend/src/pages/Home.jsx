@@ -39,12 +39,14 @@ export default function Home() {
 
         setTodaySchedule(todayData)
 
-        // Recent patients = past/today appointments excluding cancelled, newest first
+        // Recent patients = sessions that have already happened (strictly
+        // before today), excluding cancelled. Today's appointments belong to
+        // Today's Schedule, not here — they haven't happened yet.
         const recent = (Array.isArray(appts) ? appts : [])
           .filter((a) => a.status !== 'cancelled')
           .filter((a) => {
             const day = typeof a.date === 'string' ? a.date.slice(0, 10) : toISODate(new Date(a.date))
-            return day <= end
+            return day < end
           })
           .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
           .slice(0, 12)

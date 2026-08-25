@@ -24,7 +24,11 @@ import {
   createAssessment,
   updateAssessment,
   getPdfUrl,
+  getFeatureFlags,
 } from '../api/client'
+
+const LINK_GENERATION_DISABLED_MESSAGE =
+  'MMPI-2 assessment links are temporarily unavailable while we finish setting up payments. Please check back soon.'
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -163,6 +167,16 @@ export default function Assessments() {
   const [generatedLink, setGeneratedLink] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
   const [actionLoading, setActionLoading] = useState(null)
+  const [linkGenerationEnabled, setLinkGenerationEnabled] = useState(false)
+
+  useEffect(() => {
+    // Owner keeps a working link even while generation is disabled
+    // platform-wide for everyone else — enforced backend-side too.
+    const isOwner = localStorage.getItem('mmpi_role') === 'owner'
+    getFeatureFlags()
+      .then((flags) => setLinkGenerationEnabled(flags.mmpi_link_generation_enabled || isOwner))
+      .catch(() => setLinkGenerationEnabled(isOwner))
+  }, [])
 
   const loadData = async () => {
     try {
@@ -256,6 +270,8 @@ export default function Assessments() {
         <button
           type="button"
           className="assessments-cta"
+          disabled={!linkGenerationEnabled}
+          title={linkGenerationEnabled ? undefined : LINK_GENERATION_DISABLED_MESSAGE}
           onClick={() => {
             setGeneratedLink(null)
             setShowGenerate(true)
@@ -265,6 +281,10 @@ export default function Assessments() {
           Generate Assessment
         </button>
       </div>
+
+      {!linkGenerationEnabled && (
+        <div className="assessments-banner">{LINK_GENERATION_DISABLED_MESSAGE}</div>
+      )}
 
       {/* Search + Filters */}
       <div className="assessments-toolbar">
@@ -305,6 +325,8 @@ export default function Assessments() {
           <button
             type="button"
             className="assessments-cta"
+            disabled={!linkGenerationEnabled}
+            title={linkGenerationEnabled ? undefined : LINK_GENERATION_DISABLED_MESSAGE}
             onClick={() => {
               setGeneratedLink(null)
               setShowGenerate(true)
@@ -377,8 +399,8 @@ export default function Assessments() {
                       type="button"
                       className="assessments-action"
                       onClick={() => copyText(assessmentLink, item.id)}
-                      title="Copy Link"
-                      disabled={!assessmentLink}
+                      title={linkGenerationEnabled ? 'Copy Link' : LINK_GENERATION_DISABLED_MESSAGE}
+                      disabled={!assessmentLink || !linkGenerationEnabled}
                     >
                       {copiedId === item.id ? (
                         <Check size={18} strokeWidth={1.75} />
@@ -391,8 +413,8 @@ export default function Assessments() {
                       type="button"
                       className="assessments-action-icon"
                       onClick={() => copyText(assessmentLink, `resend-${item.id}`)}
-                      title="Resend / Copy Link"
-                      disabled={!assessmentLink}
+                      title={linkGenerationEnabled ? 'Resend / Copy Link' : LINK_GENERATION_DISABLED_MESSAGE}
+                      disabled={!assessmentLink || !linkGenerationEnabled}
                     >
                       <RefreshCw size={18} strokeWidth={1.75} />
                     </button>
@@ -422,7 +444,8 @@ export default function Assessments() {
                       setGeneratedLink(null)
                       setShowGenerate(true)
                     }}
-                    title="Generate New Link"
+                    title={linkGenerationEnabled ? 'Generate New Link' : LINK_GENERATION_DISABLED_MESSAGE}
+                    disabled={!linkGenerationEnabled}
                   >
                     <RefreshCw size={18} strokeWidth={1.75} />
                     <span>Generate New Link</span>
@@ -440,6 +463,7 @@ export default function Assessments() {
           patients={patients}
           assessmentLink={assessmentLink}
           generatedLink={generatedLink}
+          linkGenerationEnabled={linkGenerationEnabled}
           onGenerated={(linkData) => {
             setGeneratedLink(linkData)
             loadData()
@@ -458,6 +482,7 @@ function GenerateAssessmentModal({
   patients,
   assessmentLink,
   generatedLink,
+  linkGenerationEnabled,
   onGenerated,
   onClose,
 }) {
@@ -473,6 +498,10 @@ function GenerateAssessmentModal({
 
   const handleGenerate = async (e) => {
     e.preventDefault()
+    if (!linkGenerationEnabled) {
+      setError(LINK_GENERATION_DISABLED_MESSAGE)
+      return
+    }
     if (!patientId) {
       setError('Please select a patient')
       return
@@ -598,7 +627,12 @@ function GenerateAssessmentModal({
 
             {error && <p className="assessments-modal__error">{error}</p>}
 
-            <button type="submit" className="assessments-cta assessments-cta--full" disabled={submitting}>
+            <button
+              type="submit"
+              className="assessments-cta assessments-cta--full"
+              disabled={submitting || !linkGenerationEnabled}
+              title={linkGenerationEnabled ? undefined : LINK_GENERATION_DISABLED_MESSAGE}
+            >
               {submitting ? (
                 <Loader2 size={18} strokeWidth={1.75} className="animate-spin" />
               ) : (

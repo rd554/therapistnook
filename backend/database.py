@@ -115,6 +115,23 @@ async def _run_sqlite_migrations(conn):
         await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "signature_image_path", "signature_image_path VARCHAR")
         await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "stamp_image_path", "stamp_image_path VARCHAR")
         await _add_column_if_missing_sqlite(conn, "appointments", "google_event_id", "google_event_id VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_at", "last_test_at DATETIME")
+        await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_status", "last_test_status VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_error", "last_test_error VARCHAR")
+
+        if 'email_verified' not in columns:
+            await conn.execute(text(
+                "ALTER TABLE practitioners ADD COLUMN email_verified BOOLEAN DEFAULT 0"
+            ))
+            # Existing accounts (admin-created, or predating this feature) never went
+            # through email verification — don't lock them out of login.
+            await conn.execute(text(
+                "UPDATE practitioners SET email_verified = 1"
+            ))
+
+        await _add_column_if_missing_sqlite(conn, "practitioners", "email_verification_token", "email_verification_token VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "practitioners", "email_verification_sent_at", "email_verification_sent_at DATETIME")
+        await _add_column_if_missing_sqlite(conn, "practitioners", "signup_source", "signup_source VARCHAR")
     except Exception:
         pass
 
@@ -183,6 +200,28 @@ async def _run_postgres_migrations(conn):
         await _add_column_if_missing_postgres(conn, "practitioner_profiles", "signature_image_path", "signature_image_path VARCHAR")
         await _add_column_if_missing_postgres(conn, "practitioner_profiles", "stamp_image_path", "stamp_image_path VARCHAR")
         await _add_column_if_missing_postgres(conn, "appointments", "google_event_id", "google_event_id VARCHAR")
+        await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_at", "last_test_at TIMESTAMP WITH TIME ZONE")
+        await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_status", "last_test_status VARCHAR")
+        await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_error", "last_test_error VARCHAR")
+
+        # Check if email_verified column exists
+        result = await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'practitioners' AND column_name = 'email_verified'
+        """))
+        if not result.fetchone():
+            await conn.execute(text(
+                "ALTER TABLE practitioners ADD COLUMN email_verified BOOLEAN DEFAULT FALSE"
+            ))
+            # Existing accounts (admin-created, or predating this feature) never went
+            # through email verification — don't lock them out of login.
+            await conn.execute(text(
+                "UPDATE practitioners SET email_verified = TRUE"
+            ))
+
+        await _add_column_if_missing_postgres(conn, "practitioners", "email_verification_token", "email_verification_token VARCHAR")
+        await _add_column_if_missing_postgres(conn, "practitioners", "email_verification_sent_at", "email_verification_sent_at TIMESTAMP WITH TIME ZONE")
+        await _add_column_if_missing_postgres(conn, "practitioners", "signup_source", "signup_source VARCHAR")
     except Exception as e:
         print(f"Migration warning: {e}")
         pass

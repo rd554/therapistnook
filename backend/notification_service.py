@@ -30,7 +30,9 @@ SITE_URL = os.getenv("SITE_URL", "http://localhost:5173")
 OWNER_NAME = os.getenv("OWNER_NAME", "MMPI-2 Assessment Platform")
 
 # WhatsApp Business API
-WHATSAPP_API_URL = "https://graph.facebook.com/v18.0"
+# Graph API versions are retired ~2 years after release (v18.0 went dark Jan 2026) —
+# bump this periodically; see https://developers.facebook.com/docs/graph-api/changelog
+WHATSAPP_API_URL = "https://graph.facebook.com/v23.0"
 
 
 class NotificationResult:
@@ -133,14 +135,27 @@ class WhatsAppChannel(NotificationChannel):
         return bool(self.phone_number_id and self.access_token)
     
     def _format_phone_number(self, phone: str) -> str:
-        """Format phone number for WhatsApp API (remove +, spaces, etc.)."""
+        """Format phone number for WhatsApp API (remove +, spaces, etc.).
+
+        A leading '0' is always a local trunk prefix, never part of a country
+        code, so that normalization runs first regardless of length (e.g.
+        Indian numbers are sometimes typed as "0" + 10 digits = 11 digits,
+        which would otherwise be mistaken for an already-has-country-code
+        number by the length check below). Once there's no leading zero,
+        numbers that already carry a country code (leading '+', or more than
+        10 digits once cleaned) are trusted as-is — the India-only 91-prefix
+        heuristic only applies to bare 10-digit local numbers, so this
+        doesn't mangle e.g. US test numbers (+1...).
+        """
         cleaned = re.sub(r'[^\d]', '', phone)
-        if cleaned.startswith('0'):
-            cleaned = '91' + cleaned[1:]
-        elif not cleaned.startswith('91') and len(cleaned) == 10:
+        if not phone.strip().startswith('+') and cleaned.startswith('0'):
+            return '91' + cleaned[1:]
+        if phone.strip().startswith('+') or len(cleaned) > 10:
+            return cleaned
+        if len(cleaned) == 10:
             cleaned = '91' + cleaned
         return cleaned
-    
+
     async def send(
         self,
         recipient: str,
@@ -148,6 +163,7 @@ class WhatsAppChannel(NotificationChannel):
         body: str,
         template_id: Optional[str] = None,
         template_params: Optional[dict] = None,
+        language_code: str = "en_US",
     ) -> NotificationResult:
         if not self.is_configured():
             log.warning("WhatsApp not configured — skipping message to %s", recipient)
@@ -164,7 +180,7 @@ class WhatsAppChannel(NotificationChannel):
                         "type": "template",
                         "template": {
                             "name": template_id,
-                            "language": {"code": "en"},
+                            "language": {"code": language_code},
                         }
                     }
                     
@@ -766,19 +782,24 @@ class NotificationService:
     
     def __init__(self):
         self._email_channel = EmailChannel()
-        self._whatsapp_configs: dict[str, WhatsAppChannel] = {}
     
     def get_whatsapp_channel(
         self,
         phone_number_id: Optional[str] = None,
         access_token: Optional[str] = None,
     ) -> WhatsAppChannel:
-        """Get or create a WhatsApp channel with specific config."""
+        """Build a WhatsApp channel for the given config.
+
+        No caching here: access tokens (especially the 24h temporary ones from
+        Meta's quickstart) rotate, and a module-level NotificationService
+        singleton previously cached channels keyed only on phone_number_id —
+        so a freshly saved token would keep hitting Meta with the stale one
+        until the process restarted. WhatsAppChannel construction is cheap
+        (two strings) and send() opens its own httpx client per call, so
+        there's nothing worth caching.
+        """
         if phone_number_id:
-            key = phone_number_id
-            if key not in self._whatsapp_configs:
-                self._whatsapp_configs[key] = WhatsAppChannel(phone_number_id, access_token)
-            return self._whatsapp_configs[key]
+            return WhatsAppChannel(phone_number_id, access_token)
         return WhatsAppChannel()
     
     def get_email_template(self, event_type: str) -> Optional[dict]:
@@ -816,10 +837,11 @@ class NotificationService:
         access_token: Optional[str] = None,
         whatsapp_template_id: Optional[str] = None,
         template_params: Optional[dict] = None,
+        language_code: str = "en_US",
     ) -> NotificationResult:
         """Send a WhatsApp notification."""
         channel = self.get_whatsapp_channel(phone_number_id, access_token)
-        
+
         if whatsapp_template_id:
             return await channel.send(
                 recipient_phone,
@@ -827,6 +849,7 @@ class NotificationService:
                 "",
                 template_id=whatsapp_template_id,
                 template_params=template_params,
+                language_code=language_code,
             )
         
         message_template = self.get_whatsapp_template(event_type)

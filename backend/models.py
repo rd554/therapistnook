@@ -25,6 +25,15 @@ class Practitioner(Base):
     # Future avatar picker — preset illustration id or uploaded URL (no UI yet)
     avatar_id = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
+    # Self-signup email verification. Accounts created by an admin (legacy) or
+    # via Google sign-in (Google already verified the address) are verified
+    # immediately; plain email/password self-signup starts unverified and is
+    # blocked from logging in until the link in send_verification_email is
+    # clicked. See database.py migrations for the backfill of existing rows.
+    email_verified = Column(Boolean, default=False)
+    email_verification_token = Column(String, nullable=True, index=True)
+    email_verification_sent_at = Column(DateTime(timezone=True), nullable=True)
+    signup_source = Column(String, nullable=True)  # "self", "google", "admin"
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -1540,11 +1549,16 @@ class WhatsAppConfig(Base):
     # Webhook verification
     verify_token = Column(String, nullable=True)
     webhook_secret = Column(String, nullable=True)
-    
+
+    # Test status
+    last_test_at = Column(DateTime(timezone=True), nullable=True)
+    last_test_status = Column(String, nullable=True)  # success, failed
+    last_test_error = Column(String, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+
     # Relationships
     practitioner = relationship("Practitioner", backref="whatsapp_config")
 

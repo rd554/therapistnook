@@ -128,6 +128,8 @@ async def seed(questions: dict[int, str]):
                 role="owner",
                 ref_code=ref,
                 must_change_password=False,
+                email_verified=True,
+                signup_source="admin",
             )
             session.add(owner)
             await session.commit()

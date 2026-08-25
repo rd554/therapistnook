@@ -11,6 +11,9 @@ import Header from './components/Header'
 // Auth Pages (eager load)
 import Login from './pages/Login'
 import ChangePassword from './pages/ChangePassword'
+import Landing from './pages/Landing'
+import VerifyEmail from './pages/VerifyEmail'
+import GoogleLoginCallback from './pages/GoogleLoginCallback'
 
 // Patient Test Pages (eager load - public routes)
 import PatientEntry from './pages/PatientEntry'
@@ -36,6 +39,10 @@ const GoogleOAuthCallback = lazy(() => import('./pages/GoogleOAuthCallback'))
 // Public Profile Pages (lazy load)
 const PublicProfile = lazy(() => import('./pages/PublicProfile'))
 const PatientOnboarding = lazy(() => import('./pages/PatientOnboarding'))
+
+// Legal Pages (lazy load)
+const Privacy = lazy(() => import('./pages/Privacy'))
+const Terms = lazy(() => import('./pages/Terms'))
 
 // Phase 5 - Booking Pages (lazy load)
 const PaymentPage = lazy(() => import('./pages/PaymentPage'))
@@ -152,6 +159,10 @@ export default function App() {
       <Route path="/pay/:paymentToken" element={<Suspense fallback={<PageLoader />}><PaymentPage /></Suspense>} />
       <Route path="/booking/:bookingToken" element={<Suspense fallback={<PageLoader />}><BookingStatusPage /></Suspense>} />
 
+      {/* ── Legal routes (No auth required) ───────────────────────────────────── */}
+      <Route path="/privacy" element={<Suspense fallback={<PageLoader />}><Privacy /></Suspense>} />
+      <Route path="/terms" element={<Suspense fallback={<PageLoader />}><Terms /></Suspense>} />
+
       {/* ── Patient-facing routes (Public, with minimal header) ──────────────── */}
       <Route element={<PatientLayout auth={auth} onLogout={handleLogout} patientSession={patientSession} />}>
         <Route path="/test" element={<PatientEntry onSessionResumed={handleSessionResumed} />} />
@@ -170,6 +181,8 @@ export default function App() {
       {/* ── Auth routes ────────────────────────────────────────────────────────── */}
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<Login onLogin={handleLogin} onLogout={handleLogout} />} />
+        <Route path="/verify-email" element={<VerifyEmail onLogin={handleLogin} />} />
+        <Route path="/auth/google/callback" element={<GoogleLoginCallback onLogin={handleLogin} />} />
         <Route
           path="/change-password"
           element={
@@ -355,7 +368,10 @@ export default function App() {
       />
 
       {/* ── Default ───────────────────────────────────────────────────────────── */}
-      <Route path="/" element={<Navigate to={getDefaultRoute()} replace />} />
+      <Route
+        path="/"
+        element={isLoggedIn ? <Navigate to={getDefaultRoute()} replace /> : <Landing />}
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

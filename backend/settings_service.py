@@ -967,30 +967,91 @@ async def terminate_other_sessions(db: AsyncSession, practitioner_id: str, curre
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  WhatsApp Configuration Service (extends existing)
+#  WhatsApp Configuration Service
 # ═══════════════════════════════════════════════════════════════════════════════
+# Single clinic-wide row, keyed to the owner — same single-tenant shape as
+# EmailConfiguration/PaymentGatewayConfiguration, just seeded from prac.id
+# on first write since WhatsAppConfig.practitioner_id is NOT NULL.
 
-async def get_whatsapp_config_admin(db: AsyncSession) -> Optional[WhatsAppConfig]:
-    """Get WhatsApp configuration for admin (first one or owner's)."""
+async def get_whatsapp_config(db: AsyncSession, practitioner_id: str) -> WhatsAppConfig:
+    """Get WhatsApp configuration, creating a default row if not exists."""
     result = await db.execute(select(WhatsAppConfig).limit(1))
-    return result.scalar_one_or_none()
+    config = result.scalar_one_or_none()
+
+    if not config:
+        config = WhatsAppConfig(practitioner_id=practitioner_id)
+        db.add(config)
+        await db.commit()
+        await db.refresh(config)
+
+    return config
+
+
+async def update_whatsapp_config(db: AsyncSession, practitioner_id: str, data: dict) -> WhatsAppConfig:
+    """Update WhatsApp configuration."""
+    config = await get_whatsapp_config(db, practitioner_id)
+
+    for key, value in data.items():
+        # An empty access_token in the payload means "field left untouched" —
+        # the response only ever exposes has_access_token, so the form field
+        # starts blank and would otherwise clobber a previously saved token.
+        if key == "access_token" and not value:
+            continue
+        if value is not None and hasattr(config, key):
+            setattr(config, key, value)
+
+    await db.commit()
+    await db.refresh(config)
+    return config
 
 
 async def test_whatsapp_config(db: AsyncSession, recipient_phone: str) -> dict:
-    """Test WhatsApp configuration by sending a test message."""
-    config = await get_whatsapp_config_admin(db)
-    
+    """Test WhatsApp configuration by actually sending a message via the Meta Cloud API.
+
+    Sends Meta's pre-provisioned "hello_world" template (en_US) — it requires no
+    template approval and is available on every WhatsApp Business test setup, so
+    this verifies phone_number_id/access_token connectivity without needing a
+    custom approved template or a prior customer-initiated conversation.
+    """
+    from notification_service import notification_service
+
+    result = await db.execute(select(WhatsAppConfig).limit(1))
+    config = result.scalar_one_or_none()
+
     if not config or not config.is_enabled:
         return {"success": False, "message": "WhatsApp is not enabled", "error": "Configuration is disabled"}
-    
-    if not config.access_token:
-        return {"success": False, "message": "Missing access token", "error": "Access token is not configured"}
-    
+
+    if not config.phone_number_id or not config.access_token:
+        return {"success": False, "message": "Missing credentials", "error": "Phone number ID and access token are required"}
+
+    phone_number_id = config.phone_number_id
+    access_token = config.access_token
+
     try:
-        # In production, implement actual WhatsApp test message
-        return {"success": True, "message": f"Test message sent to {recipient_phone}"}
-    
+        send_result = await notification_service.send_whatsapp(
+            recipient_phone,
+            event_type="test",
+            placeholders={},
+            phone_number_id=phone_number_id,
+            access_token=access_token,
+            whatsapp_template_id="hello_world",
+            language_code="en_US",
+        )
+
+        config.last_test_at = datetime.now(timezone.utc)
+        config.last_test_status = "success" if send_result.success else "failed"
+        config.last_test_error = None if send_result.success else send_result.error
+        await db.commit()
+
+        if send_result.success:
+            return {"success": True, "message": f"Test message sent to {recipient_phone}"}
+        return {"success": False, "message": "Failed to send test message", "error": send_result.error}
+
     except Exception as e:
+        config.last_test_at = datetime.now(timezone.utc)
+        config.last_test_status = "failed"
+        config.last_test_error = str(e)
+        await db.commit()
         return {"success": False, "message": "Failed to send test message", "error": str(e)}
 
 

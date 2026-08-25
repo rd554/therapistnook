@@ -43,6 +43,7 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
   const [status, setStatus] = useState('not_started')
   const autoSaveTimeout = useRef(null)
   const hasChanges = useRef(false)
+  const topRef = useRef(null)
 
   useEffect(() => {
     loadData()
@@ -50,6 +51,14 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
       if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
     }
   }, [patientId])
+
+  // Next/Previous/dropdown navigation all change currentStep - jump back to
+  // the top of the wizard each time so the new step's heading and first
+  // field are visible instead of leaving the scroll position wherever the
+  // Next/Previous button happened to be on the previous step.
+  useEffect(() => {
+    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [currentStep])
 
   const loadData = async () => {
     try {
@@ -191,7 +200,7 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
   const StepComponent = getStepComponent(currentStep)
 
   return (
-    <div className="space-y-6 pt-2">
+    <div ref={topRef} className="space-y-6 pt-2">
       {/* Header: Title | Dropdown | Save Draft */}
       <div className="flex items-center gap-4">
         <h2 className="text-section-title text-content-primary">Clinical History</h2>

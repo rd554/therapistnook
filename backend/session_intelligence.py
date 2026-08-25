@@ -263,15 +263,18 @@ async def translate_transcript(
 
 def _stringify_fields(data: dict, fields: list[str]) -> dict:
     """
-    GPT-4o-mini doesn't always honor "return a string" — it sometimes
-    returns a list of bullet points for a field instead. Both SessionSummary
-    and SOAPNotes schemas require plain strings, so normalize before we hand
-    the parsed JSON back (otherwise response serialization blows up).
+    GPT-4o-mini doesn't always honor "return a string" — it sometimes returns
+    a list of bullet points, or a nested object (e.g. {"patient": "...",
+    "therapist": "..."}) for a field instead. Both SessionSummary and
+    SOAPNotes schemas require plain strings, so normalize before we hand the
+    parsed JSON back (otherwise response serialization blows up).
     """
     for field in fields:
         value = data.get(field)
         if isinstance(value, list):
             data[field] = "\n".join(str(item) for item in value)
+        elif isinstance(value, dict):
+            data[field] = "\n".join(f"{k}: {v}" for k, v in value.items())
     return data
 
 

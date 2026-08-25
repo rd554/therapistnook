@@ -29,6 +29,8 @@ from models import (
 )
 from schemas import (
     LoginRequest, LoginResponse, ChangePasswordRequest,
+    SignupRequest, SignupResponse, ResendVerificationRequest, MessageResponse,
+    GoogleLoginRequest, GoogleAuthUrlResponse, FeatureFlagsResponse,
     PractitionerCreate, PractitionerUpdate, PractitionerResponse,
     SessionCreate, SessionResponse, SessionListItem, ResumeRequest,
     QuestionsPage, QuestionResponse,
@@ -74,7 +76,7 @@ from storage import save_file, get_file_path, read_file, delete_file, validate_f
 from auth import (
     hash_password, verify_password, create_access_token,
     get_current_practitioner, require_owner,
-    generate_ref_code, generate_resume_code,
+    generate_ref_code, generate_resume_code, generate_verification_token,
 )
 from scoring import full_scoring_pipeline
 import scoring as scoring_module
@@ -93,6 +95,17 @@ logger = setup_logging()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+
+# MMPI-2 test-link generation (both the "Generate Assessment" flow and the new
+# patient-session-creation endpoint it ultimately relies on) is switched off
+# platform-wide until Razorpay billing is wired up — self-signup practitioners
+# would otherwise get a fully working assessment link for free. Flip this back
+# on via env var once payment collection exists; no code change needed then.
+ENABLE_MMPI_LINK_GENERATION = os.getenv("ENABLE_MMPI_LINK_GENERATION", "false").strip().lower() == "true"
+LINK_GENERATION_DISABLED_MESSAGE = (
+    "MMPI-2 assessment links are temporarily unavailable while we finish setting up "
+    "payments. Please check back soon."
+)
 
 
 @asynccontextmanager
@@ -206,6 +219,8 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(401, "Invalid email or password")
     if not prac.is_active:
         raise HTTPException(403, "Your account has been disabled. Please contact your administrator.")
+    if not prac.email_verified:
+        raise HTTPException(403, "Please verify your email before logging in. Check your inbox for the verification link.")
 
     token = create_access_token(prac.id, prac.role)
     return LoginResponse(
@@ -247,8 +262,193 @@ async def change_password(data: ChangePasswordRequest, prac=Depends(get_current_
     prac.password_hash = hash_password(data.new_password)
     prac.must_change_password = False
     await db.commit()
-    
+
     return {"message": "Password changed successfully"}
+
+
+VERIFICATION_TOKEN_LIFETIME = timedelta(hours=24)
+VERIFICATION_RESEND_COOLDOWN = timedelta(seconds=60)
+
+
+async def _unique_ref_code(db: AsyncSession) -> str:
+    code = generate_ref_code()
+    while (await db.execute(select(Practitioner).where(Practitioner.ref_code == code))).scalar_one_or_none():
+        code = generate_ref_code()
+    return code
+
+
+@app.post("/api/auth/signup", response_model=SignupResponse)
+async def signup(data: SignupRequest, db: AsyncSession = Depends(get_db)):
+    """Self-signup for practitioners — the only account created ahead of time is
+    the owner (seeded via seed.py); everyone else creates their own account here.
+    Accounts are active immediately but can't log in until they verify their email."""
+    email = data.email.strip().lower()
+
+    existing = (await db.execute(select(Practitioner).where(Practitioner.email == email))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, "An account with this email already exists.")
+
+    token = generate_verification_token()
+    prac = Practitioner(
+        name=data.name.strip(),
+        email=email,
+        password_hash=hash_password(data.password),
+        role="practitioner",
+        ref_code=await _unique_ref_code(db),
+        is_active=True,
+        must_change_password=False,
+        profile_setup_complete=False,
+        email_verified=False,
+        email_verification_token=token,
+        email_verification_sent_at=datetime.now(timezone.utc),
+        signup_source="self",
+    )
+    db.add(prac)
+    await db.commit()
+
+    from email_service import send_verification_email
+    try:
+        send_verification_email(email, prac.name, token)
+    except Exception as e:
+        logger.error(f"Failed to send verification email to {email}: {e}")
+
+    return SignupResponse(
+        message="Account created. Check your inbox for a verification link before signing in.",
+        email=email,
+    )
+
+
+@app.get("/api/auth/verify-email", response_model=LoginResponse)
+async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
+    """Clicked from the verification email. Logs the practitioner straight in
+    on success, same as /api/auth/login, so they land in the app immediately."""
+    prac = (await db.execute(
+        select(Practitioner).where(Practitioner.email_verification_token == token)
+    )).scalar_one_or_none()
+    if not prac:
+        raise HTTPException(400, "Invalid or expired verification link.")
+
+    sent_at = prac.email_verification_sent_at
+    if sent_at and sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    if not sent_at or datetime.now(timezone.utc) - sent_at > VERIFICATION_TOKEN_LIFETIME:
+        raise HTTPException(400, "This verification link has expired. Please request a new one.")
+
+    prac.email_verified = True
+    prac.email_verification_token = None
+    await db.commit()
+
+    token = create_access_token(prac.id, prac.role)
+    return LoginResponse(
+        access_token=token, role=prac.role,
+        name=prac.name, practitioner_id=prac.id,
+        must_change_password=prac.must_change_password if prac.must_change_password is not None else False,
+        profile_setup_complete=prac.profile_setup_complete if prac.profile_setup_complete is not None else False,
+    )
+
+
+@app.post("/api/auth/resend-verification", response_model=MessageResponse)
+async def resend_verification(data: ResendVerificationRequest, db: AsyncSession = Depends(get_db)):
+    # Always return the same generic message regardless of whether the email
+    # exists or is already verified — don't let this endpoint be used to probe
+    # which emails have accounts.
+    generic = MessageResponse(
+        message="If an account exists for that email and isn't verified yet, we've sent a new link."
+    )
+
+    email = data.email.strip().lower()
+    prac = (await db.execute(select(Practitioner).where(Practitioner.email == email))).scalar_one_or_none()
+    if not prac or prac.email_verified:
+        return generic
+
+    sent_at = prac.email_verification_sent_at
+    if sent_at and sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    if sent_at and datetime.now(timezone.utc) - sent_at < VERIFICATION_RESEND_COOLDOWN:
+        return generic
+
+    token = generate_verification_token()
+    prac.email_verification_token = token
+    prac.email_verification_sent_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    from email_service import send_verification_email
+    try:
+        send_verification_email(prac.email, prac.name, token)
+    except Exception as e:
+        logger.error(f"Failed to resend verification email to {prac.email}: {e}")
+
+    return generic
+
+
+@app.get("/api/auth/google/login-url", response_model=GoogleAuthUrlResponse)
+async def get_google_login_url(redirect_uri: str):
+    """Build the Google OAuth consent URL for 'Continue with Google' on the
+    login/signup page. Unauthenticated — this *is* how you become authenticated."""
+    import google_login_service
+    try:
+        auth_url = google_login_service.build_login_auth_url(redirect_uri)
+    except google_login_service.GoogleLoginNotConfigured as e:
+        raise HTTPException(400, str(e))
+    return GoogleAuthUrlResponse(auth_url=auth_url)
+
+
+@app.post("/api/auth/google/login", response_model=LoginResponse)
+async def google_login(data: GoogleLoginRequest, db: AsyncSession = Depends(get_db)):
+    """Exchange a Google OAuth code for a session. Creates a new practitioner
+    account on first sign-in (email already verified by Google — no separate
+    verification step needed), otherwise logs the existing one in."""
+    import google_login_service
+    try:
+        profile = await google_login_service.fetch_google_profile(data.authorization_code, data.redirect_uri)
+    except google_login_service.GoogleLoginNotConfigured as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    prac = (await db.execute(select(Practitioner).where(Practitioner.email == profile["email"]))).scalar_one_or_none()
+
+    if not prac:
+        prac = Practitioner(
+            name=profile["name"],
+            email=profile["email"],
+            password_hash=hash_password(generate_verification_token()),  # unusable random password; Google-only login
+            role="practitioner",
+            ref_code=await _unique_ref_code(db),
+            is_active=True,
+            must_change_password=False,
+            profile_setup_complete=False,
+            email_verified=True,
+            signup_source="google",
+        )
+        db.add(prac)
+        await db.commit()
+    elif not prac.email_verified:
+        # Pre-existing self-signup account finishing verification via Google instead.
+        prac.email_verified = True
+        await db.commit()
+
+    if not prac.is_active:
+        raise HTTPException(403, "Your account has been disabled. Please contact your administrator.")
+
+    token = create_access_token(prac.id, prac.role)
+    return LoginResponse(
+        access_token=token, role=prac.role,
+        name=prac.name, practitioner_id=prac.id,
+        must_change_password=prac.must_change_password if prac.must_change_password is not None else False,
+        profile_setup_complete=prac.profile_setup_complete if prac.profile_setup_complete is not None else False,
+    )
+
+
+@app.get("/api/config/features", response_model=FeatureFlagsResponse)
+async def get_feature_flags():
+    """Public, unauthenticated flags the landing/login pages need to decide what
+    to render (e.g. hide 'Continue with Google' until GOOGLE_CLIENT_ID is set)."""
+    import google_login_service
+    return FeatureFlagsResponse(
+        mmpi_link_generation_enabled=ENABLE_MMPI_LINK_GENERATION,
+        google_signup_enabled=google_login_service.google_login_configured(),
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════════
@@ -309,6 +509,8 @@ async def create_practitioner(data: PractitionerCreate, owner=Depends(require_ow
         ref_code=ref,
         must_change_password=True,
         created_by=owner.id,
+        email_verified=True,  # admin-vouched-for accounts skip self-signup's verification step
+        signup_source="admin",
     )
     db.add(prac)
     await db.commit()
@@ -2382,12 +2584,15 @@ async def create_assessment(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new assessment record."""
+    if data.assessment_type == "mmpi2" and not ENABLE_MMPI_LINK_GENERATION and prac.role != "owner":
+        raise HTTPException(403, LINK_GENERATION_DISABLED_MESSAGE)
+
     patient = await db.get(Patient, patient_id)
     if not patient:
         raise HTTPException(404, "Patient not found")
     if patient.practitioner_id != prac.id and prac.role != "owner":
         raise HTTPException(403, "Access denied")
-    
+
     if data.assessment_type not in ASSESSMENT_TYPES:
         raise HTTPException(400, f"Invalid assessment type. Must be one of: {', '.join(ASSESSMENT_TYPES)}")
     
@@ -2607,11 +2812,20 @@ async def get_practitioner_by_ref(ref_code: str, db: AsyncSession = Depends(get_
 
 @app.post("/api/patient/sessions", response_model=SessionResponse)
 async def create_patient_session(data: SessionCreate, db: AsyncSession = Depends(get_db)):
+    # This is the endpoint that actually starts a brand new MMPI-2 session,
+    # regardless of which UI (or bypassed UI) got a patient here. In-progress
+    # sessions still resume fine — see /api/patient/resume below, which is
+    # intentionally left untouched.
     prac = (await db.execute(
         select(Practitioner).where(Practitioner.ref_code == data.ref_code, Practitioner.is_active == True)
     )).scalar_one_or_none()
     if not prac:
         raise HTTPException(404, "Invalid or inactive test link")
+
+    # While link generation is disabled platform-wide, only the owner's own
+    # link keeps working — everyone else sees the disabled message.
+    if not ENABLE_MMPI_LINK_GENERATION and prac.role != "owner":
+        raise HTTPException(403, LINK_GENERATION_DISABLED_MESSAGE)
 
     code = generate_resume_code()
     while (await db.execute(select(Session).where(Session.resume_code == code))).scalar_one_or_none():
@@ -5537,9 +5751,16 @@ async def get_today_schedule(
             meeting_link=appt.meeting_link,
         ))
 
+        # SQLite drops tzinfo on read even though start_time is
+        # DateTime(timezone=True), so a naive value from the DB can't be
+        # compared to an aware `now` directly (same issue as the payments
+        # dashboard's paid_at comparison). Postgres round-trips tzinfo fine,
+        # so this is a no-op there.
+        appt_start = appt.start_time if appt.start_time.tzinfo else appt.start_time.replace(tzinfo=timezone.utc)
+
         if appt.status == "completed":
             completed += 1
-        elif appt.status == "scheduled" and appt.start_time > now:
+        elif appt.status == "scheduled" and appt_start > now:
             upcoming += 1
     
     return TodaySchedule(
@@ -6741,12 +6962,19 @@ async def get_payment_dashboard(
     # Calculate monthly revenue (current month)
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    monthly_paid = [p for p in paid_payments if p.paid_at and p.paid_at >= month_start]
-    monthly_revenue = sum(p.final_amount for p in monthly_paid)
-    
-    # Calculate today's revenue
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_paid = [p for p in paid_payments if p.paid_at and p.paid_at >= today_start]
+
+    # SQLite drops tzinfo on read even though paid_at is DateTime(timezone=True),
+    # so a naive value from the DB can't be compared to an aware `now` directly
+    # (same class of issue worked around for expires_at above). Postgres
+    # round-trips tzinfo fine, so this is a no-op there.
+    def _aware(dt):
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    monthly_paid = [p for p in paid_payments if p.paid_at and _aware(p.paid_at) >= month_start]
+    monthly_revenue = sum(p.final_amount for p in monthly_paid)
+
+    today_paid = [p for p in paid_payments if p.paid_at and _aware(p.paid_at) >= today_start]
     today_revenue = sum(p.final_amount for p in today_paid)
     
     return PaymentDashboard(
@@ -9969,6 +10197,7 @@ from schemas import (
     ClinicSettingsUpdate, ClinicSettingsResponse,
     AppointmentConfigUpdate, AppointmentConfigResponse, HolidayItem,
     EmailConfigUpdate, EmailConfigResponse, TestEmailRequest, TestEmailResponse,
+    WhatsAppConfigUpdate, WhatsAppConfigResponse, TestWhatsAppRequest, TestWhatsAppResponse,
     PaymentGatewayConfigUpdate, PaymentGatewayConfigResponse, TestPaymentGatewayResponse,
     BrandingUpdate, BrandingResponse,
     SecuritySettingsUpdate, SecuritySettingsResponse,
@@ -10232,6 +10461,74 @@ async def test_email_config(
     """Test email configuration by sending a test email."""
     result = await settings_service.test_email_config(db, data.recipient_email)
     return TestEmailResponse(**result)
+
+
+# ─── WhatsApp Configuration (Admin Only) ───────────────────────────────────────
+
+@app.get("/api/settings/whatsapp", response_model=WhatsAppConfigResponse)
+async def get_whatsapp_config(
+    prac=Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get WhatsApp Business API configuration (admin only)."""
+    config = await settings_service.get_whatsapp_config(db, prac.id)
+    return WhatsAppConfigResponse(
+        id=config.id,
+        practitioner_id=config.practitioner_id,
+        is_enabled=config.is_enabled,
+        phone_number_id=config.phone_number_id,
+        business_account_id=config.business_account_id,
+        has_access_token=bool(config.access_token),
+        last_test_at=config.last_test_at,
+        last_test_status=config.last_test_status,
+        last_test_error=config.last_test_error,
+        created_at=config.created_at,
+        updated_at=config.updated_at,
+    )
+
+
+@app.put("/api/settings/whatsapp", response_model=WhatsAppConfigResponse)
+async def update_whatsapp_config(
+    data: WhatsAppConfigUpdate,
+    prac=Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update WhatsApp Business API configuration (admin only)."""
+    config = await settings_service.update_whatsapp_config(db, prac.id, data.model_dump(exclude_none=True))
+
+    await settings_service.create_audit_log(
+        db=db,
+        action="settings_update",
+        description="Updated WhatsApp configuration",
+        practitioner=prac,
+        resource_type="whatsapp_config",
+        resource_id=config.id,
+    )
+
+    return WhatsAppConfigResponse(
+        id=config.id,
+        practitioner_id=config.practitioner_id,
+        is_enabled=config.is_enabled,
+        phone_number_id=config.phone_number_id,
+        business_account_id=config.business_account_id,
+        has_access_token=bool(config.access_token),
+        last_test_at=config.last_test_at,
+        last_test_status=config.last_test_status,
+        last_test_error=config.last_test_error,
+        created_at=config.created_at,
+        updated_at=config.updated_at,
+    )
+
+
+@app.post("/api/settings/whatsapp/test", response_model=TestWhatsAppResponse)
+async def test_whatsapp_config(
+    data: TestWhatsAppRequest,
+    prac=Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Test WhatsApp configuration by sending a real message via the Meta Cloud API."""
+    result = await settings_service.test_whatsapp_config(db, data.recipient_phone)
+    return TestWhatsAppResponse(**result)
 
 
 # ─── Payment Gateway Configuration (Admin Only) ────────────────────────────────

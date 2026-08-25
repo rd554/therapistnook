@@ -267,12 +267,16 @@ export default function ClinicalIntelligenceTab({ patientId }) {
       {/* Stats Bar */}
       {stats && (
         <MetricCardGrid cols={6}>
-          <MetricCard icon={Heart} label="Active Symptoms" value={stats.active_symptoms || 0} semantic="error" variant="mini" />
-          <MetricCard icon={FileText} label="Diagnoses" value={stats.current_diagnoses || 0} semantic="info" variant="mini" />
-          <MetricCard icon={Target} label="Active Goals" value={stats.current_goals || 0} semantic="success" variant="mini" />
-          <MetricCard icon={AlertTriangle} label="Risk Factors" value={stats.current_risk_factors || 0} semantic="warning" variant="mini" />
-          <MetricCard icon={HelpCircle} label="Questions" value={stats.outstanding_questions || 0} semantic="assessments" variant="mini" />
-          <MetricCard icon={Clock} label="Pending Review" value={stats.pending_updates || 0} semantic="payments" variant="mini" />
+          {/* summary-card-mini's default 200px min-width doesn't shrink to
+              fit a 6-up grid track, so cards overflow into their neighbors.
+              summary-card-mini--compact is the same fix already used for
+              narrow mini-card rows elsewhere (see PatientProfile.jsx). */}
+          <MetricCard icon={Heart} label="Active Symptoms" value={stats.active_symptoms || 0} semantic="error" variant="mini" className="summary-card-mini--compact !min-w-0" />
+          <MetricCard icon={FileText} label="Diagnoses" value={stats.current_diagnoses || 0} semantic="info" variant="mini" className="summary-card-mini--compact !min-w-0" />
+          <MetricCard icon={Target} label="Active Goals" value={stats.current_goals || 0} semantic="success" variant="mini" className="summary-card-mini--compact !min-w-0" />
+          <MetricCard icon={AlertTriangle} label="Risk Factors" value={stats.current_risk_factors || 0} semantic="warning" variant="mini" className="summary-card-mini--compact !min-w-0" />
+          <MetricCard icon={HelpCircle} label="Questions" value={stats.outstanding_questions || 0} semantic="assessments" variant="mini" className="summary-card-mini--compact !min-w-0" />
+          <MetricCard icon={Clock} label="Pending Review" value={stats.pending_updates || 0} semantic="payments" variant="mini" className="summary-card-mini--compact !min-w-0" />
         </MetricCardGrid>
       )}
 

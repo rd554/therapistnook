@@ -94,6 +94,39 @@ export async function changePassword(currentPassword, newPassword) {
   return res.data
 }
 
+export async function signup(name, email, password) {
+  const res = await api.post('/auth/signup', { name, email, password })
+  return res.data
+}
+
+export async function verifyEmail(token) {
+  const res = await api.get('/auth/verify-email', { params: { token } })
+  return res.data
+}
+
+export async function resendVerification(email) {
+  const res = await api.post('/auth/resend-verification', { email })
+  return res.data
+}
+
+export async function getGoogleLoginUrl(redirectUri) {
+  const res = await api.get('/auth/google/login-url', { params: { redirect_uri: redirectUri } })
+  return res.data
+}
+
+export async function googleLogin(authorizationCode, redirectUri) {
+  const res = await api.post('/auth/google/login', {
+    authorization_code: authorizationCode,
+    redirect_uri: redirectUri,
+  })
+  return res.data
+}
+
+export async function getFeatureFlags() {
+  const res = await api.get('/config/features')
+  return res.data
+}
+
 // ─── Admin ──────────────────────────────────────────────────────────────────────
 
 export async function listPractitioners() {
@@ -1174,6 +1207,23 @@ export async function updateEmailConfig(data) {
 
 export async function testEmailConfig(recipientEmail) {
   const res = await api.post('/settings/email/test', { recipient_email: recipientEmail })
+  return res.data
+}
+
+// ─── WhatsApp Configuration (Admin Only) ───────────────────────────────────────
+
+export async function getWhatsAppConfig() {
+  const res = await api.get('/settings/whatsapp')
+  return res.data
+}
+
+export async function updateWhatsAppConfig(data) {
+  const res = await api.put('/settings/whatsapp', data)
+  return res.data
+}
+
+export async function testWhatsAppConfig(recipientPhone) {
+  const res = await api.post('/settings/whatsapp/test', { recipient_phone: recipientPhone })
   return res.data
 }
 

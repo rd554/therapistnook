@@ -101,3 +101,8 @@ def generate_resume_code(length: int = 8) -> str:
     # since patients type this one in by hand to resume an in-progress test.
     chars = string.ascii_uppercase + string.digits
     return "".join(secrets.choice(chars) for _ in range(length))
+
+
+def generate_verification_token() -> str:
+    # One-time, single-use email verification link — never guessable, never reused.
+    return secrets.token_urlsafe(32)

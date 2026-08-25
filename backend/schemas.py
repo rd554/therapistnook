@@ -24,6 +24,39 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+# ─── Self-signup / email verification ──────────────────────────────────────────
+
+class SignupRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str = Field(min_length=6)
+
+
+class SignupResponse(BaseModel):
+    message: str
+    email: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class GoogleLoginRequest(BaseModel):
+    authorization_code: str
+    redirect_uri: str
+
+
+class FeatureFlagsResponse(BaseModel):
+    """Public, unauthenticated config the landing/login pages need before a
+    practitioner is signed in — never anything secret."""
+    mmpi_link_generation_enabled: bool
+    google_signup_enabled: bool
+
+
 # ─── Practitioner ────────────────────────────────────────────────────────────────
 
 class PractitionerCreate(BaseModel):
@@ -1949,6 +1982,9 @@ class WhatsAppConfigResponse(BaseModel):
     phone_number_id: Optional[str] = None
     business_account_id: Optional[str] = None
     has_access_token: bool
+    last_test_at: Optional[datetime] = None
+    last_test_status: Optional[str] = None
+    last_test_error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -1959,6 +1995,18 @@ class WhatsAppConfigUpdate(BaseModel):
     phone_number_id: Optional[str] = None
     business_account_id: Optional[str] = None
     access_token: Optional[str] = None
+
+
+class TestWhatsAppRequest(BaseModel):
+    """Test WhatsApp request"""
+    recipient_phone: str
+
+
+class TestWhatsAppResponse(BaseModel):
+    """Test WhatsApp response"""
+    success: bool
+    message: str
+    error: Optional[str] = None
 
 
 # ─── Extended Inbox Notifications ─────────────────────────────────────────────

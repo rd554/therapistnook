@@ -390,7 +390,8 @@ function RevenueTab({ data }) {
             xKey="label"
             yKey="value"
             height={250}
-            color="#10b981"
+            color="#F3FAF5"
+            borderColor="#A8C7A1"
             formatValue={formatShortCurrency}
           />
         </div>
@@ -404,6 +405,8 @@ function RevenueTab({ data }) {
                 valueKey="value"
                 size={180}
                 formatValue={formatShortCurrency}
+                colors={['#F3F0FE', '#F3FAF5', '#FEF8E8', '#EEF5FF']}
+                strokeColors={['#7C72E8', '#A8C7A1', '#E8C66A', '#A7BED3']}
               />
             </div>
           </div>

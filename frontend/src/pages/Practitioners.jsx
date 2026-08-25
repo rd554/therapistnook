@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react'
 import {
   UserPlus, UserCog, Users, ToggleLeft, ToggleRight, Loader2, Copy, Check, Link2, Trash2,
 } from 'lucide-react'
-import { listPractitioners, createPractitioner, updatePractitioner, deletePractitioner } from '../api/client'
+import { listPractitioners, createPractitioner, updatePractitioner, deletePractitioner, getFeatureFlags } from '../api/client'
 
 const PRACTITIONER_GRID_COLS = 'grid-cols-[1.2fr_1.6fr_0.8fr_0.7fr_0.9fr_0.8fr_1.1fr]'
+const LINK_GENERATION_DISABLED_MESSAGE =
+  'MMPI-2 assessment links are temporarily unavailable while we finish setting up payments.'
 
 export default function Practitioners() {
   const [practitioners, setPractitioners] = useState([])
@@ -14,6 +16,7 @@ export default function Practitioners() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [copiedId, setCopiedId] = useState(null)
+  const [linkGenerationEnabled, setLinkGenerationEnabled] = useState(false)
 
   const load = async () => {
     try {
@@ -23,7 +26,15 @@ export default function Practitioners() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    // Owner keeps a working link even while generation is disabled
+    // platform-wide for everyone else — enforced backend-side too.
+    const isOwner = localStorage.getItem('mmpi_role') === 'owner'
+    getFeatureFlags()
+      .then((flags) => setLinkGenerationEnabled(flags.mmpi_link_generation_enabled || isOwner))
+      .catch(() => setLinkGenerationEnabled(isOwner))
+  }, [])
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -177,7 +188,9 @@ export default function Practitioners() {
                     <span>
                       <button
                         onClick={() => copyLink(p.ref_code, p.id)}
-                        className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700"
+                        disabled={!linkGenerationEnabled}
+                        title={linkGenerationEnabled ? undefined : LINK_GENERATION_DISABLED_MESSAGE}
+                        className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {copiedId === p.id ? <Check className="h-3 w-3 text-green-600" /> : <Link2 className="h-3 w-3" />}
                         {copiedId === p.id ? 'Copied!' : p.ref_code}
