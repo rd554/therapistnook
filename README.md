@@ -4,15 +4,17 @@ A comprehensive clinical psychology practice management platform for administeri
 
 ## Features
 
+- **Landing Page & Self-Signup** - Public marketing site with practitioner self-registration, email verification, and "Continue with Google" login
 - **Patient Management** - Complete patient records with clinical history
 - **Bulk Client Import** - Onboard an existing patient roster via an Excel template (download, fill, upload — per-row validation with skip+warn on duplicates)
 - **MMPI-2 Assessments** - Full 567-question assessment with automated scoring
 - **Clinical Documents** - Upload and organize clinical documents (PDF/.docx text extraction; legacy .doc/.xls/.xlsx are stored with a clear "format not readable" status rather than silently failing)
 - **Appointment Scheduling** - Calendar management with availability settings, synced to the practitioner's connected Google Calendar (create/update/cancel/delete kept in sync automatically)
-- **Payment Processing** - Payment tracking and receipt generation
+- **Payment Processing** - Payment tracking and receipt generation, with invoice PDF generation and signature/stamp upload
 - **Public Booking** - Patient self-service booking portal
 - **Practice Analytics** - Comprehensive business analytics
-- **Clinical Intelligence** - AI-powered, per-patient running summary assembled from clinical history, therapy session transcripts, uploaded documents, MMPI-2 results, and assessment completions (optional)
+- **Clinical Intelligence** - AI-powered, per-patient running summary assembled from clinical history, therapy session transcripts, uploaded documents, MMPI-2 results, and assessment completions, with an interactive chat panel (optional)
+- **Account Management** - Self-service account deletion (deactivation) for practitioners
 
 ## Quick Start
 
@@ -66,6 +68,8 @@ python seed.py
 ```
 
 By default this creates a local-only development account. Set `OWNER_EMAIL` and `OWNER_PASSWORD` in your `.env` before running the seed script to choose your own credentials instead — **do this before any non-local deployment.**
+
+Alternatively, practitioners can self-register from the landing page's signup flow (email/password or "Continue with Google"). Self-signup requires SMTP configuration to deliver verification emails; Google login additionally requires `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to be set.
 
 ## Project Structure
 
