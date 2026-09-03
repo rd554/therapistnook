@@ -29,6 +29,7 @@ export default function PatientEdit() {
     email: '',
     emergency_contact: '',
     referral_source: '',
+    address: '',
   })
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function PatientEdit() {
           email: data.email || '',
           emergency_contact: data.emergency_contact || '',
           referral_source: data.referral_source || '',
+          address: data.address || '',
         })
       } catch (err) {
         setLoadError(err.response?.data?.detail || 'Failed to load patient')
@@ -66,6 +68,7 @@ export default function PatientEdit() {
         email: form.email || null,
         emergency_contact: form.emergency_contact || null,
         referral_source: form.referral_source || null,
+        address: form.address || null,
       })
       navigate(`${baseUrl}/${patientId}`)
     } catch (err) {
@@ -169,6 +172,17 @@ export default function PatientEdit() {
                   placeholder="e.g., Dr. Smith, Self-referral, Hospital"
                   value={form.referral_source}
                   onChange={(e) => setForm(p => ({ ...p, referral_source: e.target.value }))}
+                />
+              </FormField>
+            </div>
+            <div className="sm:col-span-2">
+              <FormField label="Billing Address" hint="Used on the invoice PDF's Bill To section">
+                <textarea
+                  className="input-field"
+                  rows={3}
+                  placeholder="Street address, city, state, PIN, country"
+                  value={form.address}
+                  onChange={(e) => setForm(p => ({ ...p, address: e.target.value }))}
                 />
               </FormField>
             </div>

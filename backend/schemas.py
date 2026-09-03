@@ -189,6 +189,7 @@ class PatientCreate(BaseModel):
     email: Optional[str] = None
     emergency_contact: Optional[str] = None
     referral_source: Optional[str] = None
+    address: Optional[str] = None
 
 
 class PatientUpdate(BaseModel):
@@ -199,7 +200,21 @@ class PatientUpdate(BaseModel):
     email: Optional[str] = None
     emergency_contact: Optional[str] = None
     referral_source: Optional[str] = None
+    address: Optional[str] = None
     status: Optional[str] = None
+
+
+class LastSessionSummary(BaseModel):
+    """Condensed view of a patient's most recent processed TherapySession,
+    for the Schedule Session screen. Deliberately narrower than the full
+    SessionSummary — action_items/open_questions are left off on purpose
+    (see get_patient in main.py for why), so they can never reach this
+    surface even if a future caller forgets to filter them out."""
+    session_date: datetime
+    presenting_issues: Optional[str] = None
+    key_discussion_points: Optional[str] = None
+    emotional_themes: Optional[str] = None
+    homework_discussed: Optional[str] = None
 
 
 class PatientResponse(BaseModel):
@@ -213,11 +228,20 @@ class PatientResponse(BaseModel):
     email: Optional[str] = None
     emergency_contact: Optional[str] = None
     referral_source: Optional[str] = None
+    address: Optional[str] = None
     status: str
     avatar_id: Optional[str] = None
     avatar_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    # Fee (paise/cents) from this patient's most recent payment, if any — lets
+    # Schedule Session pre-fill Payment Details with what this specific
+    # patient was last charged, rather than a practitioner-wide default.
+    last_session_fee: Optional[int] = None
+    # Condensed summary of this patient's most recent processed transcript
+    # session, if one exists — lets Schedule Session show "what happened
+    # last time" instead of a blank Notes field.
+    last_session_summary: Optional[LastSessionSummary] = None
 
 
 class PatientListItem(BaseModel):
@@ -1056,6 +1080,11 @@ class RefundComplete(BaseModel):
     notes: Optional[str] = None
 
 
+class BulkInvoiceCreate(BaseModel):
+    """Create one invoice covering several of a patient's payments"""
+    payment_ids: list[str]
+
+
 class PaymentResponse(BaseModel):
     """Full payment response"""
     id: str
@@ -1089,6 +1118,7 @@ class PaymentResponse(BaseModel):
     appointment_start_time: Optional[datetime] = None
     session_type: Optional[str] = None
     receipt_number: Optional[str] = None
+    receipt_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -1110,6 +1140,7 @@ class PaymentListItem(BaseModel):
     paid_at: Optional[datetime] = None
     refund_status: str
     receipt_number: Optional[str] = None
+    receipt_id: Optional[str] = None
     created_at: datetime
 
 
@@ -1149,6 +1180,7 @@ class ReceiptResponse(BaseModel):
     patient_name: str
     patient_email: Optional[str] = None
     patient_dob: Optional[date] = None
+    patient_address: Optional[str] = None
     practitioner_name: str
     session_fee: int
     discount_amount: int
@@ -1174,6 +1206,8 @@ class PaymentHistoryItem(BaseModel):
     payment_method: Optional[str] = None
     paid_at: Optional[datetime] = None
     receipt_number: Optional[str] = None
+    receipt_id: Optional[str] = None
+    practitioner_id: str
 
 
 class PaymentFilters(BaseModel):

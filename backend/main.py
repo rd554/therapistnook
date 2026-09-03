@@ -26,6 +26,7 @@ from models import (
     ScheduledReminder, WhatsAppConfig, PractitionerAvailability, UnavailableDate, Appointment,
     TherapistDailyNote, IntakeSubmission,
     generate_payment_link_token, generate_profile_slug, generate_uuid,
+    SUMMARY_SOURCE_INPUT_TYPES,
 )
 from schemas import (
     LoginRequest, LoginResponse, ChangePasswordRequest,
@@ -44,6 +45,7 @@ from schemas import (
     VoiceProfileResponse, VoiceProfileStatus,
     TherapySessionResponse, TherapySessionListItem, SOAPNotesUpdate,
     TranscriptSessionCreate,
+    LastSessionSummary,
     AUDIO_MIME_TYPES,
     ClinicalIntelligenceResponse, ClinicalIntelligenceVersionResponse,
     ClinicalIntelligenceUpdateResponse, ClinicalIntelligenceStats,
@@ -51,7 +53,7 @@ from schemas import (
     ClinicalChatMessageResponse, ClinicalChatAskRequest,
     PaymentCreate, PaymentUpdate, PaymentStatusUpdate, PaymentResponse, PaymentListItem,
     PaymentDashboard, RecentTransaction, RefundRequest, RefundComplete,
-    ReceiptResponse, PaymentHistoryItem,
+    ReceiptResponse, PaymentHistoryItem, BulkInvoiceCreate,
     NotificationResponse, NotificationList,
     AppointmentWithPaymentCreate, AppointmentResponseWithPayment,
     PAYMENT_STATUSES, PAYMENT_METHODS,
@@ -203,6 +205,19 @@ def _code_type_lookup(scale_digits: list, gender: str) -> tuple:
 def _compute_age(dob: date) -> int:
     today = date.today()
     return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Appointment start/end times are always stored as UTC, but on SQLite
+    DateTime(timezone=True) columns come back naive (tzinfo stripped on the
+    round trip). A naive datetime serializes without a 'Z'/offset, so the
+    frontend's `new Date(...)` parses it as local time instead of UTC —
+    shifting sessions by the timezone offset (e.g. a 9am IST booking renders
+    at 3:30am and falls outside the calendar grid). Re-attach UTC tzinfo
+    before it goes into a response so it round-trips correctly."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 # ═════════════════════════════════════════════════════════════════════════════════
@@ -669,8 +684,8 @@ async def download_patient_bulk_template(
     # back off when matching header names on upload.
     headers = [
         "Patient Name*", "Date of Birth*", "Gender*", "Phone", "Email",
-        "Emergency Contact", "Referral Source", "Chief Complaint",
-        "Therapist Notes", "Status",
+        "Emergency Contact", "Emergency Contact Relation", "Referral Source",
+        "Chief Complaint", "Therapist Notes", "Status",
     ]
     ws.append(headers)
     header_font = Font(bold=True)
@@ -685,9 +700,9 @@ async def download_patient_bulk_template(
     ws.add_data_validation(gender_dv)
     ws.add_data_validation(status_dv)
     gender_dv.add("C2:C1000")
-    status_dv.add("J2:J1000")
+    status_dv.add("K2:K1000")
 
-    widths = [22, 14, 10, 16, 26, 26, 20, 44, 32, 10]
+    widths = [22, 14, 10, 16, 26, 26, 18, 20, 44, 32, 10]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 
@@ -701,7 +716,8 @@ async def download_patient_bulk_template(
         example.cell(row=1, column=col_idx).font = header_font
     example.append([
         "Jane Doe", "1990-05-14", "Female", "+91 98765 43210",
-        "jane@example.com", "John Doe - +91 91234 56789", "Self-referral",
+        "jane@example.com", "John Doe - +91 91234 56789", "Spouse",
+        "Self-referral",
         "Persistent low mood and difficulty sleeping for the past 2 months",
         "", "Active",
     ])
@@ -787,6 +803,7 @@ async def bulk_import_patients(
         "phone": ["phone", "phone number"],
         "email": ["email", "email id"],
         "emergency_contact": ["emergency contact"],
+        "emergency_contact_relation": ["emergency contact relation", "relation", "relationship"],
         "referral_source": ["referral source"],
         "chief_complaint": ["chief complaint"],
         "therapist_notes": ["therapist notes"],
@@ -910,6 +927,12 @@ async def bulk_import_patients(
                 status = status_norm
 
         emergency_contact = cell(row, "emergency_contact")
+        emergency_contact_relation = cell(row, "emergency_contact_relation")
+        if emergency_contact and emergency_contact_relation:
+            # Patient.emergency_contact is a single free-text field everywhere
+            # else in the app (PatientEdit, ClinicalHistoryWizard) — fold the
+            # relation in rather than adding a DB column only bulk-import fills.
+            emergency_contact = f"{emergency_contact} ({emergency_contact_relation})"
         referral_source = cell(row, "referral_source")
         chief_complaint = cell(row, "chief_complaint")
         therapist_notes = cell(row, "therapist_notes")
@@ -1002,7 +1025,47 @@ async def get_patient(
     # Ensure practitioner can only access their own patients
     if patient.practitioner_id != prac.id and prac.role != "owner":
         raise HTTPException(403, "Access denied")
-    
+
+    # Fee this patient was last charged, so Schedule Session can pre-fill
+    # Payment Details with their own rate instead of a generic default.
+    last_fee = (await db.execute(
+        select(Payment.session_fee)
+        .where(Payment.patient_id == patient.id)
+        .order_by(Payment.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    # Most recent processed session with an uploaded transcript, so Schedule
+    # Session can show "what happened last time" instead of a blank Notes
+    # field. Scoped to completed rows with a non-null summary (a "completed"
+    # row can still have summary=None if generation itself failed) and to
+    # SUMMARY_SOURCE_INPUT_TYPES (transcript only for now — see models.py).
+    # Ordered by session_date, not created_at/upload time, so a transcript
+    # uploaded today for an older session doesn't outrank a more recent one.
+    # action_items/open_questions are intentionally left off this surface —
+    # it's meant to support the therapist's own read of the last session,
+    # not hand them a pre-made discussion agenda.
+    last_session = (await db.execute(
+        select(TherapySession)
+        .where(
+            TherapySession.patient_id == patient.id,
+            TherapySession.input_type.in_(SUMMARY_SOURCE_INPUT_TYPES),
+            TherapySession.processing_status == "completed",
+            TherapySession.summary.isnot(None),
+        )
+        .order_by(TherapySession.session_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    last_session_summary = None
+    if last_session and last_session.summary:
+        last_session_summary = LastSessionSummary(
+            session_date=last_session.session_date,
+            presenting_issues=last_session.summary.get("presenting_issues"),
+            key_discussion_points=last_session.summary.get("key_discussion_points"),
+            emotional_themes=last_session.summary.get("emotional_themes"),
+            homework_discussed=last_session.summary.get("homework_discussed"),
+        )
+
     return PatientResponse(
         id=patient.id,
         practitioner_id=patient.practitioner_id,
@@ -1014,11 +1077,14 @@ async def get_patient(
         email=patient.email,
         emergency_contact=patient.emergency_contact,
         referral_source=patient.referral_source,
+        address=patient.address,
         status=patient.status,
         avatar_id=getattr(patient, "avatar_id", None),
         avatar_url=getattr(patient, "avatar_url", None),
         created_at=patient.created_at,
         updated_at=patient.updated_at,
+        last_session_fee=last_fee,
+        last_session_summary=last_session_summary,
     )
 
 
@@ -1071,6 +1137,7 @@ async def create_patient(
         email=data.email.strip().lower() if data.email else None,
         emergency_contact=data.emergency_contact.strip() if data.emergency_contact else None,
         referral_source=data.referral_source.strip() if data.referral_source else None,
+        address=data.address.strip() if data.address else None,
         status="active",
     )
     db.add(patient)
@@ -1088,6 +1155,7 @@ async def create_patient(
         email=patient.email,
         emergency_contact=patient.emergency_contact,
         referral_source=patient.referral_source,
+        address=patient.address,
         status=patient.status,
         avatar_id=getattr(patient, "avatar_id", None),
         avatar_url=getattr(patient, "avatar_url", None),
@@ -1153,7 +1221,10 @@ async def update_patient(
     
     if data.referral_source is not None:
         patient.referral_source = data.referral_source.strip() if data.referral_source else None
-    
+
+    if data.address is not None:
+        patient.address = data.address.strip() if data.address else None
+
     if data.status is not None:
         if data.status not in ["active", "archived"]:
             raise HTTPException(400, "Status must be 'active' or 'archived'")
@@ -1173,6 +1244,7 @@ async def update_patient(
         email=patient.email,
         emergency_contact=patient.emergency_contact,
         referral_source=patient.referral_source,
+        address=patient.address,
         status=patient.status,
         avatar_id=getattr(patient, "avatar_id", None),
         avatar_url=getattr(patient, "avatar_url", None),
@@ -5648,8 +5720,8 @@ async def list_appointments(
             patient_id=appt.patient_id,
             patient_name=patient.full_name if patient else "Unknown",
             date=appt.date,
-            start_time=appt.start_time,
-            end_time=appt.end_time,
+            start_time=_as_utc(appt.start_time),
+            end_time=_as_utc(appt.end_time),
             duration_minutes=appt.duration_minutes,
             session_type=appt.session_type,
             session_mode=appt.session_mode,
@@ -5690,8 +5762,8 @@ async def get_calendar_events(
         events.append(CalendarEvent(
             id=appt.id,
             title=patient.full_name if patient else "Unknown Patient",
-            start=appt.start_time,
-            end=appt.end_time,
+            start=_as_utc(appt.start_time),
+            end=_as_utc(appt.end_time),
             patient_id=appt.patient_id,
             patient_name=patient.full_name if patient else "Unknown",
             session_type=appt.session_type,
@@ -5742,8 +5814,8 @@ async def get_today_schedule(
             patient_id=appt.patient_id,
             patient_name=patient.full_name if patient else "Unknown",
             date=appt.date,
-            start_time=appt.start_time,
-            end_time=appt.end_time,
+            start_time=_as_utc(appt.start_time),
+            end_time=_as_utc(appt.end_time),
             duration_minutes=appt.duration_minutes,
             session_type=appt.session_type,
             session_mode=appt.session_mode,
@@ -5800,8 +5872,8 @@ async def get_upcoming_appointments(
             patient_id=appt.patient_id,
             patient_name=patient.full_name if patient else "Unknown",
             date=appt.date,
-            start_time=appt.start_time,
-            end_time=appt.end_time,
+            start_time=_as_utc(appt.start_time),
+            end_time=_as_utc(appt.end_time),
             duration_minutes=appt.duration_minutes,
             session_type=appt.session_type,
             session_mode=appt.session_mode,
@@ -5910,8 +5982,8 @@ async def get_appointment(
         patient_id=appt.patient_id,
         patient_name=patient.full_name if patient else "Unknown",
         date=appt.date,
-        start_time=appt.start_time,
-        end_time=appt.end_time,
+        start_time=_as_utc(appt.start_time),
+        end_time=_as_utc(appt.end_time),
         duration_minutes=appt.duration_minutes,
         session_type=appt.session_type,
         session_mode=appt.session_mode,
@@ -6115,19 +6187,14 @@ async def _email_meeting_link_to_patient(db: AsyncSession, appt, patient, practi
 @app.post("/api/appointments", response_model=AppointmentResponse)
 async def create_appointment(
     data: AppointmentCreate,
-    for_practitioner_id: str = Query(None),
     prac=Depends(get_current_practitioner),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new appointment."""
-    # Determine practitioner
+    """Create a new appointment. Always booked under the logged-in
+    practitioner — nobody (including an owner) can schedule on another
+    practitioner's behalf."""
     target_prac_id = prac.id
-    if for_practitioner_id and prac.role == "owner":
-        target_prac_id = for_practitioner_id
-        target_prac = await db.get(Practitioner, target_prac_id)
-        if not target_prac:
-            raise HTTPException(404, "Practitioner not found")
-    
+
     # Validate patient
     patient = await db.get(Patient, data.patient_id)
     if not patient:
@@ -6196,8 +6263,8 @@ async def create_appointment(
         patient_id=appt.patient_id,
         patient_name=patient.full_name,
         date=appt.date,
-        start_time=appt.start_time,
-        end_time=appt.end_time,
+        start_time=_as_utc(appt.start_time),
+        end_time=_as_utc(appt.end_time),
         duration_minutes=appt.duration_minutes,
         session_type=appt.session_type,
         session_mode=appt.session_mode,
@@ -6312,8 +6379,8 @@ async def update_appointment(
         patient_id=appt.patient_id,
         patient_name=patient.full_name if patient else "Unknown",
         date=appt.date,
-        start_time=appt.start_time,
-        end_time=appt.end_time,
+        start_time=_as_utc(appt.start_time),
+        end_time=_as_utc(appt.end_time),
         duration_minutes=appt.duration_minutes,
         session_type=appt.session_type,
         session_mode=appt.session_mode,
@@ -6413,8 +6480,8 @@ async def reschedule_appointment(
         patient_id=new_appt.patient_id,
         patient_name=patient.full_name if patient else "Unknown",
         date=new_appt.date,
-        start_time=new_appt.start_time,
-        end_time=new_appt.end_time,
+        start_time=_as_utc(new_appt.start_time),
+        end_time=_as_utc(new_appt.end_time),
         duration_minutes=new_appt.duration_minutes,
         session_type=new_appt.session_type,
         session_mode=new_appt.session_mode,
@@ -6444,10 +6511,13 @@ async def _remove_unpaid_payment_for_appointment(db: AsyncSession, appointment_i
         select(Payment).where(Payment.appointment_id == appointment_id)
     )
     payment = payment_result.scalar_one_or_none()
-    if not payment or payment.status in ("paid", "refunded"):
+    # A pending payment can now carry a real invoice (pre-payment invoicing),
+    # possibly a bulk one shared with other payments — treat "already
+    # invoiced" the same as paid/refunded and leave it alone rather than
+    # deleting a Receipt that other payments still point at.
+    if not payment or payment.status in ("paid", "refunded") or payment.receipt_id:
         return
 
-    await db.execute(delete(Receipt).where(Receipt.payment_id == payment.id))
     await db.delete(payment)
 
 
@@ -6535,8 +6605,8 @@ async def generate_appointment_meeting_link(
         patient_id=appt.patient_id,
         patient_name=patient.full_name if patient else "Unknown",
         date=appt.date,
-        start_time=appt.start_time,
-        end_time=appt.end_time,
+        start_time=_as_utc(appt.start_time),
+        end_time=_as_utc(appt.end_time),
         duration_minutes=appt.duration_minutes,
         session_type=appt.session_type,
         session_mode=appt.session_mode,
@@ -6670,8 +6740,8 @@ async def get_patient_appointments(
             patient_id=appt.patient_id,
             patient_name=patient.full_name,
             date=appt.date,
-            start_time=appt.start_time,
-            end_time=appt.end_time,
+            start_time=_as_utc(appt.start_time),
+            end_time=_as_utc(appt.end_time),
             duration_minutes=appt.duration_minutes,
             session_type=appt.session_type,
             session_mode=appt.session_mode,
@@ -7103,10 +7173,8 @@ async def list_payments(
         practitioner = await db.get(Practitioner, p.practitioner_id)
         patient = await db.get(Patient, p.patient_id)
         appt = await db.get(Appointment, p.appointment_id)
-        receipt = (await db.execute(
-            select(Receipt).where(Receipt.payment_id == p.id)
-        )).scalar_one_or_none()
-        
+        receipt = await db.get(Receipt, p.receipt_id) if p.receipt_id else None
+
         result.append(PaymentListItem(
             id=p.id,
             appointment_id=p.appointment_id,
@@ -7123,6 +7191,7 @@ async def list_payments(
             paid_at=p.paid_at,
             refund_status=p.refund_status,
             receipt_number=receipt.receipt_number if receipt else None,
+            receipt_id=p.receipt_id,
             created_at=p.created_at,
         ))
     
@@ -7147,10 +7216,8 @@ async def get_payment(
     practitioner = await db.get(Practitioner, payment.practitioner_id)
     patient = await db.get(Patient, payment.patient_id)
     appt = await db.get(Appointment, payment.appointment_id)
-    receipt = (await db.execute(
-        select(Receipt).where(Receipt.payment_id == payment.id)
-    )).scalar_one_or_none()
-    
+    receipt = await db.get(Receipt, payment.receipt_id) if payment.receipt_id else None
+
     return PaymentResponse(
         id=payment.id,
         appointment_id=payment.appointment_id,
@@ -7180,9 +7247,10 @@ async def get_payment(
         refund_completed_at=payment.refund_completed_at,
         notes=payment.notes,
         appointment_date=appt.date if appt else None,
-        appointment_start_time=appt.start_time if appt else None,
+        appointment_start_time=_as_utc(appt.start_time) if appt else None,
         session_type=appt.session_type if appt else None,
         receipt_number=receipt.receipt_number if receipt else None,
+        receipt_id=payment.receipt_id,
         created_at=payment.created_at,
         updated_at=payment.updated_at,
     )
@@ -7260,10 +7328,13 @@ async def mark_payment_paid(
         payment.notes = data.notes
     
     await db.commit()
-    
-    # Generate receipt
-    await _generate_receipt(db, payment)
-    
+
+    # Invoicing is a separate, deliberate practitioner action (see
+    # POST /api/payments/{id}/invoice and the bulk-invoice endpoint below) —
+    # marking a session paid no longer issues an invoice number on its own,
+    # so a session invoiced individually can't also get swept into a later
+    # bulk invoice and double-numbered.
+
     # Create notification
     patient = await db.get(Patient, payment.patient_id)
     await _create_payment_notification(
@@ -7440,44 +7511,134 @@ async def complete_refund(
 
 # ─── Receipts ───────────────────────────────────────────────────────────────────
 
-async def _generate_receipt(db: AsyncSession, payment: Payment) -> Receipt:
-    """Generate receipt for a paid payment."""
+async def _generate_receipt(db: AsyncSession, payments: list[Payment]) -> Receipt:
+    """Issue a new invoice covering one or more payments (one row per payment
+    on the PDF). Callers are responsible for validating eligibility first —
+    same patient/practitioner, none already invoiced, status pending or paid
+    — since this always creates a fresh invoice number, never reuses one."""
     from models import generate_uuid
-    
-    # Check if receipt already exists
-    existing = (await db.execute(
-        select(Receipt).where(Receipt.payment_id == payment.id)
-    )).scalar_one_or_none()
-    if existing:
-        return existing
-    
-    patient = await db.get(Patient, payment.patient_id)
-    practitioner = await db.get(Practitioner, payment.practitioner_id)
-    appt = await db.get(Appointment, payment.appointment_id)
-    
+
+    anchor = payments[0]
+    patient = await db.get(Patient, anchor.patient_id)
+    practitioner = await db.get(Practitioner, anchor.practitioner_id)
+
+    appt_dates = []
+    session_fee_total = discount_total = tax_total = final_total = 0
+    for p in payments:
+        appt = await db.get(Appointment, p.appointment_id)
+        if appt:
+            appt_dates.append(appt.date)
+        session_fee_total += p.session_fee
+        discount_total += p.discount_amount
+        tax_total += p.tax_amount
+        final_total += p.final_amount
+    anchor_appt = await db.get(Appointment, anchor.appointment_id)
+
     receipt = Receipt(
         id=generate_uuid(),
-        payment_id=payment.id,
+        payment_id=anchor.id,
         patient_name=patient.full_name if patient else "Unknown",
         patient_email=patient.email if patient else None,
         patient_dob=patient.date_of_birth if patient else None,
+        patient_address=patient.address if patient else None,
         practitioner_name=practitioner.name if practitioner else "Unknown",
-        session_fee=payment.session_fee,
-        discount_amount=payment.discount_amount,
-        tax_amount=payment.tax_amount,
-        final_amount=payment.final_amount,
-        currency=payment.currency,
-        appointment_date=appt.date if appt else date.today(),
-        session_type=appt.session_type if appt else "therapy_session",
-        payment_method=payment.payment_method,
-        payment_date=payment.paid_at or datetime.now(timezone.utc),
+        session_fee=session_fee_total,
+        discount_amount=discount_total,
+        tax_amount=tax_total,
+        final_amount=final_total,
+        currency=anchor.currency,
+        appointment_date=min(appt_dates) if appt_dates else date.today(),
+        session_type=anchor_appt.session_type if anchor_appt else "therapy_session",
+        # Snapshot fields below only make unambiguous sense for a single-
+        # payment invoice; left as the anchor's values for a bulk one since
+        # they're not shown per-line (the PDF's item table reads live from
+        # each covered payment/appointment instead).
+        payment_method=anchor.payment_method if len(payments) == 1 else None,
+        payment_date=anchor.paid_at or datetime.now(timezone.utc),
     )
-    
+
     db.add(receipt)
+    await db.flush()  # need receipt.id before linking payments to it
+
+    for p in payments:
+        p.receipt_id = receipt.id
+
     await db.commit()
     await db.refresh(receipt)
-    
+
     return receipt
+
+
+@app.post("/api/patients/{patient_id}/payments/bulk-invoice", response_model=ReceiptResponse)
+async def create_bulk_invoice(
+    patient_id: str,
+    data: BulkInvoiceCreate,
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Issue one invoice covering several of a patient's sessions (e.g. a
+    whole month, or several months ticked together). Sessions already
+    invoiced individually are permanently locked to that invoice and can't
+    be swept into this one — the caller should only offer un-invoiced
+    sessions in the picker to begin with."""
+    patient = await db.get(Patient, patient_id)
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+    if prac.role != "owner" and patient.practitioner_id != prac.id:
+        raise HTTPException(403, "Access denied")
+
+    payment_ids = list(dict.fromkeys(data.payment_ids or []))
+    if len(payment_ids) < 1:
+        raise HTTPException(400, "Select at least one session to invoice")
+
+    payments = (await db.execute(
+        select(Payment).where(Payment.id.in_(payment_ids))
+    )).scalars().all()
+    if len(payments) != len(payment_ids):
+        raise HTTPException(404, "One or more sessions not found")
+    if any(p.patient_id != patient_id for p in payments):
+        raise HTTPException(400, "All sessions must belong to this patient")
+    practitioner_ids = {p.practitioner_id for p in payments}
+    if len(practitioner_ids) > 1:
+        raise HTTPException(400, "All sessions in one invoice must belong to the same practitioner")
+    if prac.role != "owner" and practitioner_ids != {prac.id}:
+        raise HTTPException(403, "Access denied")
+    if any(p.receipt_id for p in payments):
+        raise HTTPException(400, "One or more sessions are already invoiced")
+    if any(p.status not in ("pending", "paid") for p in payments):
+        raise HTTPException(400, "Only pending or paid sessions can be invoiced")
+
+    # Order deterministically (by appointment date) so the anchor/primary
+    # payment on the Receipt is always the earliest session in the invoice.
+    dated = []
+    for p in payments:
+        appt = await db.get(Appointment, p.appointment_id)
+        dated.append((appt.date if appt else date.today(), p))
+    dated.sort(key=lambda t: t[0])
+    ordered_payments = [p for _, p in dated]
+
+    receipt = await _generate_receipt(db, ordered_payments)
+
+    return ReceiptResponse(
+        id=receipt.id,
+        payment_id=receipt.payment_id,
+        receipt_number=receipt.receipt_number,
+        patient_name=receipt.patient_name,
+        patient_email=receipt.patient_email,
+        patient_dob=receipt.patient_dob,
+        patient_address=receipt.patient_address,
+        practitioner_name=receipt.practitioner_name,
+        session_fee=receipt.session_fee,
+        discount_amount=receipt.discount_amount,
+        tax_amount=receipt.tax_amount,
+        final_amount=receipt.final_amount,
+        currency=receipt.currency,
+        appointment_date=receipt.appointment_date,
+        session_type=receipt.session_type,
+        payment_method=receipt.payment_method,
+        payment_date=receipt.payment_date,
+        generated_at=receipt.generated_at,
+    )
 
 
 @app.get("/api/payments/{payment_id}/receipt", response_model=ReceiptResponse)
@@ -7486,26 +7647,25 @@ async def get_receipt(
     prac=Depends(get_current_practitioner),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get receipt for a payment."""
+    """Get (or, the first time, create) the invoice for a payment. Invoicing
+    is now an explicit action rather than automatic-on-payment, so this
+    doubles as the "Invoice" button's handler for a not-yet-invoiced pending
+    or paid session, and as a plain lookup once one exists."""
     payment = await db.get(Payment, payment_id)
     if not payment:
         raise HTTPException(404, "Payment not found")
-    
+
     # Access control
     if prac.role != "owner" and payment.practitioner_id != prac.id:
         raise HTTPException(403, "Access denied")
-    
-    if payment.status != "paid" and payment.status != "refunded":
-        raise HTTPException(400, "Invoice only available for paid payments")
-    
-    receipt = (await db.execute(
-        select(Receipt).where(Receipt.payment_id == payment.id)
-    )).scalar_one_or_none()
-    
-    if not receipt:
-        # Generate receipt if not exists
-        receipt = await _generate_receipt(db, payment)
-    
+
+    if payment.receipt_id:
+        receipt = await db.get(Receipt, payment.receipt_id)
+    else:
+        if payment.status not in ("pending", "paid"):
+            raise HTTPException(400, "Only pending or paid sessions can be invoiced")
+        receipt = await _generate_receipt(db, [payment])
+
     return ReceiptResponse(
         id=receipt.id,
         payment_id=receipt.payment_id,
@@ -7513,6 +7673,7 @@ async def get_receipt(
         patient_name=receipt.patient_name,
         patient_email=receipt.patient_email,
         patient_dob=receipt.patient_dob,
+        patient_address=receipt.patient_address,
         practitioner_name=receipt.practitioner_name,
         session_fee=receipt.session_fee,
         discount_amount=receipt.discount_amount,
@@ -7551,9 +7712,16 @@ async def get_invoice_pdf(
     """Downloadable invoice PDF for a paid payment — used for insurance/employer
     reimbursement claims. Token-based auth (query param, not header) since this
     is hit via direct browser navigation/<a href>/<iframe>, matching the report/pdf
-    and document-download endpoints elsewhere in this file."""
+    and document-download endpoints elsewhere in this file.
+
+    Layout mirrors a standard tax-invoice template (header / Bill To / item
+    table / totals ladder / signature) — same for every practitioner. The item
+    table has one row per payment this invoice covers: a single row for a
+    normal invoice, several for a bulk invoice grouping multiple sessions
+    (possibly a mix of paid and still-pending) into one document."""
     from auth import decode_token
     from fpdf import FPDF
+    from num2words import num2words
 
     payload = decode_token(token)
     prac = await db.get(Practitioner, payload["sub"])
@@ -7565,29 +7733,39 @@ async def get_invoice_pdf(
         raise HTTPException(404, "Payment not found")
     if prac.role != "owner" and payment.practitioner_id != prac.id:
         raise HTTPException(403, "Access denied")
-    if payment.status not in ("paid", "refunded"):
-        raise HTTPException(400, "Invoice only available for paid payments")
 
-    receipt = (await db.execute(
-        select(Receipt).where(Receipt.payment_id == payment.id)
-    )).scalar_one_or_none()
-    if not receipt:
-        receipt = await _generate_receipt(db, payment)
+    if payment.receipt_id:
+        receipt = await db.get(Receipt, payment.receipt_id)
+    else:
+        if payment.status not in ("pending", "paid"):
+            raise HTTPException(400, "Only pending or paid sessions can be invoiced")
+        receipt = await _generate_receipt(db, [payment])
 
-    # Header info (name, credentials, clinic address) and the signature/stamp
-    # images come from the practitioner who actually did the session — not the
-    # viewer, which may be an owner looking at another practitioner's invoice.
+    # All payments this invoice covers — a single row for a normal invoice,
+    # several (possibly a mix of paid and still-pending) for a bulk one.
+    covered_payments = (await db.execute(
+        select(Payment).where(Payment.receipt_id == receipt.id)
+    )).scalars().all()
+
+    # Header info (name, clinic address, email) and the signature/stamp images
+    # come from the practitioner who actually did the session — not the viewer,
+    # which may be an owner looking at another practitioner's invoice.
     profile = (await db.execute(
         select(PractitionerProfile).where(
             PractitionerProfile.practitioner_id == payment.practitioner_id
         )
     )).scalar_one_or_none()
-    appt = await db.get(Appointment, payment.appointment_id)
+    session_practitioner = await db.get(Practitioner, payment.practitioner_id)
+    # Snapshot on the receipt is canonical (matches what patient_name/patient_dob
+    # already do); fall back to the live patient record for receipts generated
+    # before the address field/column existed so old invoices don't show blank.
+    patient = await db.get(Patient, payment.patient_id)
 
     title_name = receipt.practitioner_name
     qualifications_line = None
     license_line = None
     clinic_address = None
+    email_line = session_practitioner.email if session_practitioner else None
     signature_path = None
     stamp_path = None
     if profile:
@@ -7597,19 +7775,48 @@ async def get_invoice_pdf(
         if profile.license_number:
             license_line = f"License No: {profile.license_number}"
         clinic_address = profile.clinic_address
+        email_line = profile.public_email or email_line
         if profile.signature_image_path:
             signature_path = await get_file_path(profile.signature_image_path)
         if profile.stamp_image_path:
             stamp_path = await get_file_path(profile.stamp_image_path)
 
-    mode_label = None
-    if appt and appt.session_mode:
-        mode_label = "Online" if appt.session_mode == "online" else "In-person"
-
     # Core Helvetica font is Windows-1252 only and has no Rupee sign glyph —
     # spell it out instead of risking an encoding error, same workaround as
     # the em-dash/quote sanitize() map used for the MMPI-2 report PDF above.
-    amount = f"Rs. {receipt.final_amount / 100:,.2f}"
+    def fmt_amount(paise: int) -> str:
+        return f"Rs. {paise / 100:,.2f}"
+
+    # One row per covered payment, oldest session first — for a plain
+    # single-session invoice this is just the one row it's always been.
+    dated_payments = []
+    for cp in covered_payments:
+        cp_appt = await db.get(Appointment, cp.appointment_id)
+        dated_payments.append((cp_appt.date if cp_appt else receipt.appointment_date, cp, cp_appt))
+    dated_payments.sort(key=lambda t: t[0])
+
+    item_rows = []
+    unpaid_total = 0
+    any_refunded = False
+    for appt_date, cp, cp_appt in dated_payments:
+        session_label = (cp_appt.session_type if cp_appt else "therapy_session").replace("_", " ").title()
+        description_bits = [session_label, appt_date.strftime("%d %b %Y")]
+        if cp_appt and cp_appt.session_mode:
+            description_bits.append("Online" if cp_appt.session_mode == "online" else "In-person")
+        if cp.status == "refunded":
+            any_refunded = True
+            description_bits.append("Refunded")
+        elif cp.status != "paid":
+            unpaid_total += cp.final_amount
+            description_bits.append("Payment Pending")
+        item_rows.append({
+            "description": " - ".join(description_bits),
+            "qty": 1,
+            "rate": cp.session_fee,
+            "amount": cp.session_fee,
+        })
+
+    invoice_date = receipt.generated_at.strftime("%d %b %Y")
 
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=20)
@@ -7620,87 +7827,150 @@ async def get_invoice_pdf(
     right_x, right_w = 130, 65  # ends at page x=195
     top_y = pdf.get_y()
 
-    # ─── Left: practitioner header (name / credentials / license / clinic address) ───
+    # ─── Left: practitioner header (name / clinic address / email) ───
     pdf.set_xy(left_x, top_y)
     pdf.set_font("Helvetica", "B", 14)
     pdf.multi_cell(left_w, 6.5, title_name)
-    if qualifications_line:
-        pdf.set_x(left_x)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.multi_cell(left_w, 5, qualifications_line)
-    if license_line:
-        pdf.set_x(left_x)
-        pdf.set_font("Helvetica", "", 9)
-        pdf.multi_cell(left_w, 5, license_line)
     if clinic_address:
         pdf.set_x(left_x)
         pdf.set_font("Helvetica", "", 9)
         pdf.multi_cell(left_w, 5, clinic_address)
+    if email_line:
+        pdf.set_x(left_x)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(left_w, 5, email_line)
     left_bottom_y = pdf.get_y()
 
-    # ─── Right: "INVOICE" + invoice number/date ───
+    # ─── Right: "TAX INVOICE" + invoice#/date/terms/due date ───
     pdf.set_xy(right_x, top_y)
-    pdf.set_font("Helvetica", "B", 22)
-    pdf.cell(right_w, 10, "INVOICE", align="R", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_x(right_x)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(right_w, 9, "TAX INVOICE", align="R", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(right_w, 5, receipt.receipt_number, align="R", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_x(right_x)
-    pdf.cell(right_w, 5, receipt.generated_at.strftime("%d %b %Y"), align="R", new_x="LMARGIN", new_y="NEXT")
+    right_meta = [
+        ("Invoice#", receipt.receipt_number),
+        ("Invoice Date", invoice_date),
+        ("Terms", "Due on Receipt"),
+        ("Due Date", invoice_date),
+    ]
+    for label, value in right_meta:
+        pdf.set_x(right_x)
+        pdf.cell(right_w, 5, f"{label}: {value}", align="R", new_x="LMARGIN", new_y="NEXT")
     right_bottom_y = pdf.get_y()
 
     pdf.set_y(max(left_bottom_y, right_bottom_y) + 4)
     pdf.set_draw_color(41, 98, 255)
     pdf.set_line_width(0.6)
     pdf.line(15, pdf.get_y(), 195, pdf.get_y())
-    pdf.ln(10)
+    pdf.ln(8)
 
-    # ─── Patient/session box (left) and amount box (right) ───
-    box_top = pdf.get_y()
-    left_box_x, left_box_w = 15, 115
-    right_box_x, right_box_w = 135, 60
-
-    left_rows = [("Patient:", receipt.patient_name)]
+    # ─── Bill To ───
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 5, "BILL TO", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, receipt.patient_name, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
     if receipt.patient_dob:
-        left_rows.append(("Date of Birth:", receipt.patient_dob.strftime("%d %b %Y")))
-    left_rows.append(("Session Date:", receipt.appointment_date.strftime("%d %b %Y")))
-    left_rows.append(("Session Type:", receipt.session_type.replace("_", " ").title()))
-    if mode_label:
-        left_rows.append(("Mode:", mode_label))
-    left_rows.append(("Payment Date:", receipt.payment_date.strftime("%d %b %Y")))
-    left_rows.append(("Status:", "Refunded" if payment.status == "refunded" else "Paid"))
+        pdf.cell(0, 5, f"DOB: {receipt.patient_dob.strftime('%d %b %Y')}", new_x="LMARGIN", new_y="NEXT")
+    bill_address = receipt.patient_address or (patient.address if patient else None)
+    if bill_address:
+        pdf.multi_cell(left_w, 5, bill_address)
+    pdf.ln(6)
 
-    row_h = 8
-    pad = 6
-    box_h = max(pad * 2 + row_h * len(left_rows), 50)
+    # ─── Item table ───
+    table_x = 15
+    col_desc_w, col_qty_w, col_rate_w, col_amt_w = 100, 20, 30, 30
+    table_w = col_desc_w + col_qty_w + col_rate_w + col_amt_w
 
-    pdf.set_draw_color(210, 210, 210)
-    pdf.set_line_width(0.3)
-    pdf.rect(left_box_x, box_top, left_box_w, box_h)
-    pdf.rect(right_box_x, box_top, right_box_w, box_h)
+    pdf.set_x(table_x)
+    pdf.set_fill_color(41, 98, 255)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(col_desc_w, 8, "  Item & Description", fill=True)
+    pdf.cell(col_qty_w, 8, "Qty", align="C", fill=True)
+    pdf.cell(col_rate_w, 8, "Rate", align="R", fill=True)
+    pdf.cell(col_amt_w, 8, "Amount  ", align="R", fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
 
-    label_w = 42
-    y = box_top + pad
-    for label, value in left_rows:
-        pdf.set_xy(left_box_x + 6, y)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(label_w, row_h - 2, label)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.cell(left_box_w - label_w - 12, row_h - 2, value)
-        y += row_h
+    pdf.set_font("Helvetica", "", 9)
+    for row in item_rows:
+        row_y = pdf.get_y()
+        pdf.set_xy(table_x + 2, row_y + 2)
+        pdf.multi_cell(col_desc_w - 4, 5, row["description"])
+        row_h = max(pdf.get_y() - row_y, 8)
+        pdf.set_xy(table_x + col_desc_w, row_y + 2)
+        pdf.cell(col_qty_w, row_h - 2, str(row["qty"]), align="C")
+        pdf.cell(col_rate_w, row_h - 2, fmt_amount(row["rate"]), align="R")
+        pdf.cell(col_amt_w, row_h - 2, fmt_amount(row["amount"]), align="R", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_draw_color(225, 225, 225)
+        pdf.line(table_x, row_y + row_h, table_x + table_w, row_y + row_h)
+        pdf.set_y(row_y + row_h)
 
-    pdf.set_xy(right_box_x + 6, box_top + pad)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(right_box_w - 12, 6, "Session Fee")
-    pdf.set_xy(right_box_x + 6, box_top + pad + 12)
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(right_box_w - 12, 8, amount)
+    pdf.ln(6)
 
-    pdf.set_y(box_top + box_h + 20)
+    # ─── Total In Words (left) + Sub Total/Discount/Tax/Total/Balance Due ladder (right) ───
+    totals_top = pdf.get_y()
 
-    # ─── Bottom-right: signature/stamp space above the printed name ───
-    # Most practitioners won't upload either — the gap is reserved either way so
-    # the invoice can be signed/stamped by hand on a printout too.
+    rupees, remainder_paise = divmod(receipt.final_amount, 100)
+    words = num2words(rupees, lang="en_IN").title()
+    if remainder_paise:
+        paise_words = num2words(remainder_paise, lang="en_IN").title()
+        words_line = f"Indian Rupee {words} And {paise_words} Paise Only"
+    else:
+        words_line = f"Indian Rupee {words} Only"
+
+    pdf.set_x(15)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 5, "Total In Words", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_x(15)
+    pdf.multi_cell(left_w, 5, words_line)
+    words_bottom_y = pdf.get_y()
+
+    totals_rows = [("Sub Total", fmt_amount(receipt.session_fee), False)]
+    if receipt.discount_amount:
+        totals_rows.append(("Discount", f"-{fmt_amount(receipt.discount_amount)}", False))
+    if receipt.tax_amount:
+        tax_label = "Tax"
+        if payment.tax_percentage:
+            tax_label = f"Tax ({payment.tax_percentage / 100:g}%)"
+        totals_rows.append((tax_label, f"+{fmt_amount(receipt.tax_amount)}", False))
+    totals_rows.append(("Total", fmt_amount(receipt.final_amount), True))
+    # Balance Due only counts sessions still awaiting payment — a mixed bulk
+    # invoice (some sessions already paid, some pre-payment invoiced) should
+    # only show the unpaid portion as owed, not the whole invoice.
+    totals_rows.append(("Balance Due", fmt_amount(unpaid_total), True))
+
+    totals_x, totals_w = 120, 75
+    totals_label_w = 42
+    y = totals_top
+    for label, value, bold in totals_rows:
+        pdf.set_xy(totals_x, y)
+        pdf.set_font("Helvetica", "B" if bold else "", 9)
+        pdf.cell(totals_label_w, 6, label)
+        pdf.cell(totals_w - totals_label_w, 6, value, align="R")
+        y += 6
+    if any_refunded:
+        refunded_dates = [cp.refund_completed_at for _, cp, _ in dated_payments if cp.status == "refunded" and cp.refund_completed_at]
+        refund_date = max(refunded_dates).strftime("%d %b %Y") if refunded_dates else invoice_date
+        note = "Refunded on" if len(covered_payments) == 1 else "One or more sessions refunded on"
+        pdf.set_xy(totals_x, y)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(totals_w, 5, f"{note} {refund_date}", align="R")
+        y += 5
+    totals_bottom_y = y
+
+    pdf.set_y(max(words_bottom_y, totals_bottom_y) + 12)
+
+    # ─── Bottom-right: signature block ───
+    # An uploaded signature image is treated as the complete signature block —
+    # some practitioners bake their name/qualifications/license number into the
+    # image itself. Only fall back to composed text (name + qualifications +
+    # license) when no image is uploaded, so practitioners without one still
+    # get an identified signature line.
     sig_box_x, sig_box_w = 130, 65
     gap_h = 22
     line_y = pdf.get_y() + gap_h
@@ -7719,9 +7989,20 @@ async def get_invoice_pdf(
     pdf.set_draw_color(120, 120, 120)
     pdf.set_line_width(0.3)
     pdf.line(sig_box_x, line_y, sig_box_x + sig_box_w, line_y)
-    pdf.set_xy(sig_box_x, line_y + 2)
+
+    sig_y = line_y + 2
+    pdf.set_xy(sig_box_x, sig_y)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(sig_box_w, 6, title_name, align="C")
+    pdf.cell(sig_box_w, 6, title_name, align="C", new_x="LMARGIN", new_y="NEXT")
+    if not signature_path:
+        if qualifications_line:
+            pdf.set_xy(sig_box_x, pdf.get_y())
+            pdf.set_font("Helvetica", "", 8)
+            pdf.multi_cell(sig_box_w, 4, qualifications_line, align="C")
+        if license_line:
+            pdf.set_xy(sig_box_x, pdf.get_y())
+            pdf.set_font("Helvetica", "", 8)
+            pdf.multi_cell(sig_box_w, 4, license_line, align="C")
 
     buf = io.BytesIO()
     pdf.output(buf)
@@ -7763,10 +8044,8 @@ async def get_patient_payment_history(
     result = []
     for p in payments:
         appt = await db.get(Appointment, p.appointment_id)
-        receipt = (await db.execute(
-            select(Receipt).where(Receipt.payment_id == p.id)
-        )).scalar_one_or_none()
-        
+        receipt = await db.get(Receipt, p.receipt_id) if p.receipt_id else None
+
         result.append(PaymentHistoryItem(
             id=p.id,
             appointment_id=p.appointment_id,
@@ -7778,6 +8057,8 @@ async def get_patient_payment_history(
             payment_method=p.payment_method,
             paid_at=p.paid_at,
             receipt_number=receipt.receipt_number if receipt else None,
+            receipt_id=p.receipt_id,
+            practitioner_id=p.practitioner_id,
         ))
     
     return result
@@ -7788,22 +8069,17 @@ async def get_patient_payment_history(
 @app.post("/api/appointments/with-payment", response_model=AppointmentResponseWithPayment)
 async def create_appointment_with_payment(
     data: AppointmentWithPaymentCreate,
-    for_practitioner_id: str = Query(None),
     prac=Depends(get_current_practitioner),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create appointment with associated payment record."""
+    """Create appointment with associated payment record. Always booked
+    under the logged-in practitioner — nobody (including an owner) can
+    schedule on another practitioner's behalf."""
     from models import generate_uuid
     from datetime import timedelta
-    
-    # Determine practitioner
+
     target_practitioner_id = prac.id
-    if for_practitioner_id and prac.role == "owner":
-        target_practitioner_id = for_practitioner_id
-        target_prac = await db.get(Practitioner, for_practitioner_id)
-        if not target_prac:
-            raise HTTPException(404, "Practitioner not found")
-    
+
     # Verify patient exists and belongs to practitioner
     patient = await db.get(Patient, data.patient_id)
     if not patient:
@@ -7872,7 +8148,7 @@ async def create_appointment_with_payment(
     
     # Link payment to appointment
     appointment.payment_id = payment_id
-    
+
     await db.commit()
     await db.refresh(appointment)
     await db.refresh(payment)
@@ -7888,8 +8164,8 @@ async def create_appointment_with_payment(
         patient_id=appointment.patient_id,
         patient_name=patient.full_name,
         date=appointment.date,
-        start_time=appointment.start_time,
-        end_time=appointment.end_time,
+        start_time=_as_utc(appointment.start_time),
+        end_time=_as_utc(appointment.end_time),
         duration_minutes=appointment.duration_minutes,
         session_type=appointment.session_type,
         session_mode=appointment.session_mode,
@@ -9602,13 +9878,15 @@ async def get_booking_receipt(
     
     if not payment or payment.status != "paid":
         raise HTTPException(404, "Payment not found or not completed")
-    
-    receipt = (await db.execute(
-        select(Receipt).where(Receipt.payment_id == payment.id)
-    )).scalar_one_or_none()
-    
-    if not receipt:
-        raise HTTPException(404, "Invoice not found")
+
+    # The practitioner may already have invoiced this session (individually
+    # or as part of a bulk invoice); otherwise generate the patient's own
+    # single-session invoice now — either way, once generated this payment
+    # is locked out of any future bulk invoice for it.
+    if payment.receipt_id:
+        receipt = await db.get(Receipt, payment.receipt_id)
+    else:
+        receipt = await _generate_receipt(db, [payment])
 
     return PatientReceiptView(
         receipt_number=receipt.receipt_number,

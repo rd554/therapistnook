@@ -46,6 +46,7 @@ export default function PractitionerPatients() {
     email: '',
     emergency_contact: '',
     referral_source: '',
+    address: '',
   })
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
@@ -103,6 +104,7 @@ export default function PractitionerPatients() {
         email: form.email || null,
         emergency_contact: form.emergency_contact || null,
         referral_source: form.referral_source || null,
+        address: form.address || null,
       })
       setForm({
         full_name: '',
@@ -112,6 +114,7 @@ export default function PractitionerPatients() {
         email: '',
         emergency_contact: '',
         referral_source: '',
+        address: '',
       })
       setShowForm(false)
       await load()
@@ -176,6 +179,7 @@ export default function PractitionerPatients() {
       email: '',
       emergency_contact: '',
       referral_source: '',
+      address: '',
     })
     setError('')
     setShowForm(false)
@@ -361,6 +365,17 @@ export default function PractitionerPatients() {
                         placeholder="e.g., Dr. Smith, Self-referral, Hospital"
                         value={form.referral_source}
                         onChange={(e) => setForm(p => ({ ...p, referral_source: e.target.value }))}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <FormField label="Billing Address" hint="Used on the invoice PDF's Bill To section">
+                      <textarea
+                        className="input-field"
+                        rows={3}
+                        placeholder="Street address, city, state, PIN, country"
+                        value={form.address}
+                        onChange={(e) => setForm(p => ({ ...p, address: e.target.value }))}
                       />
                     </FormField>
                   </div>

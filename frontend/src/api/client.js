@@ -612,9 +612,8 @@ export async function getAppointment(appointmentId) {
   return res.data
 }
 
-export async function createAppointment(data, forPractitionerId = null) {
-  const params = forPractitionerId ? { for_practitioner_id: forPractitionerId } : {}
-  const res = await api.post('/appointments', data, { params })
+export async function createAppointment(data) {
+  const res = await api.post('/appointments', data)
   return res.data
 }
 
@@ -766,9 +765,15 @@ export async function getPatientPaymentHistory(patientId) {
   return res.data
 }
 
-export async function createAppointmentWithPayment(data, forPractitionerId = null) {
-  const params = forPractitionerId ? { for_practitioner_id: forPractitionerId } : {}
-  const res = await api.post('/appointments/with-payment', data, { params })
+// Issue one invoice covering several of a patient's sessions (e.g. a whole
+// month, or several months ticked together) in one go.
+export async function createBulkInvoice(patientId, paymentIds) {
+  const res = await api.post(`/patients/${patientId}/payments/bulk-invoice`, { payment_ids: paymentIds })
+  return res.data
+}
+
+export async function createAppointmentWithPayment(data) {
+  const res = await api.post('/appointments/with-payment', data)
   return res.data
 }
 

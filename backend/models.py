@@ -54,6 +54,13 @@ class Patient(Base):
     email = Column(String, nullable=True)
     emergency_contact = Column(String, nullable=True)
     referral_source = Column(String, nullable=True)
+    # Billing address for the invoice PDF's "Bill To" block — free-text,
+    # multi-line, same convention as PractitionerProfile.clinic_address.
+    # Distinct from ClinicalHistory.basic_info["address"] (intake data,
+    # only present once a patient's clinical history has been started);
+    # this field is the canonical one for billing and the two are not
+    # kept in sync.
+    address = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="active")  # "active" or "archived"
     # Future avatar picker — preset illustration id or uploaded URL (no UI yet)
     avatar_id = Column(String, nullable=True)
@@ -344,6 +351,14 @@ class VoiceProfile(Base):
     
     # Relationships
     practitioner = relationship("Practitioner", backref="voice_profile")
+
+
+# input_type values whose summary is considered reliable enough to surface
+# as a pre-session "last session summary" on the Schedule Session screen.
+# Deliberately scoped to transcript uploads only for now — audio-derived
+# summaries carry transcription risk the therapist hasn't reviewed as
+# directly. Widen this tuple (e.g. add "audio") once that's no longer true.
+SUMMARY_SOURCE_INPUT_TYPES = ("transcript",)
 
 
 class TherapySession(Base):
@@ -929,25 +944,41 @@ class Payment(Base):
     
     # Notes
     notes = Column(Text, nullable=True)  # Internal notes
-    
+
+    # Invoicing — set once this payment has been explicitly invoiced, either
+    # on its own or swept into a bulk invoice covering a whole month. Invoicing
+    # is a deliberate practitioner action (not automatic on payment) so a
+    # session invoiced individually can't also end up double-invoiced by a
+    # later bulk invoice; once set, this payment is permanently locked to that
+    # Receipt regardless of any later status change (e.g. paid -> refunded).
+    receipt_id = Column(String, ForeignKey("receipts.id"), nullable=True, index=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+
     # Relationships
     appointment = relationship("Appointment", backref="payment")
     practitioner = relationship("Practitioner", foreign_keys=[practitioner_id], backref="payments")
     patient = relationship("Patient", backref="payments")
     refund_initiator = relationship("Practitioner", foreign_keys=[refund_initiated_by])
+    receipt = relationship("Receipt", foreign_keys=[receipt_id])
 
 
 class Receipt(Base):
-    """Receipt generated after successful payment."""
+    """Invoice document. Historically 1:1 with a single Payment (hence the
+    table/column names — see generate_receipt_number for why the user-facing
+    label moved to "Invoice" without a rename); now also doubles as a bulk
+    invoice covering several Payments from the same month. `payment_id` below
+    is only the anchor/primary payment (kept for backward-compat single-
+    payment lookups and for the snapshot fields' source); the authoritative
+    "which payments does this invoice cover" answer is every Payment whose
+    `receipt_id` points back at this row."""
     __tablename__ = "receipts"
 
     id = Column(String, primary_key=True, default=generate_uuid)
     payment_id = Column(String, ForeignKey("payments.id"), nullable=False, unique=True, index=True)
-    
+
     # Receipt identification
     receipt_number = Column(String, unique=True, nullable=False, index=True, default=generate_receipt_number)
     
@@ -955,6 +986,7 @@ class Receipt(Base):
     patient_name = Column(String, nullable=False)
     patient_email = Column(String, nullable=True)
     patient_dob = Column(Date, nullable=True)  # for insurance/reimbursement claims
+    patient_address = Column(Text, nullable=True)  # for invoice PDF's Bill To block
     practitioner_name = Column(String, nullable=False)
     
     # Amount details (snapshot)
@@ -977,9 +1009,9 @@ class Receipt(Base):
     
     # Timestamps
     generated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    
+
     # Relationships
-    payment = relationship("Payment", backref="receipt")
+    payment = relationship("Payment", foreign_keys=[payment_id])
 
 
 class InternalNotification(Base):

@@ -630,7 +630,7 @@ function PaymentRow({ payment, onView, onGenerated }) {
       </span>
       {payment.receipt_number ? (
         <span className="font-mono text-xs text-content-secondary truncate">{payment.receipt_number}</span>
-      ) : payment.status === 'paid' ? (
+      ) : (payment.status === 'paid' || payment.status === 'pending') ? (
         <span
           onClick={handleGenerate}
           className="text-xs text-primary font-medium cursor-pointer hover:underline w-fit"
@@ -715,7 +715,10 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
   const sessionType = SESSION_TYPES[payment.session_type] || { label: payment.session_type }
 
   useEffect(() => {
-    if (payment.status === 'paid' || payment.status === 'refunded') {
+    // Only fetch if a receipt is already attached — getPaymentReceipt() will
+    // get-or-create, and invoicing is now a deliberate action (not something
+    // that should happen as a side effect of merely opening this drawer).
+    if (payment.receipt_number) {
       loadReceipt()
     }
   }, [payment])

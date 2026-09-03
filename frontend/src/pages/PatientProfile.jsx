@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
   User, ArrowLeft, Phone, Mail, AlertCircle, Calendar, 
   FileText, Brain, Activity, FolderOpen, Edit, Clock, CheckCircle, Upload,
   Video, Building, Plus, ExternalLink, CreditCard, IndianRupee, Receipt, Loader2,
 } from 'lucide-react'
-import { getPatient, getClinicalHistorySummary, getPatientAppointments, createAppointment, getPatientPaymentHistory, getInvoicePdfUrl } from '../api/client'
+import { getPatient, getClinicalHistorySummary, getPatientAppointments, createAppointment, getPatientPaymentHistory, getInvoicePdfUrl, getPaymentReceipt, createBulkInvoice } from '../api/client'
 import ClinicalHistoryWizard from '../components/ClinicalHistoryWizard'
 import DocumentUpload from '../components/DocumentUpload'
 import DocumentsList from '../components/DocumentsList'
@@ -276,6 +276,12 @@ function OverviewTab({ patient }) {
         <InfoField label="Referral Source" value={patient.referral_source} />
         <InfoField label="Status" value={<StatusChip status={patient.status} />} />
         <InfoField label="Patient Since" value={formatDate(patient.created_at)} />
+        <div className="sm:col-span-2">
+          <InfoField
+            label="Billing Address"
+            value={patient.address && <span className="whitespace-pre-line">{patient.address}</span>}
+          />
+        </div>
       </div>
     </div>
   )
@@ -546,8 +552,8 @@ function PatientSessionsTab({ patientId, patient }) {
         <ScheduleModal
           initialDate={new Date()}
           patients={[{ id: patientId, full_name: patient.full_name, age: patient.age, gender: patient.gender }]}
-          practitioners={[]}
           onSubmit={handleScheduleSession}
+          onScheduled={loadAppointments}
           onClose={() => setShowScheduleModal(false)}
         />
       )}
@@ -558,6 +564,9 @@ function PatientSessionsTab({ patientId, patient }) {
 function PatientPaymentsTab({ patientId }) {
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
+  const [selectedMonths, setSelectedMonths] = useState(new Set())
+  const [generatingId, setGeneratingId] = useState(null)
+  const [bulkGenerating, setBulkGenerating] = useState(false)
 
   useEffect(() => {
     loadPayments()
@@ -571,6 +580,74 @@ function PatientPaymentsTab({ patientId }) {
       console.error('Failed to load payment history:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // A session can be invoiced (individually or swept into a bulk invoice) as
+  // long as it hasn't been invoiced yet and isn't failed/refunded/cancelled —
+  // invoicing works ahead of payment now, not just after.
+  const isInvoiceable = (p) => !p.receipt_id && (p.status === 'pending' || p.status === 'paid')
+
+  // Group sessions by calendar month for bulk invoicing. Payments already
+  // come back ordered by appointment date (desc), so insertion order here
+  // keeps the most recent month first.
+  const monthGroups = useMemo(() => {
+    const map = new Map()
+    for (const p of payments) {
+      const d = new Date(p.appointment_date)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+          payments: [],
+        })
+      }
+      map.get(key).payments.push(p)
+    }
+    return Array.from(map.values())
+  }, [payments])
+
+  const toggleMonth = (key) => {
+    setSelectedMonths((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const selectedPaymentIds = monthGroups
+    .filter((g) => selectedMonths.has(g.key))
+    .flatMap((g) => g.payments.filter(isInvoiceable).map((p) => p.id))
+
+  const handleGenerateSingle = async (paymentId) => {
+    if (generatingId) return
+    setGeneratingId(paymentId)
+    try {
+      await getPaymentReceipt(paymentId) // get-or-create
+      await loadPayments()
+    } catch (err) {
+      console.error('Failed to generate invoice:', err)
+      alert(err.userMessage || 'Failed to generate invoice')
+    } finally {
+      setGeneratingId(null)
+    }
+  }
+
+  const handleBulkInvoice = async () => {
+    if (bulkGenerating || selectedPaymentIds.length === 0) return
+    setBulkGenerating(true)
+    try {
+      const receipt = await createBulkInvoice(patientId, selectedPaymentIds)
+      setSelectedMonths(new Set())
+      await loadPayments()
+      window.open(getInvoicePdfUrl(receipt.payment_id), '_blank')
+    } catch (err) {
+      console.error('Failed to create bulk invoice:', err)
+      alert(err.userMessage || 'Failed to create bulk invoice')
+    } finally {
+      setBulkGenerating(false)
     }
   }
 
@@ -667,43 +744,81 @@ function PatientPaymentsTab({ patientId }) {
                 </span>
               </div>
 
-              {payments.map((payment) => (
-                <RowCard
-                  key={payment.id}
-                  className="flex items-center gap-3"
-                >
-                  <span className="text-xs text-content-secondary w-[76px] shrink-0">
-                    {formatPaymentDate(payment.appointment_date)}
-                  </span>
-                  <span className="text-sm text-content-primary w-[150px] shrink-0 whitespace-nowrap">
-                    {getSessionTypeLabel(payment.session_type)}
-                  </span>
-                  <span className="text-sm font-medium text-content-primary w-[90px] shrink-0">
-                    {formatCurrency(payment.amount, payment.currency)}
-                  </span>
-                  <div className="flex items-center gap-3 ml-auto shrink-0">
-                    <StatusChip status={payment.status} size="sm" />
-                    <div className="w-16 text-right">
-                      {payment.status === 'paid' ? (
-                        payment.receipt_number ? (
-                          <a
-                            href={getInvoicePdfUrl(payment.id)}
-                            className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer"
-                          >
-                            Invoice →
-                          </a>
-                        ) : (
-                          <span className="text-content-muted">—</span>
-                        )
-                      ) : (
-                        <span className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer">
-                          Pay Now →
-                        </span>
-                      )}
+              {monthGroups.map((group) => {
+                const eligible = group.payments.filter(isInvoiceable)
+                const practitionerIds = new Set(eligible.map((p) => p.practitioner_id))
+                const canBulkInvoice = eligible.length > 0 && practitionerIds.size === 1
+                const checked = selectedMonths.has(group.key)
+
+                return (
+                  <div key={group.key} className="space-y-2">
+                    <div className="px-4 h-9 flex items-center gap-3 rounded-xl bg-slate-100">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!canBulkInvoice}
+                        onChange={() => toggleMonth(group.key)}
+                        className="w-4 h-4 rounded accent-primary disabled:opacity-30"
+                        title={canBulkInvoice ? 'Select this month for a bulk invoice' : 'Nothing left to invoice this month'}
+                      />
+                      <span className="text-sm font-medium text-content-secondary">{group.label}</span>
+                      <span className="text-xs text-content-muted">
+                        {group.payments.length} session{group.payments.length !== 1 ? 's' : ''}
+                      </span>
                     </div>
+
+                    {group.payments.map((payment) => (
+                      <RowCard
+                        key={payment.id}
+                        className="flex items-center gap-3"
+                      >
+                        <span className="text-xs text-content-secondary w-[76px] shrink-0">
+                          {formatPaymentDate(payment.appointment_date)}
+                        </span>
+                        <span className="text-sm text-content-primary w-[150px] shrink-0 whitespace-nowrap">
+                          {getSessionTypeLabel(payment.session_type)}
+                        </span>
+                        <span className="text-sm font-medium text-content-primary w-[90px] shrink-0">
+                          {formatCurrency(payment.amount, payment.currency)}
+                        </span>
+                        <div className="flex items-center gap-3 ml-auto shrink-0">
+                          <StatusChip status={payment.status} size="sm" />
+                          <div className="w-16 text-right">
+                            {payment.receipt_id ? (
+                              <a
+                                href={getInvoicePdfUrl(payment.id)}
+                                className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer"
+                              >
+                                Invoice →
+                              </a>
+                            ) : isInvoiceable(payment) ? (
+                              <span
+                                onClick={() => handleGenerateSingle(payment.id)}
+                                className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer"
+                              >
+                                {generatingId === payment.id ? '…' : 'Generate →'}
+                              </span>
+                            ) : (
+                              <span className="text-content-muted">—</span>
+                            )}
+                          </div>
+                        </div>
+                      </RowCard>
+                    ))}
                   </div>
-                </RowCard>
-              ))}
+                )
+              })}
+
+              {selectedPaymentIds.length > 0 && (
+                <div className="sticky bottom-0 flex items-center justify-between gap-4 rounded-xl bg-primary-light px-4 py-3 mt-2">
+                  <span className="text-sm text-content-secondary">
+                    {selectedMonths.size} month{selectedMonths.size !== 1 ? 's' : ''} selected · {selectedPaymentIds.length} session{selectedPaymentIds.length !== 1 ? 's' : ''}
+                  </span>
+                  <Button size="sm" isLoading={bulkGenerating} onClick={handleBulkInvoice}>
+                    Create Bulk Invoice
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </div>

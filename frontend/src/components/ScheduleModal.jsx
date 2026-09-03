@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  X, Calendar, Clock, User, Video, Building, FileText, Loader2,
+  X, Calendar, Clock, User, Video, Building, Loader2,
   AlertCircle, Plus, ChevronDown, ChevronUp, IndianRupee, Percent, Tag,
   Stethoscope, ClipboardCheck, MessageSquare, RefreshCw, AlertTriangle,
-  CheckCircle, CalendarPlus, Search,
+  CheckCircle, CalendarPlus, Search, History,
 } from 'lucide-react'
-import { createAppointmentWithPayment, getCalendarEvents } from '../api/client'
+import { createAppointmentWithPayment, getCalendarEvents, getPatient } from '../api/client'
 
 const SESSION_TYPES = [
   { value: 'therapy_session', label: 'Therapy Session', icon: Stethoscope },
@@ -53,9 +53,9 @@ export default function ScheduleModal({
   initialStartTime,
   initialEndTime,
   patients,
-  practitioners,
   onSubmit,
   onClose,
+  onScheduled,
   editMode = false,
   initialData = null,
 }) {
@@ -69,22 +69,29 @@ export default function ScheduleModal({
   const [showSuccess, setShowSuccess] = useState(false)
   const [conflicts, setConflicts] = useState([])
   const [checkingConflicts, setCheckingConflicts] = useState(false)
-  
+  const [patientLastFee, setPatientLastFee] = useState(null) // rupees, what the selected patient was last charged
+  // Condensed summary of the patient's last processed transcript session, if
+  // any — replaces the old free-text Notes field with "what happened last
+  // time" instead, so there's no separate scratchpad field to keep in sync.
+  const [lastSessionSummary, setLastSessionSummary] = useState(null)
+
   const searchInputRef = useRef(null)
   const dropdownRef = useRef(null)
+  // Tracks the currently-selected patient synchronously so an in-flight
+  // getPatient() fetch can tell, once it resolves, whether the user has
+  // since picked a different patient and its result is now stale.
+  const selectedPatientIdRef = useRef(null)
   
   const [form, setForm] = useState(() => {
     if (editMode && initialData) {
       return {
         patientId: initialData.patient_id,
         patientName: initialData.patient_name,
-        practitionerId: initialData.practitioner_id,
         date: formatDateForInput(initialData.date),
         startTime: formatTimeForInput(initialData.start_time),
         duration: initialData.duration_minutes,
         sessionType: initialData.session_type,
         sessionMode: initialData.session_mode,
-        notes: initialData.notes || '',
         sessionFee: '',
         discountAmount: '',
         discountReason: '',
@@ -107,13 +114,11 @@ export default function ScheduleModal({
       return {
         patientId: '',
         patientName: '',
-        practitionerId: '',
         date,
         startTime,
         duration: DURATION_CHIPS.find(d => d.value === duration)?.value || defaultDuration,
         sessionType: 'therapy_session',
         sessionMode: 'offline',
-        notes: '',
         sessionFee: '',
         discountAmount: '',
         discountReason: '',
@@ -124,7 +129,6 @@ export default function ScheduleModal({
     return {
       patientId: '',
       patientName: '',
-      practitionerId: '',
       date,
       startTime,
       duration: defaultDuration,
@@ -179,6 +183,7 @@ export default function ScheduleModal({
     return () => clearTimeout(timeoutId)
   }, [form.date, form.startTime, form.duration])
 
+
   const filteredPatients = useMemo(() => {
     if (!searchQuery) return patients.slice(0, 8)
     return patients.filter(p =>
@@ -195,6 +200,29 @@ export default function ScheduleModal({
     setForm(f => ({ ...f, patientId: patient.id, patientName: patient.full_name }))
     setShowPatientDropdown(false)
     setSearchQuery('')
+    selectedPatientIdRef.current = patient.id
+
+    // Pre-fill the session fee with what this specific patient was last
+    // charged — only when the field is still untouched, so it never
+    // overwrites something the user already typed. Same round trip also
+    // pulls their last processed session summary, if they have one.
+    setPatientLastFee(null)
+    setLastSessionSummary(null)
+    if (editMode) return
+    getPatient(patient.id).then((full) => {
+      // The practitioner may have picked a different patient while this was
+      // in flight — don't let a stale response apply to the new selection.
+      if (selectedPatientIdRef.current !== patient.id) return
+      if (full.last_session_fee) {
+        setPatientLastFee(full.last_session_fee / 100)
+        setForm(f => (f.patientId === patient.id && !f.sessionFee
+          ? { ...f, sessionFee: String(full.last_session_fee / 100) }
+          : f))
+      }
+      if (full.last_session_summary) {
+        setLastSessionSummary(full.last_session_summary)
+      }
+    }).catch(() => {})
   }
 
   const handleDurationSelect = (duration) => {
@@ -249,15 +277,17 @@ export default function ScheduleModal({
           end_time: endDateTime.toISOString(),
           session_type: form.sessionType,
           session_mode: form.sessionMode,
-          notes: form.notes || null,
           session_fee: sessionFee,
           discount_amount: discountAmount,
           discount_reason: form.discountReason || null,
           tax_percentage: taxPercentage,
         }
-        
-        const forPractitionerId = form.practitionerId || null
-        await createAppointmentWithPayment(data, forPractitionerId)
+
+        await createAppointmentWithPayment(data)
+        // The payment path bypasses onSubmit (it creates the appointment
+        // itself), so the parent's calendar/list never learns a new
+        // appointment exists unless we tell it directly here.
+        await onScheduled?.()
       } else {
         const data = {
           patient_id: form.patientId,
@@ -266,12 +296,11 @@ export default function ScheduleModal({
           end_time: endDateTime.toISOString(),
           session_type: form.sessionType,
           session_mode: form.sessionMode,
-          notes: form.notes || null,
         }
 
         await onSubmit(data)
       }
-      
+
       setShowSuccess(true)
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to schedule appointment')
@@ -291,11 +320,14 @@ export default function ScheduleModal({
 
   const handleScheduleAnother = () => {
     setShowSuccess(false)
+    selectedPatientIdRef.current = null
+    setPatientLastFee(null)
+    setLastSessionSummary(null)
     setForm(f => ({
       ...f,
       patientId: '',
       patientName: '',
-      notes: '',
+      // No patient selected yet — the fee/summary re-fill once one is picked again.
       sessionFee: '',
       discountAmount: '',
       discountReason: '',
@@ -420,7 +452,12 @@ export default function ScheduleModal({
                       {!editMode && (
                         <button
                           type="button"
-                          onClick={() => setForm(f => ({ ...f, patientId: '', patientName: '' }))}
+                          onClick={() => {
+                            selectedPatientIdRef.current = null
+                            setPatientLastFee(null)
+                            setLastSessionSummary(null)
+                            setForm(f => ({ ...f, patientId: '', patientName: '' }))
+                          }}
                           className="flex h-8 w-8 items-center justify-center rounded-[10px] text-content-muted hover:bg-slate-200 hover:text-content-primary transition-colors"
                         >
                           <X className="h-4 w-4" strokeWidth={1.5} />
@@ -605,43 +642,33 @@ export default function ScheduleModal({
                 )}
               </div>
 
-              {/* Practitioner (Admin only) - Full Width. Hidden in edit mode: the
-                  update endpoint doesn't support reassigning a practitioner. */}
-              {!editMode && practitioners && practitioners.length > 0 && (
+              {/* Last Session Summary - Full Width. Only appears when the
+                  selected patient has a processed transcript session on
+                  file — otherwise this space is simply absent. */}
+              {lastSessionSummary && (
                 <div className="col-span-2">
-                  <label className="label">Practitioner</label>
-                  <select
-                    className="input-field appearance-none cursor-pointer pr-10"
-                    value={form.practitionerId}
-                    onChange={(e) => setForm(f => ({ ...f, practitionerId: e.target.value }))}
-                    style={{
-                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                      backgroundPosition: 'right 12px center',
-                      backgroundRepeat: 'no-repeat',
-                      backgroundSize: '20px',
-                    }}
-                  >
-                    <option value="">Select practitioner (optional)</option>
-                    {practitioners.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
+                  <label className="label">
+                    <History className="mr-1.5 inline h-4 w-4 text-content-muted" strokeWidth={1.5} />
+                    Last Session Summary
+                  </label>
+                  <div className="rounded-[14px] border border-[#E8ECF4] bg-slate-50 p-4 space-y-3">
+                    <p className="text-xs font-medium text-content-muted">
+                      {formatDateDisplay(lastSessionSummary.session_date)}
+                    </p>
+                    {[
+                      ['Presenting Issues', lastSessionSummary.presenting_issues],
+                      ['Key Discussion Points', lastSessionSummary.key_discussion_points],
+                      ['Emotional Themes', lastSessionSummary.emotional_themes],
+                      ['Homework Discussed', lastSessionSummary.homework_discussed],
+                    ].filter(([, text]) => text).map(([label, text]) => (
+                      <div key={label}>
+                        <p className="text-xs font-semibold text-content-secondary mb-0.5">{label}</p>
+                        <p className="text-sm text-content-primary">{text}</p>
+                      </div>
                     ))}
-                  </select>
+                  </div>
                 </div>
               )}
-
-              {/* Notes - Full Width */}
-              <div className="col-span-2">
-                <label className="label">
-                  <FileText className="mr-1.5 inline h-4 w-4 text-content-muted" strokeWidth={1.5} />
-                  Notes (optional)
-                </label>
-                <textarea
-                  className="textarea-field !min-h-[100px]"
-                  placeholder="Add clinical notes for this appointment..."
-                  value={form.notes}
-                  onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
-                />
-              </div>
 
               {/* Payment Section - Full Width */}
               {!editMode && (
@@ -684,7 +711,11 @@ export default function ScheduleModal({
                               min="0"
                             />
                           </div>
-                          <p className="helper-text">Leave empty for no payment tracking</p>
+                          <p className="helper-text">
+                            {patientLastFee
+                              ? `Defaults to ${form.patientName}'s last session fee — clear it for no payment tracking on this session`
+                              : 'Leave empty for no payment tracking'}
+                          </p>
                         </div>
 
                         {/* Discount */}

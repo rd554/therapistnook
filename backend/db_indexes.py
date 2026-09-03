@@ -27,6 +27,7 @@ SINGLE_INDEXES = [
     ("ix_appointments_start_time", "appointments", "start_time"),
     ("ix_payments_paid_at", "payments", "paid_at"),
     ("ix_payments_payment_link_token", "payments", "payment_link_token"),
+    ("ix_payments_receipt_id", "payments", "receipt_id"),
     ("ix_scheduled_reminders_scheduled_for", "scheduled_reminders", "scheduled_for"),
     ("ix_scheduled_reminders_status", "scheduled_reminders", "status"),
     ("ix_internal_notifications_is_read", "internal_notifications", "is_read"),

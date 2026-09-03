@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import {
   getCalendarEvents, getAppointment, createAppointment, updateAppointment, rescheduleAppointment,
-  cancelAppointment, deleteAppointment, listPatients, listPractitioners,
+  cancelAppointment, deleteAppointment, listPatients,
 } from '../api/client'
 import ScheduleModal from '../components/ScheduleModal'
 import AppointmentDetail from '../components/AppointmentDetail'
@@ -128,14 +128,10 @@ export default function Calendar() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState(null)
   const [patients, setPatients] = useState([])
-  const [practitioners, setPractitioners] = useState([])
   const [statusFilter, setStatusFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [contextMenu, setContextMenu] = useState(null)
   const calendarRef = useRef(null)
-  
-  const userRole = localStorage.getItem('mmpi_role')
-  const isOwner = userRole === 'owner'
 
   const loadEvents = async () => {
     setLoading(true)
@@ -161,24 +157,12 @@ export default function Calendar() {
     }
   }
 
-  const loadPractitioners = async () => {
-    if (isOwner) {
-      try {
-        const data = await listPractitioners()
-        setPractitioners(data.filter(p => p.is_active))
-      } catch (err) {
-        console.error('Failed to load practitioners:', err)
-      }
-    }
-  }
-
   useEffect(() => {
     loadEvents()
   }, [view, currentDate])
 
   useEffect(() => {
     loadPatients()
-    loadPractitioners()
   }, [])
 
   // Keyboard shortcuts
@@ -593,8 +577,8 @@ export default function Calendar() {
           initialStartTime={selectedSlot?.startTime}
           initialEndTime={selectedSlot?.endTime}
           patients={patients}
-          practitioners={isOwner ? practitioners : []}
           onSubmit={handleCreateAppointment}
+          onScheduled={loadEvents}
           onClose={() => {
             setShowScheduleModal(false)
             setSelectedSlot(null)
@@ -624,7 +608,6 @@ export default function Calendar() {
           editMode
           initialData={editingAppointment}
           patients={patients}
-          practitioners={isOwner ? practitioners : []}
           onSubmit={handleSaveEditedAppointment}
           onClose={() => {
             setShowEditModal(false)
