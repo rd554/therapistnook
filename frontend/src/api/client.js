@@ -21,7 +21,7 @@ api.interceptors.response.use(
     const data = err.response?.data
     
     if (status === 401) {
-      const isProtectedRoute = ['/home', '/patients', '/calendar', '/payments', '/settings', '/practitioners', '/analytics', '/inbox', '/assessments'].some(
+      const isProtectedRoute = ['/home', '/patients', '/calendar', '/payments', '/settings', '/analytics', '/inbox', '/assessments'].some(
         path => window.location.pathname.startsWith(path)
       )
       
@@ -131,21 +131,6 @@ export async function getFeatureFlags() {
 
 export async function listPractitioners() {
   const res = await api.get('/admin/practitioners')
-  return res.data
-}
-
-export async function createPractitioner(data) {
-  const res = await api.post('/admin/practitioners', data)
-  return res.data
-}
-
-export async function updatePractitioner(id, data) {
-  const res = await api.patch(`/admin/practitioners/${id}`, data)
-  return res.data
-}
-
-export async function deletePractitioner(id) {
-  const res = await api.delete(`/admin/practitioners/${id}`)
   return res.data
 }
 

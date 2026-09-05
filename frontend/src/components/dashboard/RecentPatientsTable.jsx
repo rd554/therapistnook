@@ -8,13 +8,11 @@ const DASHBOARD_LIMIT = 5
 const ATTENDANCE_MAP = {
   present: 'completed',
   absent: 'no_show',
-  rescheduled: 'rescheduled',
 }
 
 const STATUS_TO_ATTENDANCE = {
   completed: 'present',
   no_show: 'absent',
-  rescheduled: 'rescheduled',
 }
 
 function formatDate(dateStr) {
@@ -43,6 +41,21 @@ function AttendanceCheck({ kind, active, onClick, disabled }) {
       aria-label={kind}
     >
       {active && <Check size={12} strokeWidth={2.5} />}
+    </button>
+  )
+}
+
+function AttendancePill({ kind, label, active, onClick, disabled }) {
+  return (
+    <button
+      type="button"
+      className={`dash-recent-pill dash-recent-pill--${kind}${active ? ' dash-recent-pill--on' : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+    >
+      {active && <Check size={12} strokeWidth={2.5} />}
+      {label}
     </button>
   )
 }
@@ -97,56 +110,87 @@ export default function RecentPatientsTable({ appointments = [] }) {
           </p>
         </div>
       ) : (
-        <div className="dash-recent-wrap">
-          <div className="dash-recent-labels" aria-hidden="true">
-            <span>Date</span>
-            <span>Time</span>
-            <span>Appointment</span>
-            <span className="text-center">Present</span>
-            <span className="text-center">Absent</span>
-            <span className="text-center">Rescheduled</span>
+        <>
+          {/* Desktop/tablet: original column grid, unchanged */}
+          <div className="hidden lg:block">
+            <div className="dash-recent-wrap">
+              <div className="dash-recent-labels" aria-hidden="true">
+                <span>Date</span>
+                <span>Time</span>
+                <span>Appointment</span>
+                <span className="text-center">Present</span>
+                <span className="text-center">Absent</span>
+              </div>
+              <div className="dash-recent-list">
+                {displayRows.map((appt) => {
+                  const attendance = STATUS_TO_ATTENDANCE[appt.status] || null
+                  const isOnline = appt.session_mode === 'online'
+                  return (
+                    <div key={appt.id} className="dash-recent-card">
+                      <span className="truncate">{formatDate(appt.date)}</span>
+                      <span className="truncate">{formatTime(appt.start_time)}</span>
+                      <div className="dash-recent-card__appt">
+                        <span className={`dash-mode-dot ${isOnline ? 'dash-mode-dot--online' : 'dash-mode-dot--offline'}`} />
+                        <span className="truncate">{appt.patient_name}</span>
+                      </div>
+                      <div className="flex justify-center">
+                        <AttendanceCheck
+                          kind="present"
+                          active={attendance === 'present'}
+                          disabled={savingId === appt.id}
+                          onClick={() => handleAttendance(appt, 'present')}
+                        />
+                      </div>
+                      <div className="flex justify-center">
+                        <AttendanceCheck
+                          kind="absent"
+                          active={attendance === 'absent'}
+                          disabled={savingId === appt.id}
+                          onClick={() => handleAttendance(appt, 'absent')}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
           </div>
-          <div className="dash-recent-list">
+
+          {/* Phone/tablet: stacked cards with labeled buttons, no header row needed */}
+          <div className="dash-recent-mobile lg:hidden">
             {displayRows.map((appt) => {
               const attendance = STATUS_TO_ATTENDANCE[appt.status] || null
               const isOnline = appt.session_mode === 'online'
               return (
-                <div key={appt.id} className="dash-recent-card">
-                  <span className="truncate">{formatDate(appt.date)}</span>
-                  <span className="truncate">{formatTime(appt.start_time)}</span>
-                  <div className="dash-recent-card__appt">
+                <div key={appt.id} className="dash-recent-card-m">
+                  <div className="dash-recent-card-m__top">
                     <span className={`dash-mode-dot ${isOnline ? 'dash-mode-dot--online' : 'dash-mode-dot--offline'}`} />
-                    <span className="truncate">{appt.patient_name}</span>
+                    <span className="dash-recent-card-m__name truncate">{appt.patient_name}</span>
                   </div>
-                  <div className="flex justify-center">
-                    <AttendanceCheck
+                  <div className="dash-recent-card-m__meta">
+                    {formatDate(appt.date)} · {formatTime(appt.start_time)}
+                  </div>
+                  <div className="dash-recent-card-m__actions">
+                    <AttendancePill
                       kind="present"
+                      label="Present"
                       active={attendance === 'present'}
                       disabled={savingId === appt.id}
                       onClick={() => handleAttendance(appt, 'present')}
                     />
-                  </div>
-                  <div className="flex justify-center">
-                    <AttendanceCheck
+                    <AttendancePill
                       kind="absent"
+                      label="Absent"
                       active={attendance === 'absent'}
                       disabled={savingId === appt.id}
                       onClick={() => handleAttendance(appt, 'absent')}
-                    />
-                  </div>
-                  <div className="flex justify-center">
-                    <AttendanceCheck
-                      kind="rescheduled"
-                      active={attendance === 'rescheduled'}
-                      disabled={savingId === appt.id}
-                      onClick={() => handleAttendance(appt, 'rescheduled')}
                     />
                   </div>
                 </div>
               )
             })}
           </div>
-        </div>
+        </>
       )}
     </section>
   )

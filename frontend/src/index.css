@@ -1278,7 +1278,7 @@
 
   .dash-recent-labels {
     display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px 72px;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px;
     gap: 8px;
     padding: 0 14px;
     font-family: 'Manrope', system-ui, sans-serif;
@@ -1299,7 +1299,7 @@
 
   .dash-recent-card {
     display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px 72px;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px;
     align-items: center;
     gap: 8px;
     padding: 14px;
@@ -1368,9 +1368,79 @@
     color: #FFFFFF;
   }
 
-  .dash-check--rescheduled.dash-check--on {
-    background: var(--color-slate);
-    border-color: var(--color-slate);
+  /* Phone/tablet stacked cards for Recent Patients (< lg only; desktop grid
+     above is untouched) — labeled buttons instead of bare checkboxes since
+     there's no room for a header row to explain them. */
+
+  .dash-recent-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .dash-recent-card-m {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    background: #FAFBFC;
+    border-radius: 16px;
+    box-shadow: var(--shadow-card-elevation);
+  }
+
+  .dash-recent-card-m__top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .dash-recent-card-m__name {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text-primary);
+  }
+
+  .dash-recent-card-m__meta {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-size: 13px;
+    color: #64748B;
+  }
+
+  .dash-recent-card-m__actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .dash-recent-pill {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex: 1;
+    padding: 7px 0;
+    border-radius: 8px;
+    border: 1.5px solid #CBD5E1;
+    background: #FFFFFF;
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: #64748B;
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  }
+
+  .dash-recent-pill--present.dash-recent-pill--on {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: #FFFFFF;
+  }
+
+  .dash-recent-pill--absent.dash-recent-pill--on {
+    background: var(--color-overdue-accent);
+    border-color: var(--color-overdue-accent);
     color: #FFFFFF;
   }
 

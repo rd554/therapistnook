@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Users, Plus, Search, Loader2, Archive, RotateCcw, Edit, Eye,
-  ArrowUpDown, ChevronDown, Check, X, Upload, Download, FileSpreadsheet,
+  Users, Plus, Loader2, Archive, RotateCcw, Edit, Eye,
+  ArrowUpDown, Check, X, Upload, Download, FileSpreadsheet,
 } from 'lucide-react'
 import {
   listPatients, createPatient, archivePatient, restorePatient,
@@ -13,7 +13,6 @@ import {
   StatusChip,
   IntakeStatusChip,
   NoPatients,
-  NoResults,
   FormCard,
   FormField,
   FormGrid,
@@ -24,6 +23,7 @@ import {
   IconButton,
   RowCard,
   PhoneInput,
+  SectionDropdown,
 } from '../components/ui'
 
 export default function PractitionerPatients() {
@@ -33,7 +33,6 @@ export default function PractitionerPatients() {
   const [intakeSubmissions, setIntakeSubmissions] = useState([])
   const [resolvingIntakeId, setResolvingIntakeId] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('active')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState('desc')
@@ -62,7 +61,6 @@ export default function PractitionerPatients() {
   const load = async () => {
     try {
       const data = await listPatients({
-        search: search || undefined,
         status: statusFilter,
         sortBy,
         sortOrder,
@@ -83,13 +81,6 @@ export default function PractitionerPatients() {
     load()
     loadIntake()
   }, [statusFilter, sortBy, sortOrder])
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      load()
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [search])
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -238,51 +229,34 @@ export default function PractitionerPatients() {
     <div className="space-y-6 max-w-[780px]">
       {/* Section Header - Outside Card */}
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-section-title text-content-primary">Patients</h1>
-        
-        <div className="flex items-center gap-2 flex-1 justify-end">
-          {/* Search */}
-          <div className="relative max-w-[200px] flex-1">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-content-muted" />
-            <input
-              type="text"
-              className="input-field-sm !pl-8 w-full"
-              placeholder="Search patients..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          
-          {/* Status Filter */}
-          <div className="relative">
-            <select
-              className="input-field-sm pr-7 appearance-none cursor-pointer"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="active">Active</option>
-              <option value="archived">Archived</option>
-              <option value="all">All</option>
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-content-muted pointer-events-none" />
-          </div>
-          
-          {/* Add Patient Button */}
+        <h1 className="text-section-title text-content-primary shrink-0">Patients</h1>
+
+        <div className="flex items-center gap-2 justify-end flex-wrap">
+          <SectionDropdown
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={[
+              { value: 'active', label: 'Active' },
+              { value: 'archived', label: 'Archived' },
+              { value: 'all', label: 'All' },
+            ]}
+            maxWidth="140px"
+          />
+
           <button
             onClick={() => setShowForm(true)}
             className="workspace-header__btn workspace-header__btn--soft"
           >
             <Plus size={16} strokeWidth={1.5} />
-            <span>Add Patient</span>
+            <span className="hidden sm:inline">Add Patient</span>
           </button>
 
-          {/* Bulk Upload Button */}
           <button
             onClick={() => setShowBulkModal(true)}
             className="workspace-header__btn workspace-header__btn--soft"
           >
             <Upload size={16} strokeWidth={1.5} />
-            <span>Bulk Upload</span>
+            <span className="hidden sm:inline">Bulk Upload</span>
           </button>
         </div>
       </div>
@@ -491,13 +465,11 @@ export default function PractitionerPatients() {
 
       {/* Patient List */}
       {patients.length === 0 && intakeSubmissions.length === 0 ? (
-        search ? (
-          <NoResults searchTerm={search} onClear={() => setSearch('')} />
-        ) : (
-          <NoPatients onAdd={() => setShowForm(true)} />
-        )
+        <NoPatients onAdd={() => setShowForm(true)} />
       ) : (
-        <div className="space-y-2.5">
+        <>
+        {/* Desktop/tablet: original grid table, unchanged */}
+        <div className="hidden lg:block space-y-2.5">
           {/* Header Row - Transparent like Recent Patients */}
           <div className="px-4 grid grid-cols-[1.8fr_0.6fr_0.7fr_0.9fr_0.9fr_1.3fr_auto] items-center gap-4 text-xs font-normal text-content-muted">
             <span>Name</span>
@@ -597,6 +569,96 @@ export default function PractitionerPatients() {
             </RowCard>
           ))}
         </div>
+
+        {/* Phone/tablet: stacked cards, no fixed columns to squeeze */}
+        <div className="lg:hidden space-y-2.5">
+          {/* New Intake Submissions */}
+          {intakeSubmissions.map((s) => (
+            <RowCard key={`intake-m-${s.id}`} hoverable={false} className="flex flex-col gap-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-content-primary truncate">{s.full_name}</div>
+                  <div className="text-content-muted text-xs">{s.age} · {s.gender}</div>
+                </div>
+                <StatusChip status="new_intake" size="sm" />
+              </div>
+              {s.chief_complaint && (
+                <div className="text-content-muted text-xs truncate" title={s.chief_complaint}>
+                  {s.chief_complaint}
+                </div>
+              )}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => handleAcceptIntake(s)}
+                  disabled={resolvingIntakeId === s.id}
+                  className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-success-text hover:bg-green-800 rounded-btn transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Check className="w-3.5 h-3.5" strokeWidth={2} /> Accept
+                </button>
+                <button
+                  onClick={() => handleDeclineIntake(s)}
+                  disabled={resolvingIntakeId === s.id}
+                  className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-error-text hover:bg-red-700 rounded-btn transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <X className="w-3.5 h-3.5" strokeWidth={2} /> Remove
+                </button>
+              </div>
+            </RowCard>
+          ))}
+
+          {/* Patient Rows */}
+          {patients.map((p) => (
+            <RowCard key={`m-${p.id}`} className="flex flex-col gap-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <button
+                  onClick={() => navigate(`${baseUrl}/${p.id}`)}
+                  className="text-left font-medium text-content-primary hover:text-primary transition-colors truncate"
+                >
+                  {p.full_name}
+                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <IconButton
+                    icon={Eye}
+                    label="View profile"
+                    size="sm"
+                    onClick={() => navigate(`${baseUrl}/${p.id}`)}
+                  />
+                  <IconButton
+                    icon={Edit}
+                    label="Edit"
+                    size="sm"
+                    onClick={() => navigate(`${baseUrl}/${p.id}/edit`)}
+                  />
+                  {p.status === 'active' ? (
+                    <IconButton
+                      icon={Archive}
+                      label="Archive"
+                      size="sm"
+                      onClick={() => handleArchive(p)}
+                    />
+                  ) : (
+                    <IconButton
+                      icon={RotateCcw}
+                      label="Restore"
+                      size="sm"
+                      onClick={() => handleRestore(p)}
+                    />
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-secondary text-xs">
+                <span>{p.age} yrs</span>
+                <span>{p.gender}</span>
+                <span className="text-content-muted">{formatDate(p.created_at)}</span>
+              </div>
+              <div className="flex items-center gap-2 justify-end">
+                <StatusChip status={p.status} size="sm" />
+                <IntakeStatusChip status={p.clinical_history_status} size="sm" />
+              </div>
+            </RowCard>
+          ))}
+        </div>
+        </>
       )}
     </div>
   )

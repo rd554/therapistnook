@@ -37,7 +37,7 @@ export default function Login({ onLogin, onLogout }) {
     } else if (data.role === 'practitioner' && !data.profile_setup_complete) {
       navigate('/profile-settings')
     } else if (data.role === 'owner') {
-      navigate('/admin')
+      navigate('/home')
     } else {
       navigate('/practitioner')
     }

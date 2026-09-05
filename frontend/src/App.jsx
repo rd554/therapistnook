@@ -23,7 +23,6 @@ import ThankYou from './pages/ThankYou'
 
 // Workspace Pages (lazy load)
 const Home = lazy(() => import('./pages/Home'))
-const Practitioners = lazy(() => import('./pages/Practitioners'))
 const PractitionerPatients = lazy(() => import('./pages/PractitionerPatients'))
 const PatientProfile = lazy(() => import('./pages/PatientProfile'))
 const PatientEdit = lazy(() => import('./pages/PatientEdit'))
@@ -51,7 +50,6 @@ const InboxPage = lazy(() => import('./pages/InboxPage'))
 
 // Legacy pages (for backward compatibility)
 const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Admin = lazy(() => import('./pages/Admin'))
 const PractitionerDashboard = lazy(() => import('./pages/PractitionerDashboard'))
 
 // Loading Fallback
@@ -203,16 +201,6 @@ export default function App() {
       >
         {/* Home */}
         <Route path="/home" element={<Suspense fallback={<PageLoader />}><Home /></Suspense>} />
-        
-        {/* Practitioners (Admin only) */}
-        <Route
-          path="/practitioners"
-          element={
-            <ProtectedRoute isAllowed={isOwner} redirectTo="/home">
-              <Suspense fallback={<PageLoader />}><Practitioners /></Suspense>
-            </ProtectedRoute>
-          }
-        />
 
         {/* Patients */}
         <Route path="/patients" element={<Suspense fallback={<PageLoader />}><PractitionerPatients /></Suspense>} />
@@ -273,11 +261,9 @@ export default function App() {
       <Route
         path="/admin"
         element={
-          isLoggedIn && isOwner 
-            ? <Navigate to="/practitioners" replace />
-            : isLoggedIn && isPractitioner
-              ? <Navigate to="/home" replace />
-              : <Navigate to="/login" replace />
+          isLoggedIn && (isOwner || isPractitioner)
+            ? <Navigate to="/home" replace />
+            : <Navigate to="/login" replace />
         }
       />
       <Route

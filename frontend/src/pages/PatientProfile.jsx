@@ -133,7 +133,8 @@ export default function PatientProfile() {
   return (
     <div className="space-y-8 max-w-[1120px]">
       {/* Header: Back + Name | Dropdown | Edit Profile */}
-      <div className="flex items-center justify-between gap-12">
+      {/* Tablet/desktop: original single-row layout, unchanged */}
+      <div className="hidden sm:flex items-center justify-between gap-12">
         {/* Left: Back + Name */}
         <div className="flex items-center gap-3">
           <button 
@@ -168,6 +169,42 @@ export default function PatientProfile() {
           <Edit className="h-3.5 w-3.5" />
           Edit Profile
         </Link>
+      </div>
+
+      {/* Mobile: name gets its own full row (smaller font, no age/gender line);
+          dropdown + Edit Profile share a row below so the dropdown has room to
+          actually show its label instead of being squeezed unreadable */}
+      <div className="flex sm:hidden flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(`${baseUrl}/patients`)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4 text-content-secondary" />
+          </button>
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="profile-header-compact text-lg truncate">{patient.full_name}</h1>
+            {patient.status === 'archived' && <StatusChip status="archived" size="sm" />}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <SectionDropdown
+            value={activeTab}
+            onChange={setActiveTab}
+            options={getDropdownOptions()}
+            className="flex-1"
+            maxWidth="none"
+            variant="sage"
+          />
+          <Link
+            to={`${baseUrl}/patients/${patientId}/edit`}
+            className={`btn-secondary-sm shrink-0 ${activeTab !== 'overview' ? 'invisible pointer-events-none' : ''}`}
+          >
+            <Edit className="h-3.5 w-3.5" />
+            Edit Profile
+          </Link>
+        </div>
       </div>
 
       {/* Tab Content */}
@@ -605,7 +642,10 @@ function PatientPaymentsTab({ patientId }) {
       }
       map.get(key).payments.push(p)
     }
-    return Array.from(map.values())
+    return Array.from(map.values()).map((group) => ({
+      ...group,
+      total: group.payments.reduce((sum, p) => sum + p.amount, 0),
+    }))
   }, [payments])
 
   const toggleMonth = (key) => {
@@ -751,19 +791,25 @@ function PatientPaymentsTab({ patientId }) {
                 const checked = selectedMonths.has(group.key)
 
                 return (
-                  <div key={group.key} className="space-y-2">
-                    <div className="px-4 h-9 flex items-center gap-3 rounded-xl bg-slate-100">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={!canBulkInvoice}
-                        onChange={() => toggleMonth(group.key)}
-                        className="w-4 h-4 rounded accent-primary disabled:opacity-30"
-                        title={canBulkInvoice ? 'Select this month for a bulk invoice' : 'Nothing left to invoice this month'}
-                      />
-                      <span className="text-sm font-medium text-content-secondary">{group.label}</span>
-                      <span className="text-xs text-content-muted">
-                        {group.payments.length} session{group.payments.length !== 1 ? 's' : ''}
+                  <div key={group.key} className="space-y-2 pt-1 first:pt-0">
+                    <div className="px-4 h-9 flex items-center gap-3">
+                      {canBulkInvoice ? (
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleMonth(group.key)}
+                          className="w-4 h-4 rounded accent-primary"
+                          title="Select this month for a bulk invoice"
+                        />
+                      ) : (
+                        <span className="w-4 shrink-0" />
+                      )}
+                      <span className="text-xs font-semibold uppercase tracking-wide text-content-muted whitespace-nowrap">
+                        {group.label}
+                      </span>
+                      <span className="h-px flex-1 bg-border-light" />
+                      <span className="text-xs text-content-muted whitespace-nowrap">
+                        {group.payments.length} session{group.payments.length !== 1 ? 's' : ''} · {formatCurrency(group.total)}
                       </span>
                     </div>
 

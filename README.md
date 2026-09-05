@@ -15,6 +15,7 @@ A comprehensive clinical psychology practice management platform for administeri
 - **Practice Analytics** - Comprehensive business analytics
 - **Clinical Intelligence** - AI-powered, per-patient running summary assembled from clinical history, therapy session transcripts, uploaded documents, MMPI-2 results, and assessment completions, with an interactive chat panel (optional)
 - **Account Management** - Self-service account deletion (deactivation) for practitioners
+- **Responsive Design** - Mobile and tablet friendly layouts across the dashboard, patient records, and scheduling views
 
 ## Quick Start
 

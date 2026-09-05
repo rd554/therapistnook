@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Menu, Bell, LogOut, User, Settings, Calendar, Clock, Plus, CalendarPlus, UserPlus } from 'lucide-react'
+import { Menu, Bell, LogOut, User, Settings, Calendar, Clock, Plus, CalendarPlus } from 'lucide-react'
 import { listNotifications } from '../api/client'
 
 function getInitials(name = '') {
@@ -29,7 +29,6 @@ export default function WorkspaceHeader({
   onMobileMenuToggle,
 }) {
   const navigate = useNavigate()
-  const isOwner = auth?.role === 'owner'
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [now, setNow] = useState(() => new Date())
@@ -98,17 +97,6 @@ export default function WorkspaceHeader({
             <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
             <span className="hidden md:inline">Add Patient</span>
           </button>
-          {isOwner && (
-            <button
-              type="button"
-              className="workspace-header__btn workspace-header__btn--nav"
-              onClick={() => navigate('/practitioners')}
-              aria-label="Add Practitioner"
-            >
-              <UserPlus size={16} strokeWidth={1.5} aria-hidden="true" />
-              <span className="hidden md:inline">Add Practitioner</span>
-            </button>
-          )}
           <button
             type="button"
             className="workspace-header__btn workspace-header__btn--nav"

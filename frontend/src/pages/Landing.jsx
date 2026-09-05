@@ -66,24 +66,24 @@ export default function Landing() {
     <div className="min-h-screen bg-white">
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-border-light bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-2.5">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4 max-sm:px-4">
+          <Link to="/" className="flex items-center gap-2.5 max-sm:gap-2">
             <img src="/logo.png" alt="Therapistnook" className="h-9 w-9" />
-            <span className="text-lg font-bold text-content-primary">Therapistnook</span>
+            <span className="text-lg font-bold text-content-primary max-sm:text-base">Therapistnook</span>
           </Link>
           <nav className="hidden items-center gap-7 text-sm font-semibold text-content-secondary sm:flex">
             <a href="#product" className="transition hover:text-content-primary">Product</a>
             <a href="#features" className="transition hover:text-content-primary">Features</a>
             <a href="#pricing" className="transition hover:text-content-primary">Pricing</a>
           </nav>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 max-sm:gap-2">
             <Link
               to="/login"
-              className="rounded-btn px-4 py-2 text-sm font-semibold text-content-secondary transition hover:text-content-primary"
+              className="rounded-btn px-4 py-2 text-sm font-semibold text-content-secondary transition hover:text-content-primary max-sm:px-2.5"
             >
               Log In
             </Link>
-            <Link to="/login?mode=signup" className="btn-primary !py-2 !px-5 text-sm">
+            <Link to="/login?mode=signup" className="btn-primary !py-2 !px-5 text-sm max-sm:!px-3.5">
               Sign Up
             </Link>
           </div>
@@ -99,22 +99,22 @@ export default function Landing() {
           <div className="absolute top-16 -right-20 h-80 w-80 rounded-full bg-lavender-200/50 blur-3xl" />
         </div>
 
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-20 pt-6 sm:pt-10 lg:grid-cols-2 lg:gap-10">
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pb-20 pt-6 sm:pt-10 md:grid-cols-2 md:gap-10 lg:grid-cols-2 lg:gap-10">
           {/* Copy */}
-          <div className="text-center lg:text-left">
+          <div className="text-center md:text-left lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-badge bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-700">
               <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} />
               Built for licensed psychologists
             </span>
-            <h1 className="mx-auto mt-6 max-w-xl text-page-title text-content-primary sm:text-5xl lg:mx-0">
+            <h1 className="mx-auto mt-6 max-w-xl text-page-title text-content-primary sm:text-5xl md:mx-0 lg:mx-0">
               Manage your practice and score clinical assessments in one place
             </h1>
-            <p className="mx-auto mt-5 max-w-xl text-body text-content-secondary sm:text-lg lg:mx-0">
+            <p className="mx-auto mt-5 max-w-xl text-body text-content-secondary sm:text-lg md:mx-0 lg:mx-0">
               Therapistnook handles patient records, scheduling and payments alongside automated,
               gender-specific clinical assessment scoring so you spend less time on paperwork and
               more time with patients
             </p>
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3 md:justify-start lg:justify-start">
               <Link to="/login?mode=signup" className="btn-primary text-base">
                 Create your free account
                 <ArrowRight className="h-4 w-4" strokeWidth={2} />
@@ -126,7 +126,7 @@ export default function Landing() {
           </div>
 
           {/* Illustration */}
-          <div className="relative mx-auto w-full max-w-md lg:max-w-none">
+          <div className="relative mx-auto w-full max-w-md md:max-w-none lg:max-w-none">
             <img
               src="/hero-illustration.svg"
               alt="Illustration of a practitioner working calmly and in control of their practice"
@@ -140,7 +140,7 @@ export default function Landing() {
       <section id="product" className="border-t border-border-light bg-surface-subtle py-20">
         <div className="mx-auto max-w-4xl px-6">
           <div className="relative mx-auto max-w-4xl">
-            <div className="absolute -left-3 -top-4 z-10 hidden -rotate-3 items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-content-secondary shadow-md sm:flex">
+            <div className="absolute -left-3 -top-4 z-10 hidden -rotate-3 items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-md sm:flex">
               <CalendarClock className="h-3.5 w-3.5 text-primary-600" strokeWidth={2} />
               Synced with Google Calendar
             </div>
@@ -179,8 +179,8 @@ export default function Landing() {
               </div>
               <p className="text-caption text-content-muted">Scored in seconds</p>
             </div>
-            <div className="absolute -bottom-4 -right-3 z-10 hidden rotate-3 items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-content-secondary shadow-md sm:flex">
-              <ShieldCheck className="h-3.5 w-3.5 text-success-text" strokeWidth={2} />
+            <div className="absolute -bottom-4 -right-3 z-10 hidden rotate-3 items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-md sm:flex">
+              <ShieldCheck className="h-3.5 w-3.5 text-primary-600" strokeWidth={2} />
               Secure patient records
             </div>
 
@@ -230,6 +230,32 @@ export default function Landing() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Mobile: the floating corner cards above are hidden below sm (no room to
+              float them outside the mockup), so restate the same highlights as a
+              static chip row instead of just dropping them. */}
+          <div className="mt-4 flex flex-wrap justify-center gap-2 sm:hidden">
+            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
+              <CalendarClock className="h-3.5 w-3.5 shrink-0 text-primary-600" strokeWidth={2} />
+              Synced with Google Calendar
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
+              <Sparkles className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Clinical Intelligence
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
+              <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Session Notes
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
+              <Brain className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Scored in seconds
+            </span>
+            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-primary-600" strokeWidth={2} />
+              Secure patient records
+            </span>
           </div>
         </div>
       </section>
