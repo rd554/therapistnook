@@ -581,6 +581,16 @@ class ClinicalIntelligence(Base):
     #   sources: [{source_type, source_id, excerpt, date}],
     # }]
     
+    # Recent-changes audit trail - capped rolling log of applied changes,
+    # newest first, both auto-applied AND manually-approved. Exists because
+    # ClinicalIntelligenceVersion snapshots are only created on manual
+    # approve (see review_update in main.py), so without this, auto-applied
+    # updates - the majority path - would leave no record of what changed.
+    # Powers the "What's changed since last visit" card. See
+    # append_change_entry() in clinical_intelligence.py.
+    recent_changes = Column(JSON, nullable=True)
+    # [{id, section, operation, label, source_type, source_id, applied_at}]
+
     # Processing metadata
     last_processed_at = Column(DateTime(timezone=True), nullable=True)
     last_source_type = Column(String, nullable=True)

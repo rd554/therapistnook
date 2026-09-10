@@ -126,6 +126,7 @@ async def _run_sqlite_migrations(conn):
         await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_at", "last_test_at DATETIME")
         await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_status", "last_test_status VARCHAR")
         await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_error", "last_test_error VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "clinical_intelligence", "recent_changes", "recent_changes JSON")
 
         if 'email_verified' not in columns:
             await conn.execute(text(
@@ -226,6 +227,7 @@ async def _run_postgres_migrations(conn):
         await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_at", "last_test_at TIMESTAMP WITH TIME ZONE")
         await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_status", "last_test_status VARCHAR")
         await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_error", "last_test_error VARCHAR")
+        await _add_column_if_missing_postgres(conn, "clinical_intelligence", "recent_changes", "recent_changes JSON")
 
         # Check if email_verified column exists
         result = await conn.execute(text("""

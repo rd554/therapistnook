@@ -226,6 +226,29 @@
     border-color: rgba(47, 47, 47, 0.1);
   }
 
+  /* Light lavender by default, solid dark lavender on hover/press - same
+     pattern as .workspace-header__btn--nav, for secondary actions that
+     still want a lavender tint instead of the neutral .btn-secondary */
+  .btn-tint {
+    @apply inline-flex items-center justify-center gap-2
+           transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    background: var(--color-lavender-soft);
+    color: var(--color-primary);
+    border-radius: var(--radius-btn);
+    height: 42px;
+    padding: 0 20px;
+  }
+
+  .btn-tint:hover:not(:disabled),
+  .btn-tint:active:not(:disabled) {
+    background: var(--color-primary-hover);
+    color: #FFFFFF;
+  }
+
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2
            bg-transparent
@@ -874,6 +897,15 @@
     box-shadow: var(--shadow-navbar);
   }
 
+  /* Below lg (where the hamburger menu button appears) the desktop's spacious
+     40px inset reads as pushing the hamburger toward the middle of a narrow
+     screen — tighten it to a normal mobile edge margin. */
+  @media (max-width: 1023px) {
+    .workspace-header {
+      padding: 0 20px;
+    }
+  }
+
   .workspace-header__left {
     @apply flex items-center;
     gap: 16px;
@@ -925,8 +957,11 @@
     box-shadow: none;
   }
 
-  .workspace-header__btn--soft:hover {
-    background: var(--color-lavender-soft);
+  .workspace-header__btn--soft:hover,
+  .workspace-header__btn--soft:focus-visible,
+  .workspace-header__btn--soft:active {
+    background: var(--color-primary-hover);
+    color: #FFFFFF;
   }
 
   .workspace-header__btn--primary {
@@ -1625,6 +1660,15 @@
   .workspace-main {
     padding: var(--navbar-content-gap) var(--page-padding-x) 56px;
     background: #FFFFFF;
+  }
+
+  /* Match the header's tightened mobile/tablet inset so page content (e.g. the
+     "Patients" heading) stays flush with the hamburger above it. */
+  @media (max-width: 1023px) {
+    .workspace-main {
+      padding-left: 20px;
+      padding-right: 20px;
+    }
   }
 
   /* ============================================
@@ -3004,6 +3048,18 @@
   .section-dropdown-cream {
     background: #FEF8E8 !important;
     border-color: #E8C66A !important;
+  }
+
+  /* Neutral grey collapsed-button treatment — the toggle button itself reads
+     as a filled grey pill, but the open options menu stays untouched (it's
+     hardcoded bg-white in SectionDropdown.jsx, independent of variant). */
+  .section-dropdown-grey {
+    background: #F1F5F9 !important;
+    border-color: #E2E8F0 !important;
+  }
+
+  .section-dropdown-grey:focus {
+    box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.15) !important;
   }
 
   .section-dropdown-cream:focus {

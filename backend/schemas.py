@@ -744,6 +744,7 @@ class ClinicalIntelligenceResponse(BaseModel):
     risk_factors: Optional[list[RiskFactorItem]] = None
     timeline: Optional[list[TimelineItem]] = None
     outstanding_questions: Optional[list[OutstandingQuestionItem]] = None
+    recent_changes: Optional[list[dict]] = None
     last_processed_at: Optional[datetime] = None
     last_source_type: Optional[str] = None
     last_source_id: Optional[str] = None

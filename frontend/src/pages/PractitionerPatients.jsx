@@ -21,7 +21,6 @@ import {
   Alert,
   Button,
   IconButton,
-  RowCard,
   PhoneInput,
   SectionDropdown,
 } from '../components/ui'
@@ -214,11 +213,17 @@ export default function PractitionerPatients() {
   }
 
   const formatDate = (dateStr) => {
-    return new Date(dateStr).toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric' 
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
     })
+  }
+
+  const getInitials = (name) => {
+    if (!name) return '?'
+    const parts = name.trim().split(/\s+/)
+    return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase()
   }
 
   if (loading) {
@@ -226,7 +231,7 @@ export default function PractitionerPatients() {
   }
 
   return (
-    <div className="space-y-6 max-w-[780px]">
+    <div className="space-y-6">
       {/* Section Header - Outside Card */}
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-section-title text-content-primary shrink-0">Patients</h1>
@@ -468,10 +473,12 @@ export default function PractitionerPatients() {
         <NoPatients onAdd={() => setShowForm(true)} />
       ) : (
         <>
-        {/* Desktop/tablet: original grid table, unchanged */}
+        {/* Desktop/tablet: elevated rows — one soft grey card per patient,
+            matching the Dashboard's Recent Patients widget (bg #F1F5F9,
+            16px radius, soft shadow) instead of one flat table surface. */}
         <div className="hidden lg:block space-y-2.5">
-          {/* Header Row - Transparent like Recent Patients */}
-          <div className="px-4 grid grid-cols-[1.8fr_0.6fr_0.7fr_0.9fr_0.9fr_1.3fr_auto] items-center gap-4 text-xs font-normal text-content-muted">
+          {/* Header Row */}
+          <div className="px-6 py-2 grid grid-cols-[minmax(0,1fr)_64px_84px_104px_104px_140px_96px] items-center gap-4 text-xs font-medium text-content-muted">
             <span>Name</span>
             <span>Age</span>
             <span>Gender</span>
@@ -481,20 +488,26 @@ export default function PractitionerPatients() {
             <span className="w-24"></span>
           </div>
 
-          {/* New Intake Submissions - awaiting Accept/Remove, always pinned to top */}
+          {/* New Intake Submissions - awaiting Accept/Remove, always pinned to top.
+              Lavender tint (not the neutral grey used for ordinary rows) so a
+              row that's blocking on a decision still reads as distinct/urgent. */}
           {intakeSubmissions.map((s) => (
-            <RowCard
+            <div
               key={`intake-${s.id}`}
-              hoverable={false}
-              className="grid grid-cols-[1.8fr_0.6fr_0.7fr_0.9fr_0.9fr_1.3fr_auto] items-center gap-4"
+              className="relative px-6 py-3.5 grid grid-cols-[minmax(0,1fr)_64px_84px_104px_104px_140px_96px] items-center gap-4 bg-primary-50 rounded-btn border border-dashed border-primary-300 shadow-sm"
             >
-              <div className="text-left">
-                <div className="font-medium text-content-primary">{s.full_name}</div>
-                {s.chief_complaint && (
-                  <div className="text-content-muted text-xs truncate max-w-[260px]" title={s.chief_complaint}>
-                    {s.chief_complaint}
-                  </div>
-                )}
+              <div className="flex items-center gap-3 min-w-0 text-left">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warning-bg text-warning-text text-xs font-bold">
+                  {getInitials(s.full_name)}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-medium text-content-primary truncate">{s.full_name}</div>
+                  {s.chief_complaint && (
+                    <div className="text-content-muted text-xs truncate max-w-[220px]" title={s.chief_complaint}>
+                      {s.chief_complaint}
+                    </div>
+                  )}
+                </div>
               </div>
               <span className="text-secondary text-sm">{s.age}</span>
               <span className="text-secondary text-sm">{s.gender}</span>
@@ -517,20 +530,25 @@ export default function PractitionerPatients() {
                   <X className="w-3.5 h-3.5" strokeWidth={2} /> Remove
                 </button>
               </div>
-            </RowCard>
+            </div>
           ))}
 
           {/* Patient Rows */}
           {patients.map((p) => (
-            <RowCard 
+            <div
               key={p.id}
-              className="grid grid-cols-[1.8fr_0.6fr_0.7fr_0.9fr_0.9fr_1.3fr_auto] items-center gap-4"
+              className="group px-6 py-3.5 grid grid-cols-[minmax(0,1fr)_64px_84px_104px_104px_140px_96px] items-center gap-4 bg-surface-subtle rounded-btn border border-slate-100 shadow-sm hover:bg-border-light transition-all"
             >
               <button
                 onClick={() => navigate(`${baseUrl}/${p.id}`)}
-                className="text-left font-medium text-content-primary hover:text-primary transition-colors"
+                className="flex items-center gap-3 min-w-0 text-left"
               >
-                {p.full_name}
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-light text-primary text-xs font-bold">
+                  {getInitials(p.full_name)}
+                </div>
+                <span className="font-medium text-content-primary group-hover:text-primary transition-colors truncate">
+                  {p.full_name}
+                </span>
               </button>
               <span className="text-secondary text-sm">{p.age}</span>
               <span className="text-secondary text-sm">{p.gender}</span>
@@ -566,24 +584,31 @@ export default function PractitionerPatients() {
                   />
                 )}
               </div>
-            </RowCard>
+            </div>
           ))}
         </div>
 
-        {/* Phone/tablet: stacked cards, no fixed columns to squeeze */}
+        {/* Phone/tablet: same elevated-row-per-patient treatment as desktop,
+            stacked into a compact layout instead of grid columns since
+            there isn't room for them side by side. */}
         <div className="lg:hidden space-y-2.5">
           {/* New Intake Submissions */}
           {intakeSubmissions.map((s) => (
-            <RowCard key={`intake-m-${s.id}`} hoverable={false} className="flex flex-col gap-2">
+            <div key={`intake-m-${s.id}`} className="flex flex-col gap-2 px-4 py-3.5 bg-primary-50 rounded-btn border border-dashed border-primary-300 shadow-sm">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-medium text-content-primary truncate">{s.full_name}</div>
-                  <div className="text-content-muted text-xs">{s.age} · {s.gender}</div>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warning-bg text-warning-text text-xs font-bold">
+                    {getInitials(s.full_name)}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-medium text-content-primary truncate">{s.full_name}</div>
+                    <div className="text-content-muted text-xs">{s.age} · {s.gender}</div>
+                  </div>
                 </div>
                 <StatusChip status="new_intake" size="sm" />
               </div>
               {s.chief_complaint && (
-                <div className="text-content-muted text-xs truncate" title={s.chief_complaint}>
+                <div className="text-content-muted text-xs truncate pl-12" title={s.chief_complaint}>
                   {s.chief_complaint}
                 </div>
               )}
@@ -603,18 +628,23 @@ export default function PractitionerPatients() {
                   <X className="w-3.5 h-3.5" strokeWidth={2} /> Remove
                 </button>
               </div>
-            </RowCard>
+            </div>
           ))}
 
           {/* Patient Rows */}
           {patients.map((p) => (
-            <RowCard key={`m-${p.id}`} className="flex flex-col gap-2.5">
+            <div key={`m-${p.id}`} className="group flex flex-col gap-2.5 px-4 py-3.5 bg-surface-subtle rounded-btn border border-slate-100 shadow-sm active:bg-border-light transition-all">
               <div className="flex items-start justify-between gap-2">
                 <button
                   onClick={() => navigate(`${baseUrl}/${p.id}`)}
-                  className="text-left font-medium text-content-primary hover:text-primary transition-colors truncate"
+                  className="flex items-center gap-3 min-w-0 text-left"
                 >
-                  {p.full_name}
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-light text-primary text-xs font-bold">
+                    {getInitials(p.full_name)}
+                  </div>
+                  <span className="font-medium text-content-primary group-hover:text-primary transition-colors truncate">
+                    {p.full_name}
+                  </span>
                 </button>
                 <div className="flex items-center gap-1 shrink-0">
                   <IconButton
@@ -646,7 +676,7 @@ export default function PractitionerPatients() {
                   )}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-secondary text-xs">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-12 text-secondary text-xs">
                 <span>{p.age} yrs</span>
                 <span>{p.gender}</span>
                 <span className="text-content-muted">{formatDate(p.created_at)}</span>
@@ -655,7 +685,7 @@ export default function PractitionerPatients() {
                 <StatusChip status={p.status} size="sm" />
                 <IntakeStatusChip status={p.clinical_history_status} size="sm" />
               </div>
-            </RowCard>
+            </div>
           ))}
         </div>
         </>

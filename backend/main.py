@@ -4812,6 +4812,7 @@ async def get_clinical_intelligence(
         risk_factors=ci.risk_factors,
         timeline=ci.timeline,
         outstanding_questions=ci.outstanding_questions,
+        recent_changes=ci.recent_changes,
         last_processed_at=ci.last_processed_at,
         last_source_type=ci.last_source_type,
         last_source_id=ci.last_source_id,
@@ -5061,7 +5062,7 @@ async def trigger_clinical_intelligence_processing(
         # Check for auto-apply updates
         if update.get("auto_apply"):
             # Apply directly to intelligence
-            from clinical_intelligence import merge_intelligence_update
+            from clinical_intelligence import merge_intelligence_update, append_change_entry
             ci_data = {
                 "patient_summary": ci.patient_summary,
                 "psychological_profile": ci.psychological_profile,
@@ -5073,9 +5074,22 @@ async def trigger_clinical_intelligence_processing(
                 "risk_factors": ci.risk_factors or [],
                 "timeline": ci.timeline or [],
                 "outstanding_questions": ci.outstanding_questions or [],
+                "recent_changes": ci.recent_changes or [],
             }
             updated_data = merge_intelligence_update(ci_data, update)
-            
+            # No ClinicalIntelligenceUpdate row is created on this path (see
+            # else branch below), so this audit entry is the only record
+            # this change was ever applied - see append_change_entry's
+            # docstring.
+            updated_data = append_change_entry(
+                updated_data,
+                update.get("section"),
+                update.get("operation"),
+                update.get("proposed_changes") or {},
+                update.get("source_type"),
+                update.get("source_id"),
+            )
+
             # Update the model
             ci.patient_summary = updated_data.get("patient_summary")
             ci.psychological_profile = updated_data.get("psychological_profile")
@@ -5087,6 +5101,7 @@ async def trigger_clinical_intelligence_processing(
             ci.risk_factors = updated_data.get("risk_factors")
             ci.timeline = updated_data.get("timeline")
             ci.outstanding_questions = updated_data.get("outstanding_questions")
+            ci.recent_changes = updated_data.get("recent_changes")
         else:
             # Create pending update for review
             ci_update = ClinicalIntelligenceUpdate(
@@ -5218,7 +5233,7 @@ async def review_update(
     
     if data.action == "approve":
         # Apply the update
-        from clinical_intelligence import merge_intelligence_update, create_intelligence_snapshot
+        from clinical_intelligence import merge_intelligence_update, create_intelligence_snapshot, append_change_entry
         
         # Create version snapshot before applying
         from models import generate_uuid
@@ -5259,13 +5274,22 @@ async def review_update(
             "risk_factors": ci.risk_factors or [],
             "timeline": ci.timeline or [],
             "outstanding_questions": ci.outstanding_questions or [],
+            "recent_changes": ci.recent_changes or [],
         }
         updated_data = merge_intelligence_update(ci_data, {
             "section": update.section,
             "operation": update.operation,
             "proposed_changes": update.proposed_changes,
         })
-        
+        updated_data = append_change_entry(
+            updated_data,
+            update.section,
+            update.operation,
+            update.proposed_changes or {},
+            update.source_type,
+            update.source_id,
+        )
+
         # Update the model
         ci.patient_summary = updated_data.get("patient_summary")
         ci.psychological_profile = updated_data.get("psychological_profile")
@@ -5277,10 +5301,11 @@ async def review_update(
         ci.risk_factors = updated_data.get("risk_factors")
         ci.timeline = updated_data.get("timeline")
         ci.outstanding_questions = updated_data.get("outstanding_questions")
+        ci.recent_changes = updated_data.get("recent_changes")
         ci.version += 1
-    
+
     await db.commit()
-    
+
     return {"message": f"Update {data.action}d successfully"}
 
 
@@ -5327,7 +5352,7 @@ async def bulk_review_updates(
         update.reviewed_at = datetime.now(timezone.utc)
         
         if action == "approve":
-            from clinical_intelligence import merge_intelligence_update
+            from clinical_intelligence import merge_intelligence_update, append_change_entry
             ci_data = {
                 "patient_summary": ci.patient_summary,
                 "psychological_profile": ci.psychological_profile,
@@ -5339,13 +5364,22 @@ async def bulk_review_updates(
                 "risk_factors": ci.risk_factors or [],
                 "timeline": ci.timeline or [],
                 "outstanding_questions": ci.outstanding_questions or [],
+                "recent_changes": ci.recent_changes or [],
             }
             updated_data = merge_intelligence_update(ci_data, {
                 "section": update.section,
                 "operation": update.operation,
                 "proposed_changes": update.proposed_changes,
             })
-            
+            updated_data = append_change_entry(
+                updated_data,
+                update.section,
+                update.operation,
+                update.proposed_changes or {},
+                update.source_type,
+                update.source_id,
+            )
+
             ci.patient_summary = updated_data.get("patient_summary")
             ci.psychological_profile = updated_data.get("psychological_profile")
             ci.symptoms = updated_data.get("symptoms")
@@ -5356,7 +5390,8 @@ async def bulk_review_updates(
             ci.risk_factors = updated_data.get("risk_factors")
             ci.timeline = updated_data.get("timeline")
             ci.outstanding_questions = updated_data.get("outstanding_questions")
-        
+            ci.recent_changes = updated_data.get("recent_changes")
+
         processed += 1
     
     if action == "approve" and processed > 0:

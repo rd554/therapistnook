@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Brain, Loader2, AlertCircle, RefreshCw, CheckCircle, XCircle, Clock,
-  User, Heart, AlertTriangle, Target, Users, Calendar, HelpCircle,
+  User, AlertTriangle, Target, Users, Calendar, HelpCircle,
   FileText, Activity, ChevronDown, ChevronRight, History,
   ThumbsUp, ThumbsDown, Sparkles, Shield, TrendingUp,
-  MessageCircle, Send, ShieldAlert,
+  Send, ShieldAlert, Sparkle,
 } from 'lucide-react'
 import {
   getClinicalIntelligence,
@@ -18,13 +18,10 @@ import {
   askClinicalIntelligenceChat,
 } from '../api/client'
 import {
-  SectionHeader,
-  MetricCard,
-  MetricCardGrid,
-  CollapsibleCard,
   NoClinicalIntelligence,
   Alert,
   Button,
+  IconButton,
   PageLoader,
 } from './ui'
 
@@ -106,17 +103,6 @@ export default function ClinicalIntelligenceTab({ patientId }) {
   const [showVersions, setShowVersions] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [confidenceFilter, setConfidenceFilter] = useState('all')
-  const [expandedSections, setExpandedSections] = useState({
-    summary: false,
-    symptoms: false,
-    diagnoses: false,
-    goals: false,
-    relationships: false,
-    events: false,
-    risks: false,
-    questions: false,
-    timeline: false,
-  })
 
   const loadData = async () => {
     try {
@@ -189,10 +175,6 @@ export default function ClinicalIntelligenceTab({ patientId }) {
     }
   }
 
-  const toggleSection = (section) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
-  }
-
   // These must run on every render regardless of loading/error state - the
   // early returns below would otherwise change the hook count between
   // renders (violates Rules of Hooks: "Rendered more hooks than during the
@@ -243,42 +225,20 @@ export default function ClinicalIntelligenceTab({ patientId }) {
     !(intelligence?.treatment_goals?.length)
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <SectionHeader
-        icon={Brain}
-        title="Clinical Intelligence"
-        subtitle="AI-powered insights from all patient data sources"
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={loadVersions} leftIcon={History}>
-              Version History
-            </Button>
-            <Button variant="secondary" onClick={() => setShowChat(true)} leftIcon={MessageCircle}>
-              Ask About This Patient
-            </Button>
-            <Button onClick={handleProcess} isLoading={processing} leftIcon={RefreshCw}>
-              {processing ? 'Processing...' : 'Reprocess All Sources'}
-            </Button>
-          </div>
-        }
-      />
-
-      {/* Stats Bar */}
-      {stats && (
-        <MetricCardGrid cols={6}>
-          {/* summary-card-mini's default 200px min-width doesn't shrink to
-              fit a 6-up grid track, so cards overflow into their neighbors.
-              summary-card-mini--compact is the same fix already used for
-              narrow mini-card rows elsewhere (see PatientProfile.jsx). */}
-          <MetricCard icon={Heart} label="Active Symptoms" value={stats.active_symptoms || 0} semantic="error" variant="mini" className="summary-card-mini--compact !min-w-0" />
-          <MetricCard icon={FileText} label="Diagnoses" value={stats.current_diagnoses || 0} semantic="info" variant="mini" className="summary-card-mini--compact !min-w-0" />
-          <MetricCard icon={Target} label="Active Goals" value={stats.current_goals || 0} semantic="success" variant="mini" className="summary-card-mini--compact !min-w-0" />
-          <MetricCard icon={AlertTriangle} label="Risk Factors" value={stats.current_risk_factors || 0} semantic="warning" variant="mini" className="summary-card-mini--compact !min-w-0" />
-          <MetricCard icon={HelpCircle} label="Questions" value={stats.outstanding_questions || 0} semantic="assessments" variant="mini" className="summary-card-mini--compact !min-w-0" />
-          <MetricCard icon={Clock} label="Pending Review" value={stats.pending_updates || 0} semantic="payments" variant="mini" className="summary-card-mini--compact !min-w-0" />
-        </MetricCardGrid>
-      )}
+    <div className="space-y-6 pt-2">
+      {/* Section Header - Outside Card, matching the other patient tabs */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h2 className="text-section-title text-content-primary">Clinical Intelligence</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <IconButton icon={History} label="Version History" onClick={loadVersions} />
+          <Button variant="tint" size="sm" onClick={() => setShowChat(true)} leftIcon={Sparkle}>
+            Ask Nook
+          </Button>
+          <Button variant="tint" size="sm" onClick={handleProcess} isLoading={processing} leftIcon={RefreshCw}>
+            {processing ? 'Processing...' : 'Reprocess All Sources'}
+          </Button>
+        </div>
+      </div>
 
       {/* Pending Updates */}
       {hasPendingUpdates && (
@@ -357,167 +317,32 @@ export default function ClinicalIntelligenceTab({ patientId }) {
         </div>
       )}
 
-      {/* Intelligence Content */}
+      {/* Intelligence Content - one prioritized column: the things a
+          practitioner needs to act on or orient by first (risk, what
+          changed, the summary) come before reference detail, instead of
+          nine identical-looking accordion rows in source order. */}
       {!isEmpty && (
-        <div className="space-y-4">
-          {/* Patient Summary */}
-          {intelligence?.patient_summary && (
-            <IntelligenceCollapsibleSection
-              title="Patient Summary"
-              icon={User}
-              expanded={expandedSections.summary}
-              onToggle={() => toggleSection('summary')}
-            >
-              <div className="prose prose-sm max-w-none">
-                <p className="text-gray-700">{intelligence.patient_summary.text}</p>
-              </div>
-              {intelligence.patient_summary.sources?.length > 0 && (
-                <SourceCitations sources={intelligence.patient_summary.sources} />
-              )}
-            </IntelligenceCollapsibleSection>
-          )}
+        <div className="space-y-5">
+          <RiskBanner riskFactors={intelligence?.risk_factors} />
 
-          {/* Symptoms */}
-          {intelligence?.symptoms?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Symptoms"
-              icon={Heart}
-              count={intelligence.symptoms.length}
-              expanded={expandedSections.symptoms}
-              onToggle={() => toggleSection('symptoms')}
-            >
-              <div className="space-y-3">
-                {intelligence.symptoms.map((symptom, idx) => (
-                  <SymptomCard key={symptom.id || idx} symptom={symptom} />
-                ))}
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
+          <WhatsChangedCard recentChanges={intelligence?.recent_changes} />
 
-          {/* Diagnoses */}
-          {intelligence?.diagnoses?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Diagnoses"
-              icon={FileText}
-              count={intelligence.diagnoses.length}
-              expanded={expandedSections.diagnoses}
-              onToggle={() => toggleSection('diagnoses')}
-            >
-              <div className="space-y-3">
-                {intelligence.diagnoses.map((diagnosis, idx) => (
-                  <DiagnosisCard key={diagnosis.id || idx} diagnosis={diagnosis} />
-                ))}
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
+          <SnapshotCard summary={intelligence?.patient_summary} stats={stats} />
 
-          {/* Treatment Goals */}
-          {intelligence?.treatment_goals?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Treatment Goals"
-              icon={Target}
-              count={intelligence.treatment_goals.length}
-              expanded={expandedSections.goals}
-              onToggle={() => toggleSection('goals')}
-            >
-              <div className="space-y-3">
-                {intelligence.treatment_goals.map((goal, idx) => (
-                  <GoalCard key={goal.id || idx} goal={goal} />
-                ))}
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
+          <ClinicalPictureCard
+            diagnoses={intelligence?.diagnoses}
+            symptoms={intelligence?.symptoms}
+          />
 
-          {/* Risk Factors */}
-          {intelligence?.risk_factors?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Risk Factors"
-              icon={AlertTriangle}
-              count={intelligence.risk_factors.length}
-              expanded={expandedSections.risks}
-              onToggle={() => toggleSection('risks')}
-              headerClass="bg-error-bg"
-            >
-              <div className="space-y-3">
-                {intelligence.risk_factors.map((risk, idx) => (
-                  <RiskCard key={risk.id || idx} risk={risk} />
-                ))}
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
+          <TreatmentGoalsCard goals={intelligence?.treatment_goals} />
 
-          {/* Important Relationships */}
-          {intelligence?.relationships?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Important Relationships"
-              icon={Users}
-              count={intelligence.relationships.length}
-              expanded={expandedSections.relationships}
-              onToggle={() => toggleSection('relationships')}
-            >
-              <div className="grid gap-3 sm:grid-cols-2">
-                {intelligence.relationships.map((rel, idx) => (
-                  <RelationshipCard key={rel.id || idx} relationship={rel} />
-                ))}
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
+          <OutstandingQuestionsCard questions={intelligence?.outstanding_questions} />
 
-          {/* Life Events */}
-          {intelligence?.life_events?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Life Events"
-              icon={Calendar}
-              count={intelligence.life_events.length}
-              expanded={expandedSections.events}
-              onToggle={() => toggleSection('events')}
-            >
-              <div className="space-y-3">
-                {intelligence.life_events.map((event, idx) => (
-                  <LifeEventCard key={event.id || idx} event={event} />
-                ))}
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
-
-          {/* Outstanding Questions */}
-          {intelligence?.outstanding_questions?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Outstanding Questions"
-              icon={HelpCircle}
-              count={intelligence.outstanding_questions.filter(q => !q.resolved).length}
-              expanded={expandedSections.questions}
-              onToggle={() => toggleSection('questions')}
-            >
-              <div className="space-y-3">
-                {intelligence.outstanding_questions.filter(q => !q.resolved).map((question, idx) => (
-                  <QuestionCard key={question.id || idx} question={question} />
-                ))}
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
-
-          {/* Timeline */}
-          {intelligence?.timeline?.length > 0 && (
-            <IntelligenceCollapsibleSection
-              title="Timeline"
-              icon={Clock}
-              count={intelligence.timeline.length}
-              expanded={expandedSections.timeline}
-              onToggle={() => toggleSection('timeline')}
-            >
-              <div className="relative">
-                <div className="absolute left-4 top-0 h-full w-0.5 bg-slate-200" />
-                <div className="space-y-4">
-                  {intelligence.timeline
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .map((item, idx) => (
-                      <TimelineItem key={item.id || idx} item={item} />
-                    ))}
-                </div>
-              </div>
-            </IntelligenceCollapsibleSection>
-          )}
+          <MoreDetailSection
+            relationships={intelligence?.relationships}
+            lifeEvents={intelligence?.life_events}
+            timeline={intelligence?.timeline}
+          />
         </div>
       )}
 
@@ -550,29 +375,458 @@ export default function ClinicalIntelligenceTab({ patientId }) {
   )
 }
 
-function IntelligenceCollapsibleSection({ title, icon: Icon, count, expanded, onToggle, children, headerClass = '' }) {
+// A small header used by every card in the new layout: a muted icon tile
+// plus a title (optionally a subtitle), matching the approved mockup.
+function CardHeader({ icon: Icon, iconClassName = 'bg-slate-50 text-content-muted', title, subtitle, action }) {
   return (
-    <div className="card overflow-hidden !p-0">
-      <button
-        onClick={onToggle}
-        className={`flex w-full items-center justify-between p-5 text-left hover:bg-slate-50 transition-colors ${headerClass}`}
-      >
-        <div className="flex items-center gap-3">
-          <Icon className="h-5 w-5 text-content-muted" strokeWidth={1.8} />
+    <div className="mb-3.5 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3.5">
+        <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${iconClassName}`}>
+          <Icon className="h-5 w-5" strokeWidth={1.8} />
+        </div>
+        <div>
           <h3 className="text-card-title">{title}</h3>
-          {count !== undefined && (
-            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-content-secondary">
-              {count}
+          {subtitle && <p className="mt-0.5 text-caption">{subtitle}</p>}
+        </div>
+      </div>
+      {action}
+    </div>
+  )
+}
+
+// Only rendered when there's something to act on - not even a placeholder
+// shows when the patient has no active risk factors.
+function RiskBanner({ riskFactors }) {
+  const active = (riskFactors || []).filter(r => r.status !== 'resolved')
+  if (active.length === 0) return null
+
+  return (
+    <Alert
+      variant="error"
+      title={`${active.length} active risk factor${active.length === 1 ? '' : 's'}`}
+    >
+      <div className="mt-2 space-y-1.5">
+        {active.map((risk, idx) => (
+          <div key={risk.id || idx} className="flex items-center justify-between gap-3">
+            <span className="font-medium">
+              {(risk.risk_type || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
             </span>
+            <span className="text-xs uppercase tracking-wide opacity-80">
+              {risk.severity}{risk.status ? ` · ${risk.status}` : ''}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Alert>
+  )
+}
+
+// Shows the most recent applied changes across all sources, newest first -
+// NOT grouped down to a single source event. A "reprocess all sources" run
+// walks clinical history, sessions, documents and assessments in one pass
+// and prepends every change it applies, so picking "the first group" would
+// surface whichever source that loop happened to touch last, not what's
+// actually most recent - and would hide changes from other sources applied
+// moments earlier in the same run. A flat top-N list sidesteps that. Reads
+// `recent_changes`, a rolling audit log the backend appends to on every
+// applied change (auto-applied or reviewed) - see append_change_entry() in
+// clinical_intelligence.py. Renders nothing for patients with no changes
+// logged yet (existing records predate this field).
+//
+// Titled "Recent changes", not "since last visit" - nothing here is scoped
+// to a visit boundary (no per-visit grouping, no reliable event date), so
+// claiming otherwise would overstate what the log actually tracks. Also
+// note a "Reprocess all sources" run can emit more entries than fit here in
+// one pass, so right after a bulk reprocess this reflects processing
+// activity, not only new clinical findings.
+//
+// The date tag is deliberately omitted. `applied_at` is when the backend
+// processed the change, not when the underlying clinical event happened -
+// reprocessing older history would otherwise show today's date on a
+// months-old session.
+function WhatsChangedCard({ recentChanges }) {
+  const [showAll, setShowAll] = useState(false)
+  if (!recentChanges || recentChanges.length === 0) return null
+
+  const visible = showAll ? recentChanges : recentChanges.slice(0, 6)
+  const remaining = recentChanges.length - visible.length
+
+  return (
+    <div className="card">
+      <CardHeader
+        icon={Clock}
+        iconClassName="bg-info-bg text-info-text"
+        title="Recent changes"
+        action={<span className="text-caption">{recentChanges.length} total</span>}
+      />
+      <div className="divide-y divide-border-light">
+        {visible.map(change => (
+          <div key={change.id} className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
+            <div className="flex items-start gap-3">
+              <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-info-text/40" />
+              <span className="text-sm text-content-primary">{change.label}</span>
+            </div>
+            <span className="flex-shrink-0 rounded-full border border-border-light bg-slate-50 px-2.5 py-0.5 text-xs text-content-secondary">
+              {sourceGroupMeta(change.source_type).label}
+            </span>
+          </div>
+        ))}
+      </div>
+      {remaining > 0 && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="mt-3.5 flex items-center gap-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
+        >
+          Show {remaining} more change{remaining === 1 ? '' : 's'}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function SnapshotTag({ children }) {
+  return (
+    <span className="rounded-full border border-border-light bg-slate-50 px-2.5 py-1 text-xs font-medium text-content-secondary">
+      {children}
+    </span>
+  )
+}
+
+// The orientation card: the AI-written narrative plus a handful of counts
+// pulled from /clinical-intelligence/stats, so this is the one place that
+// says "2 current diagnoses" - not a header count elsewhere computed from
+// a differently-filtered list. That was the source of the diagnoses-count
+// mismatch in the old layout.
+function SnapshotCard({ summary, stats }) {
+  if (!summary?.text) return null
+
+  const tags = [
+    stats?.current_diagnoses > 0 && `${stats.current_diagnoses} current diagnos${stats.current_diagnoses === 1 ? 'is' : 'es'}`,
+    stats?.current_goals > 0 && `${stats.current_goals} active goal${stats.current_goals === 1 ? '' : 's'}`,
+    stats?.outstanding_questions > 0 && `${stats.outstanding_questions} open question${stats.outstanding_questions === 1 ? '' : 's'}`,
+  ].filter(Boolean)
+
+  return (
+    <div className="card">
+      <CardHeader icon={User} iconClassName="bg-teal-50 text-teal-600" title="Patient Summary" />
+      <p className="text-body text-content-secondary">{summary.text}</p>
+      {tags.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {tags.map(tag => <SnapshotTag key={tag}>{tag}</SnapshotTag>)}
+        </div>
+      )}
+      {summary.sources?.length > 0 && <SourceCitations sources={summary.sources} />}
+    </div>
+  )
+}
+
+function DiagnosisRow({ diagnosis }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
+      <div>
+        <div className="text-sm text-content-primary">{diagnosis.name}</div>
+        {diagnosis.icd_code ? (
+          <div className="mt-0.5 text-xs text-content-muted">ICD-10 · {diagnosis.icd_code}</div>
+        ) : diagnosis.status === 'provisional' ? (
+          <div className="mt-0.5 text-xs text-content-muted">Pending diagnostic confirmation</div>
+        ) : null}
+      </div>
+      <div className="flex flex-shrink-0 gap-1.5">
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[diagnosis.status] || 'bg-gray-100 text-gray-600'}`}>
+          {diagnosis.status}
+        </span>
+        {diagnosis.confidence && (
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${CONFIDENCE_COLORS[diagnosis.confidence] || 'bg-gray-100 text-gray-600'}`}>
+            {diagnosis.confidence} confidence
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SymptomRow({ symptom }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
+      <div className="text-sm text-content-primary">{symptom.name}</div>
+      <div className="flex flex-shrink-0 gap-1.5">
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[symptom.current_status] || 'bg-gray-100 text-gray-600'}`}>
+          {symptom.current_status}
+        </span>
+        {symptom.severity && (
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${SEVERITY_COLORS[symptom.severity] || 'bg-gray-100 text-gray-600'}`}>
+            {symptom.severity}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Diagnoses and symptoms grouped visually under one card - they're the two
+// things a practitioner reads together to answer "what's going on with this
+// patient" - but kept as two separate sub-lists rather than merged into one
+// data structure, since they're different clinical concepts.
+//
+// Each sub-header carries its own "N total" so the count next to it never
+// disagrees with the rows underneath - this list shows every diagnosis
+// including historical/resolved ones, while the Patient Summary badge above
+// only counts current ones, and the two are labeled differently on purpose
+// instead of silently showing two different numbers for "diagnoses".
+function ClinicalPictureCard({ diagnoses, symptoms }) {
+  const hasDiagnoses = diagnoses?.length > 0
+  const hasSymptoms = symptoms?.length > 0
+  if (!hasDiagnoses && !hasSymptoms) return null
+
+  return (
+    <div className="card">
+      <CardHeader icon={FileText} iconClassName="bg-primary-light text-primary-600" title="Clinical Picture" />
+
+      {hasDiagnoses && (
+        <>
+          <div className="mb-1 flex items-baseline justify-between">
+            <p className="text-xs font-bold uppercase tracking-wide text-content-muted">Diagnoses</p>
+            <p className="text-xs text-content-muted">{diagnoses.length} total</p>
+          </div>
+          <div className="divide-y divide-border-light">
+            {diagnoses.map((d, idx) => <DiagnosisRow key={d.id || idx} diagnosis={d} />)}
+          </div>
+        </>
+      )}
+
+      {hasDiagnoses && hasSymptoms && <div className="my-4 h-px bg-border-light" />}
+
+      {hasSymptoms && (
+        <>
+          <div className="mb-1 flex items-baseline justify-between">
+            <p className="text-xs font-bold uppercase tracking-wide text-content-muted">Symptoms</p>
+            <p className="text-xs text-content-muted">{symptoms.length} total</p>
+          </div>
+          <div className="divide-y divide-border-light">
+            {symptoms.map((s, idx) => <SymptomRow key={s.id || idx} symptom={s} />)}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Goal text is often a full session note ("Continue to explore coping
+// strategies for..."), not a short label - clamped to 2 lines and capped to
+// a readable column width (instead of spanning the full card) so a list of
+// 10 doesn't read like a document. Tap to expand in place rather than
+// hover-to-reveal - hover doesn't work on tablet, and it's the same
+// useState idiom already used for "show N more" elsewhere on this card.
+// The date is `created_date` (when the goal was set/extracted), not a
+// visit date - it at least lets a practitioner tell a recent goal apart
+// from one that's been sitting untouched for months.
+function GoalRow({ goal }) {
+  const [expanded, setExpanded] = useState(false)
+  const date = goal.created_date &&
+    new Date(goal.created_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+  return (
+    <button
+      onClick={() => setExpanded(prev => !prev)}
+      className="-mx-2 flex w-full items-start justify-between gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-slate-50/60 first:pt-0 last:pb-0"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        {expanded ? (
+          <ChevronDown className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
+        ) : (
+          <ChevronRight className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
+        )}
+        <div className="min-w-0 max-w-2xl">
+          <p className={`text-sm text-content-primary ${expanded ? '' : 'line-clamp-2'}`}>{goal.goal}</p>
+          {date && <p className="mt-1 text-xs text-content-muted">{date}</p>}
+        </div>
+      </div>
+      <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[goal.status] || 'bg-gray-100 text-gray-600'}`}>
+        {goal.status}
+      </span>
+    </button>
+  )
+}
+
+// Shows the first 3 goals and hides the rest behind "Show N more" instead
+// of dumping the whole list - most patients accumulate far more goals than
+// anyone needs to see by default.
+function TreatmentGoalsCard({ goals }) {
+  const [showAll, setShowAll] = useState(false)
+  if (!goals?.length) return null
+
+  const visible = showAll ? goals : goals.slice(0, 3)
+  const remaining = goals.length - visible.length
+
+  return (
+    <div className="card">
+      <CardHeader
+        icon={Target}
+        iconClassName="bg-success-bg text-success-text"
+        title="Treatment Goals"
+        action={<span className="text-caption">{goals.length} total</span>}
+      />
+      <div className="divide-y divide-border-light">
+        {visible.map((g, idx) => <GoalRow key={g.id || idx} goal={g} />)}
+      </div>
+      {remaining > 0 && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="mt-3.5 flex items-center gap-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
+        >
+          Show {remaining} more goal{remaining === 1 ? '' : 's'}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Kept as its own card rather than folded into "More detail" - these are
+// things the practitioner is expected to go find out, which makes them
+// more actionable than most other sections.
+// Same treatment as GoalRow: narrower reading column, the date it was
+// raised, and tap-to-expand instead of dumping the full question text -
+// keeps a card with several open questions from reading like a wall of text.
+function QuestionRow({ question: q }) {
+  const [expanded, setExpanded] = useState(false)
+  const date = q.created_date &&
+    new Date(q.created_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+
+  return (
+    <button
+      onClick={() => setExpanded(prev => !prev)}
+      className="-mx-2 flex w-full items-start justify-between gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-slate-50/60 first:pt-0 last:pb-0"
+    >
+      <div className="flex min-w-0 items-start gap-2">
+        {expanded ? (
+          <ChevronDown className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
+        ) : (
+          <ChevronRight className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
+        )}
+        <div className="min-w-0 max-w-2xl">
+          <p className={`text-sm text-content-primary ${expanded ? '' : 'line-clamp-2'}`}>{q.question}</p>
+          {date && <p className="mt-1 text-xs text-content-muted">{date}</p>}
+        </div>
+      </div>
+      <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+        q.priority === 'high' ? 'bg-error-bg text-error-text' :
+        q.priority === 'medium' ? 'bg-warning-bg text-warning-text' :
+        'bg-gray-100 text-gray-600'
+      }`}>
+        {q.priority} priority
+      </span>
+    </button>
+  )
+}
+
+// Shows the first 3 and hides the rest behind "Show N more", same as
+// Treatment Goals - a patient with a long open-questions list shouldn't
+// dump the whole thing by default.
+function OutstandingQuestionsCard({ questions }) {
+  const [showAll, setShowAll] = useState(false)
+  const unresolved = (questions || []).filter(q => !q.resolved)
+  if (unresolved.length === 0) return null
+
+  const visible = showAll ? unresolved : unresolved.slice(0, 3)
+  const remaining = unresolved.length - visible.length
+
+  return (
+    <div className="card">
+      <CardHeader
+        icon={HelpCircle}
+        iconClassName="bg-warning-bg text-warning-text"
+        title="Outstanding Questions"
+        action={<span className="text-caption">{unresolved.length} total</span>}
+      />
+      <div className="divide-y divide-border-light">
+        {visible.map((q, idx) => <QuestionRow key={q.id || idx} question={q} />)}
+      </div>
+      {remaining > 0 && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="mt-3.5 flex items-center gap-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
+        >
+          Show {remaining} more question{remaining === 1 ? '' : 's'}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Relationships, Life Events and Timeline are real data a practitioner may
+// need, but not what they read on every visit - demoted into one flat,
+// de-emphasized, collapsed-by-default row instead of three more accordion
+// cards competing for the same attention as Clinical Picture and Goals.
+function MoreDetailSection({ relationships, lifeEvents, timeline }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const sectionLabels = [
+    relationships?.length > 0 && 'Relationships',
+    lifeEvents?.length > 0 && 'Life Events',
+    timeline?.length > 0 && 'Timeline',
+  ].filter(Boolean)
+  if (sectionLabels.length === 0) return null
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border-light bg-slate-50/60">
+      <button
+        onClick={() => setExpanded(prev => !prev)}
+        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-100/60"
+      >
+        <div className="flex items-center gap-2.5">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4 flex-shrink-0 text-content-muted" />
+          ) : (
+            <ChevronRight className="h-4 w-4 flex-shrink-0 text-content-muted" />
+          )}
+          <span className="text-sm font-semibold text-content-secondary">More detail</span>
+          <span className="text-caption">{sectionLabels.join(' · ')}</span>
+        </div>
+        <span className="text-caption">{sectionLabels.length} section{sectionLabels.length === 1 ? '' : 's'}</span>
+      </button>
+      {expanded && (
+        <div className="space-y-6 border-t border-border-light bg-white p-5">
+          {relationships?.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-content-muted">Relationships</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {relationships.map((rel, idx) => (
+                  <RelationshipCard key={rel.id || idx} relationship={rel} />
+                ))}
+              </div>
+            </div>
+          )}
+          {lifeEvents?.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-content-muted">Life Events</p>
+              <div className="space-y-3">
+                {lifeEvents.map((event, idx) => (
+                  <LifeEventCard key={event.id || idx} event={event} />
+                ))}
+              </div>
+            </div>
+          )}
+          {timeline?.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-content-muted">Timeline</p>
+              <div className="relative">
+                <div className="absolute left-4 top-0 h-full w-0.5 bg-slate-200" />
+                <div className="space-y-4">
+                  {timeline
+                    .slice()
+                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                    .map((item, idx) => (
+                      <TimelineItem key={item.id || idx} item={item} />
+                    ))}
+                </div>
+              </div>
+            </div>
           )}
         </div>
-        {expanded ? (
-          <ChevronDown className="h-5 w-5 text-content-muted" />
-        ) : (
-          <ChevronRight className="h-5 w-5 text-content-muted" />
-        )}
-      </button>
-      {expanded && <div className="border-t border-border-light p-5">{children}</div>}
+      )}
     </div>
   )
 }
@@ -969,24 +1223,55 @@ function ConfidenceBadge({ confidence, small = false }) {
   )
 }
 
+// Multiple extracted facts often cite the same session, producing several
+// identical (type, date) source entries - collapsed here to one chip with a
+// ×N count instead of repeating the same label down the column. Hidden by
+// default behind a single "Sources (N)" toggle: the answer stays compact,
+// but every citation backing it is one click away rather than trimmed or
+// summarized away - trust here means nothing is hidden for good, just
+// collapsed until asked for.
 function SourceCitations({ sources }) {
+  const [expanded, setExpanded] = useState(false)
   if (!sources || sources.length === 0) return null
-  
+
+  const grouped = []
+  const byKey = new Map()
+  for (const source of sources) {
+    const label = source.source_type?.replace('_', ' ') || 'source'
+    const date = source.date && new Date(source.date).toLocaleDateString()
+    const key = `${label}|${date || ''}`
+    const existing = byKey.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      const entry = { label, date, count: 1, excerpt: source.excerpt }
+      byKey.set(key, entry)
+      grouped.push(entry)
+    }
+  }
+
   return (
-    <div className="mt-3 border-t border-gray-100 pt-3">
-      <p className="text-xs font-medium text-gray-500">Sources:</p>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {sources.map((source, idx) => (
-          <span
-            key={idx}
-            className="rounded bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600"
-            title={source.excerpt || ''}
-          >
-            {source.source_type?.replace('_', ' ')}
-            {source.date && ` (${new Date(source.date).toLocaleDateString()})`}
-          </span>
-        ))}
-      </div>
+    <div className="mt-2 border-t border-border-light pt-2">
+      <button
+        onClick={() => setExpanded(prev => !prev)}
+        className="flex items-center gap-1 text-[10px] font-medium text-primary-600 hover:text-primary-700"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Sources ({sources.length})
+      </button>
+      {expanded && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {grouped.map((g, idx) => (
+            <span
+              key={idx}
+              className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-content-muted"
+              title={g.excerpt || ''}
+            >
+              {g.label}{g.date ? ` · ${g.date}` : ''}{g.count > 1 ? ` ×${g.count}` : ''}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -1042,6 +1327,19 @@ function VersionHistoryModal({ versions, onClose }) {
 // clinical-intelligence/chat routes in main.py), so switching patients and
 // reopening this panel always starts from that patient's own history, never
 // a previous patient's.
+// A handful of example questions shown before the first message, spanning
+// the kinds of things this record can actually answer (current picture,
+// safety, progress over time, gaps) - not meant to be asked verbatim, just
+// to give a therapist new to this feature a sense of its range. Tapping one
+// fills the input rather than sending it immediately, since these are
+// examples to edit, not one-click actions on a real patient record.
+const SUGGESTED_QUESTIONS = [
+  'What symptoms have been reported?',
+  'Are there any risk factors on record?',
+  'How have treatment goals changed over time?',
+  "What's still unresolved or unclear about this patient?",
+]
+
 function ClinicalChatPanel({ patientId, onClose }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1049,6 +1347,12 @@ function ClinicalChatPanel({ patientId, onClose }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
   const scrollRef = useRef(null)
+  const textareaRef = useRef(null)
+
+  const fillDraft = (question) => {
+    setDraft(question)
+    textareaRef.current?.focus()
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -1104,35 +1408,52 @@ function ClinicalChatPanel({ patientId, onClose }) {
     <>
       <div className="fixed inset-0 z-50 bg-black/20" onClick={onClose} />
       <div
-        className="fixed bottom-6 right-6 z-50 flex h-[70vh] max-h-[640px] w-full max-w-sm flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
+        className="fixed bottom-6 right-6 z-50 flex h-[70vh] max-h-[640px] w-full max-w-sm flex-col overflow-hidden rounded-[20px] bg-white"
+        style={{ boxShadow: 'var(--shadow-card-hover)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-gray-100 p-4">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-gray-900">
-            <MessageCircle className="h-5 w-5 text-gray-400" />
-            Ask About This Patient
-          </h2>
+        <div
+          className="flex items-center justify-between gap-3 px-4 py-2.5"
+          style={{ background: 'var(--color-primary-hover)' }}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white text-primary-600">
+              <Sparkle className="h-4 w-4" fill="currentColor" />
+            </span>
+            <h2 className="text-base font-semibold text-white">Nook</h2>
+          </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className="rounded-lg p-1.5 text-white/75 hover:bg-white/10 hover:text-white"
           >
-            <XCircle className="h-5 w-5" />
+            <XCircle className="h-4.5 w-4.5" />
           </button>
         </div>
 
-        <p className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-500">
+        <p className="border-b border-border-light bg-slate-50 px-4 py-2 text-xs text-content-muted">
           Answers draw only from this patient's approved record. Updates still awaiting review aren't included.
         </p>
 
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
           {loading ? (
             <div className="flex justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+              <Loader2 className="h-5 w-5 animate-spin text-content-muted" />
             </div>
           ) : messages.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-500">
-              Ask a question about this patient's clinical record, e.g. "What symptoms have been reported?"
-            </p>
+            <div className="space-y-2 py-2">
+              <p className="text-center text-xs text-content-muted">Try one of these:</p>
+              <div className="space-y-1.5">
+                {SUGGESTED_QUESTIONS.map(q => (
+                  <button
+                    key={q}
+                    onClick={() => fillDraft(q)}
+                    className="w-full rounded-lg border border-border-light bg-white px-2.5 py-1.5 text-left text-xs leading-snug text-content-secondary transition-colors hover:border-primary-300 hover:bg-primary-light/40"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
             messages.map(m => <ChatBubble key={m.id} message={m} />)
           )}
@@ -1142,16 +1463,17 @@ function ClinicalChatPanel({ patientId, onClose }) {
           <p className="border-t border-error-bg bg-error-bg/40 px-4 py-2 text-xs text-error-text">{error}</p>
         )}
 
-        <div className="border-t border-gray-100 p-3">
+        <div className="border-t border-border-light p-3">
           <div className="flex items-end gap-2">
             <textarea
+              ref={textareaRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask a question…"
+              placeholder="Ask Nook a question…"
               rows={2}
               disabled={sending}
-              className="flex-1 resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none disabled:bg-gray-50"
+              className="flex-1 resize-none rounded-lg border border-border-light px-3 py-2 text-sm text-content-primary focus:border-primary-500 focus:outline-none disabled:bg-slate-50"
             />
             <button
               onClick={handleSend}
@@ -1170,9 +1492,14 @@ function ClinicalChatPanel({ patientId, onClose }) {
 function ChatBubble({ message }) {
   const isUser = message.role === 'user'
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex items-start gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      {!isUser && (
+        <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary-light text-primary-600">
+          <Sparkle className="h-3.5 w-3.5" fill="currentColor" />
+        </span>
+      )}
       <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-        isUser ? 'bg-primary-600 text-white' : 'bg-white border border-gray-200 text-gray-900'
+        isUser ? 'bg-primary-600 text-white' : 'border border-border-light bg-white text-content-primary'
       }`}>
         <p className="whitespace-pre-wrap">{message.content}</p>
         {!isUser && message.grounded === false && (

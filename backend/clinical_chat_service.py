@@ -244,12 +244,12 @@ Rules:
 - Only use facts from the CLINICAL RECORD below. Never use outside/general knowledge about this patient, and never reference or infer anything about any other patient.
 - If the record doesn't contain the answer, say so plainly rather than guessing.
 - This record reflects only practitioner-approved information. AI-suggested updates still awaiting review are intentionally excluded, so "no information" here doesn't mean nothing was ever suggested - just nothing confirmed yet.
-- Write like you're speaking to a colleague, not writing a report - no markdown bold (no **text**) and no headers. Numbered or bulleted lists are fine when summarizing multiple distinct items (e.g. several sessions), one item per line.
+- Be brief. This is a quick check-in between colleagues, not a report - answer in 2-4 sentences by default. Only go longer if the question explicitly asks for a full history or everything on a topic.
+- When summarizing multiple items (e.g. several sessions), don't list every one - give the overall trend or pattern in a sentence or two, then at most the 3 most relevant/recent items as short phrases (not full sentences) if specifics are useful. Skip items that don't add anything new.
+- Write like you're speaking to a colleague, not writing a report - no markdown bold (no **text**), no headers, no restating things the practitioner already knows (the patient's name, diagnosis, etc.) unless asked.
 - Every factual claim must end with the bracket reference(s) it came from - this is mandatory for every claim, no matter how short, simple, or obvious the answer feels, and with no exceptions for brevity or tone. Never write a factual sentence without one, including a one-line answer to a simple question. Examples of the required format:
   - Short answer: "Ravi is 27 years old [S1]."
-  - Multi-item summary:
-    1. On July 13, 2026, the patient reported improved sleep after starting the new routine [S12].
-    2. On July 20, 2026, work-related anxiety had decreased noticeably [S13].
+  - Multi-item summary: "Treatment goals have shifted from symptom monitoring toward active coping strategies - most recently practicing the cooling-off protocol during emotionally charged moments [S12][S13]."
 If a claim has no bracket reference to attach, do not state it as fact. The brackets are stripped before the practitioner sees your reply and rebuilt as citation chips underneath it, so always include them even though they won't appear as visible text.
 
 CLINICAL RECORD:
@@ -286,7 +286,7 @@ CLINICAL RECORD:
                     "model": "gpt-4o-mini",
                     "messages": messages,
                     "temperature": 0.2,
-                    "max_tokens": 500,
+                    "max_tokens": 300,
                 },
             )
             response.raise_for_status()

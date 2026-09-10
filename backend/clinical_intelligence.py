@@ -1605,6 +1605,96 @@ def merge_intelligence_update(
     return current_data
 
 
+def describe_intelligence_change(section: Optional[str], operation: Optional[str], changes: dict) -> str:
+    """
+    One-line human-readable label for an applied change, e.g. "New symptom
+    noted: sleep disturbance" or "Goal updated: improve sleep hygiene — marked
+    in progress". Drives the "What's changed since last visit" feed, so this
+    is written for a practitioner skimming a list, not a log line.
+    """
+    changes = changes or {}
+    operation = operation or "add"
+
+    if section == "symptoms":
+        name = changes.get("name") or "symptom"
+        return f"New symptom noted: {name}" if operation == "add" else f"Symptom updated: {name}"
+
+    if section == "diagnoses":
+        name = changes.get("name") or "diagnosis"
+        status = changes.get("status")
+        if operation == "add":
+            return f"Diagnosis considered: {name}, {status}" if status else f"Diagnosis considered: {name}"
+        return f"Diagnosis updated: {name}" + (f" — now {status}" if status else "")
+
+    if section == "treatment_goals":
+        goal = changes.get("goal") or "goal"
+        status = changes.get("status")
+        if operation == "add":
+            return f"New goal: {goal}"
+        suffix = f" — marked {status.replace('_', ' ')}" if status else ""
+        return f"Goal updated: {goal}{suffix}"
+
+    if section == "risk_factors":
+        risk_type = (changes.get("risk_type") or "risk factor").replace("_", " ")
+        return f"Risk factor noted: {risk_type}" if operation == "add" else f"Risk factor updated: {risk_type}"
+
+    if section == "relationships":
+        person = changes.get("person") or "a relationship"
+        return f"Relationship noted: {person}"
+
+    if section == "life_events":
+        event = changes.get("event") or "a life event"
+        return f"Life event noted: {event}"
+
+    if section == "outstanding_questions":
+        question = (changes.get("question") or "").strip()
+        return f"New question: {question[:80]}" if operation == "add" else "Question updated"
+
+    if section == "patient_summary":
+        return "Patient summary updated"
+
+    if section == "psychological_profile":
+        return "Psychological profile updated"
+
+    if section == "timeline":
+        return changes.get("title") or "Timeline entry added"
+
+    label = (section or "record").replace("_", " ")
+    return f"{label.capitalize()} {'added' if operation == 'add' else 'updated'}"
+
+
+def append_change_entry(
+    current_data: dict,
+    section: Optional[str],
+    operation: Optional[str],
+    changes: dict,
+    source_type: Optional[str],
+    source_id: Optional[str],
+    max_entries: int = 25,
+) -> dict:
+    """
+    Prepend an audit-trail entry to `current_data['recent_changes']`, newest
+    first, capped at `max_entries`. This is the only complete change log:
+    `ClinicalIntelligenceVersion` snapshots are only written on manual
+    approve, so auto-applied changes - the majority path, see `auto_apply`
+    usage throughout this module - would otherwise leave no trace at all,
+    which is what "What's changed since last visit" reads from.
+    """
+    entry = {
+        "id": generate_uuid(),
+        "section": section,
+        "operation": operation,
+        "label": describe_intelligence_change(section, operation, changes),
+        "source_type": source_type,
+        "source_id": source_id,
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+    }
+    log = list(current_data.get("recent_changes") or [])
+    log.insert(0, entry)
+    current_data["recent_changes"] = log[:max_entries]
+    return current_data
+
+
 def create_intelligence_snapshot(intelligence_data: dict) -> dict:
     """Create a snapshot of intelligence data for versioning."""
     return {

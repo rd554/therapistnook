@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react'
 const variants = {
   primary: 'btn-primary',
   secondary: 'btn-secondary',
+  tint: 'btn-tint',
   ghost: 'btn-ghost',
   danger: 'inline-flex items-center justify-center gap-2 px-5 text-[15px] font-medium text-white bg-error-text hover:bg-red-700 rounded-btn shadow-sm transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed',
   success: 'inline-flex items-center justify-center gap-2 px-5 text-[15px] font-medium text-white bg-success-text hover:bg-green-800 rounded-btn shadow-sm transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed',

@@ -132,13 +132,13 @@ export default function PatientProfile() {
 
   return (
     <div className="space-y-8 max-w-[1120px]">
-      {/* Header: Back + Name | Dropdown | Edit Profile */}
+      {/* Header: Back + Name | Edit Profile (above the Patient Information card) | Section Dropdown (page's right edge) */}
       {/* Tablet/desktop: original single-row layout, unchanged */}
-      <div className="hidden sm:flex items-center justify-between gap-12">
+      <div className="hidden sm:flex relative z-20 items-center gap-12">
         {/* Left: Back + Name */}
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => navigate(`${baseUrl}/patients`)} 
+          <button
+            onClick={() => navigate(`${baseUrl}/patients`)}
             className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"
           >
             <ArrowLeft className="h-4 w-4 text-content-secondary" />
@@ -151,30 +151,45 @@ export default function PatientProfile() {
             <p className="text-xs text-content-muted mt-0.5">{patient.age} years old • {patient.gender}</p>
           </div>
         </div>
-        
-        {/* Center: Section Dropdown */}
-        <SectionDropdown
-          value={activeTab}
-          onChange={setActiveTab}
-          options={getDropdownOptions()}
-          maxWidth="200px"
-          variant="sage"
-        />
-        
-        {/* Right: Edit Profile - Overview tab only, kept in layout (invisible) elsewhere so the dropdown stays centered */}
-        <Link
-          to={`${baseUrl}/patients/${patientId}/edit`}
-          className={`btn-secondary-sm ${activeTab !== 'overview' ? 'invisible pointer-events-none' : ''}`}
-        >
-          <Edit className="h-3.5 w-3.5" />
-          Edit Profile
-        </Link>
+
+        {/* Edit Profile - Overview tab only. Anchored to the left edge of the row and
+            right-aligned within the Patient Information card's own width (728px) so it
+            sits directly above the card's right edge instead of floating out at the
+            page's far right. `pointer-events-none` on the wrapper (with `-auto` back on
+            the link) keeps the empty 728px-wide box from swallowing clicks on the Back
+            button/name that sit underneath it. */}
+        {activeTab === 'overview' && (
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[728px] flex justify-end pointer-events-none">
+            <Link
+              to={`${baseUrl}/patients/${patientId}/edit`}
+              className="btn-secondary-sm !text-[13px] pointer-events-auto"
+            >
+              <Edit className="h-3.5 w-3.5" />
+              Edit Profile
+            </Link>
+          </div>
+        )}
+
+        {/* Section Dropdown - pinned to the page's right edge. Wrapped (rather than
+            passing `absolute` into SectionDropdown's own className) because that
+            component's root div hardcodes `relative`, which wins the cascade over
+            an `absolute` utility applied to the same element. */}
+        <div className="absolute right-0 top-1/2 -translate-y-1/2">
+          <SectionDropdown
+            value={activeTab}
+            onChange={setActiveTab}
+            options={getDropdownOptions()}
+            maxWidth="240px"
+            variant="grey"
+            align="right"
+          />
+        </div>
       </div>
 
       {/* Mobile: name gets its own full row (smaller font, no age/gender line);
           dropdown + Edit Profile share a row below so the dropdown has room to
           actually show its label instead of being squeezed unreadable */}
-      <div className="flex sm:hidden flex-col gap-3">
+      <div className="flex sm:hidden relative z-20 flex-col gap-3">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(`${baseUrl}/patients`)}
@@ -195,11 +210,11 @@ export default function PatientProfile() {
             options={getDropdownOptions()}
             className="flex-1"
             maxWidth="none"
-            variant="sage"
+            variant="grey"
           />
           <Link
             to={`${baseUrl}/patients/${patientId}/edit`}
-            className={`btn-secondary-sm shrink-0 ${activeTab !== 'overview' ? 'invisible pointer-events-none' : ''}`}
+            className={`btn-secondary-sm !text-[13px] shrink-0 ${activeTab !== 'overview' ? 'invisible pointer-events-none' : ''}`}
           >
             <Edit className="h-3.5 w-3.5" />
             Edit Profile
@@ -294,43 +309,70 @@ function DocumentsTab({ patientId }) {
 }
 
 function OverviewTab({ patient }) {
+  // Grouped into row-pairs (rather than one flat grid) purely for spacing rhythm —
+  // no divider lines, generous whitespace between rows does the separating instead.
+  const rows = [
+    [
+      { label: 'Full Name', value: patient.full_name },
+      { label: 'Date of Birth', value: formatDate(patient.date_of_birth) },
+    ],
+    [
+      { label: 'Age', value: `${patient.age} years` },
+      { label: 'Phone', value: patient.phone },
+    ],
+    [
+      { label: 'Gender', value: patient.gender },
+      { label: 'Email', value: patient.email },
+    ],
+    [
+      { label: 'Emergency Contact', value: patient.emergency_contact },
+      { label: 'Referral Source', value: patient.referral_source },
+    ],
+    [
+      { label: 'Status', value: <StatusChip status={patient.status} />, chip: true },
+      { label: 'Patient Since', value: formatDate(patient.created_at) },
+    ],
+  ]
+
   return (
     <div className="card mt-2 max-w-[728px]">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-light">
           <User className="h-4.5 w-4.5 text-primary" strokeWidth={1.8} />
         </div>
         <h2 className="text-card-title">Patient Information</h2>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <InfoField label="Full Name" value={patient.full_name} />
-        <InfoField label="Date of Birth" value={formatDate(patient.date_of_birth)} />
-        <InfoField label="Age" value={`${patient.age} years`} />
-        <InfoField label="Phone" value={patient.phone} />
-        <InfoField label="Gender" value={patient.gender} />
-        <InfoField label="Email" value={patient.email} />
-        <InfoField label="Emergency Contact" value={patient.emergency_contact} />
-        <InfoField label="Referral Source" value={patient.referral_source} />
-        <InfoField label="Status" value={<StatusChip status={patient.status} />} />
-        <InfoField label="Patient Since" value={formatDate(patient.created_at)} />
-        <div className="sm:col-span-2">
-          <InfoField
-            label="Billing Address"
-            value={patient.address && <span className="whitespace-pre-line">{patient.address}</span>}
-          />
-        </div>
+      <div className="flex flex-col gap-4">
+        {rows.map((pair) => (
+          <div key={pair[0].label} className="grid gap-8 sm:grid-cols-2">
+            {pair.map((field) => (
+              <InfoField key={field.label} label={field.label} value={field.value} chip={field.chip} />
+            ))}
+          </div>
+        ))}
+        <InfoField
+          label="Billing Address"
+          value={patient.address && <span className="whitespace-pre-line">{patient.address}</span>}
+        />
       </div>
     </div>
   )
 }
 
-function InfoField({ label, value }) {
+function InfoField({ label, value, chip = false }) {
   return (
     <div>
       <p className="label mb-0">{label}</p>
-      <p className="mt-1 font-medium text-content-primary">
-        {value || <span className="text-content-muted font-normal">Not provided</span>}
-      </p>
+      {chip ? (
+        // A chip carries its own padding/line-height — wrapping it in the same
+        // <p className="font-medium ..."> as plain text mismatched its height
+        // against sibling rows, which read as "awkward"/misaligned.
+        <div className="mt-1.5">{value}</div>
+      ) : (
+        <p className="mt-1 font-medium text-content-primary">
+          {value || <span className="text-content-muted font-normal">Not provided</span>}
+        </p>
+      )}
     </div>
   )
 }

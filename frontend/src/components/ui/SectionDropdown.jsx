@@ -7,7 +7,8 @@ export function SectionDropdown({
   options,
   className = '',
   maxWidth = '220px',
-  variant = 'default'
+  variant = 'default',
+  align = 'left',
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
@@ -23,6 +24,7 @@ export function SectionDropdown({
 
   const variantClasses = {
     default: 'input-field-sm',
+    grey: 'input-field-sm section-dropdown-grey',
     sage: 'input-field-sm section-dropdown-sage',
   }
 
@@ -42,7 +44,7 @@ export function SectionDropdown({
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 top-full z-30 mt-1 w-max min-w-full max-w-[240px] max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-30 mt-1 w-max min-w-full max-w-[240px] max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg`}
         >
           {options.map(opt => (
             <button
