@@ -106,7 +106,7 @@
   }
 
   body {
-    @apply min-h-screen font-sans bg-white;
+    @apply min-h-dvh font-sans bg-white;
     color: var(--color-text-primary);
   }
 
@@ -313,6 +313,14 @@
   .card-hover {
     @apply card cursor-pointer;
     transition: all 180ms ease;
+  }
+
+  /* Login card only: trim padding on short viewports (small phones,
+     landscape) so the form fits without scrolling. */
+  @media (max-height: 600px) {
+    .login-card {
+      padding: 16px;
+    }
   }
 
   .card-hover:hover {

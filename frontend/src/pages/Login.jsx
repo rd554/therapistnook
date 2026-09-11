@@ -19,7 +19,13 @@ export default function Login({ onLogin, onLogout }) {
   const [signupDone, setSignupDone] = useState(false)
   const [resending, setResending] = useState(false)
   const [resent, setResent] = useState(false)
-  const [googleEnabled, setGoogleEnabled] = useState(false)
+  // null = not known yet (feature-flag request in flight). Seed from the last
+  // answer we saw so returning visitors don't see the Google button pop in/out
+  // and the card doesn't change height after first paint.
+  const [googleEnabled, setGoogleEnabled] = useState(() => {
+    const cached = localStorage.getItem('mmpi_google_enabled')
+    return cached === null ? null : cached === 'true'
+  })
 
   useEffect(() => {
     if (searchParams.get('new') === '1' && onLogout) {
@@ -28,7 +34,12 @@ export default function Login({ onLogin, onLogout }) {
   }, [searchParams, onLogout])
 
   useEffect(() => {
-    getFeatureFlags().then((flags) => setGoogleEnabled(flags.google_signup_enabled)).catch(() => {})
+    getFeatureFlags()
+      .then((flags) => {
+        setGoogleEnabled(flags.google_signup_enabled)
+        localStorage.setItem('mmpi_google_enabled', String(flags.google_signup_enabled))
+      })
+      .catch(() => setGoogleEnabled((prev) => (prev === null ? false : prev)))
   }, [])
 
   const redirectAfterLogin = (data) => {
@@ -104,22 +115,26 @@ export default function Login({ onLogin, onLogout }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-svh items-center justify-center p-4 short:p-2">
       <div className="w-full max-w-md animate-fade-in">
-        <div className="card">
+        <div className="card login-card">
           {/* Header */}
-          <div className="mb-8 text-center">
+          <div className="mb-4 text-center short:mb-2 sm:mb-8">
             <Link to="/">
-              <img src="/logo.png" alt="Therapistnook" className="mx-auto mb-4 h-28 w-28" />
+              <img
+                src="/logo.png"
+                alt="Therapistnook"
+                className="mx-auto mb-2 h-16 w-16 short:mb-1 short:h-10 short:w-10 sm:mb-4 sm:h-28 sm:w-28"
+              />
             </Link>
-            <h1 className="text-h2 text-content-primary">Therapistnook</h1>
-            <p className="mt-2 text-body text-content-secondary">
+            <h1 className="text-h2 text-content-primary short:text-card-title">Therapistnook</h1>
+            <p className="mt-1 text-body text-content-secondary short:hidden sm:mt-2">
               {mode === 'login' ? 'Sign in to your practitioner account' : 'Create your practitioner account'}
             </p>
           </div>
 
           {/* Mode Tabs */}
-          <div className="mb-6 flex rounded-btn bg-surface-subtle p-1">
+          <div className="mb-4 flex rounded-btn bg-surface-subtle p-1 short:mb-2 sm:mb-6">
             <button
               type="button"
               onClick={() => switchMode('login')}
@@ -194,21 +209,30 @@ export default function Login({ onLogin, onLogout }) {
             </div>
           ) : (
             <>
-              {googleEnabled && (
+              {googleEnabled === null ? (
                 <>
-                  <button type="button" onClick={handleGoogle} className="btn-secondary w-full">
-                    <GoogleIcon />
-                    {mode === 'login' ? 'Continue with Google' : 'Sign up with Google'}
-                  </button>
-                  <div className="my-5 flex items-center gap-3">
+                  <div className="h-[42px] w-full animate-pulse rounded-btn bg-surface-subtle" />
+                  <div className="my-3 flex items-center gap-3 short:my-2 sm:my-5">
                     <span className="h-px flex-1 bg-border-light" />
                     <span className="text-caption text-content-muted">or</span>
                     <span className="h-px flex-1 bg-border-light" />
                   </div>
                 </>
-              )}
+              ) : googleEnabled ? (
+                <>
+                  <button type="button" onClick={handleGoogle} className="btn-secondary w-full">
+                    <GoogleIcon />
+                    {mode === 'login' ? 'Continue with Google' : 'Sign up with Google'}
+                  </button>
+                  <div className="my-3 flex items-center gap-3 short:my-2 sm:my-5">
+                    <span className="h-px flex-1 bg-border-light" />
+                    <span className="text-caption text-content-muted">or</span>
+                    <span className="h-px flex-1 bg-border-light" />
+                  </div>
+                </>
+              ) : null}
 
-              <form onSubmit={mode === 'login' ? handleLogin : handleSignup} className="space-y-5">
+              <form onSubmit={mode === 'login' ? handleLogin : handleSignup} className="space-y-3 short:space-y-2 sm:space-y-5">
                 {mode === 'signup' && (
                   <div>
                     <label className="label">Full Name</label>

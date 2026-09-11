@@ -8,6 +8,13 @@ export default {
   ],
   theme: {
     extend: {
+      // Extra breakpoint keyed on viewport *height*, not width — for
+      // compacting content that must fit without scrolling (e.g. the login
+      // card) on short screens like iPhone SE or a phone in landscape,
+      // independent of how wide the device is.
+      screens: {
+        short: { raw: '(max-height: 600px)' },
+      },
       fontFamily: {
         sans: ['Manrope', 'system-ui', '-apple-system', 'sans-serif'],
       },
