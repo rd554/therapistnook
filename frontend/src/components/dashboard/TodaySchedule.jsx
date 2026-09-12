@@ -82,7 +82,7 @@ export default function TodaySchedule({ schedule }) {
     <section className="dash-section">
       <div className="dash-section__heading">
         <div className="dash-section__heading-left">
-          <h2 className="dash-section__title">Today&apos;s Schedule</h2>
+          <h2 className="dash-section__title">Today&apos;s schedule</h2>
           {hasAppointments && (
             <span className="dash-section__badge">
               {totalCount} session{totalCount !== 1 ? 's' : ''}
@@ -102,7 +102,7 @@ export default function TodaySchedule({ schedule }) {
           </p>
           <Link to="/calendar" className="btn-primary-sm inline-flex items-center gap-2">
             <CalendarPlus size={16} strokeWidth={1.5} />
-            Schedule Appointment
+            Schedule appointment
           </Link>
         </div>
       ) : (

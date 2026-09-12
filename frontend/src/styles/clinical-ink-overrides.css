@@ -64,27 +64,11 @@
   border-bottom: var(--border-width) solid var(--border);
 }
 
-.clinical-ink .workspace-header__btn--nav,
-.clinical-ink .workspace-header__btn--soft {
-  background: var(--accent-tint);
-  color: var(--accent);
-}
-.clinical-ink .workspace-header__btn--nav:hover,
-.clinical-ink .workspace-header__btn--nav:focus-visible,
-.clinical-ink .workspace-header__btn--nav:active,
-.clinical-ink .workspace-header__btn--soft:hover,
-.clinical-ink .workspace-header__btn--soft:focus-visible,
-.clinical-ink .workspace-header__btn--soft:active {
-  background: var(--accent);
-  color: var(--text-inverse);
-}
-.clinical-ink .workspace-header__btn--primary {
-  background: var(--accent);
-  color: var(--text-inverse);
-}
-.clinical-ink .workspace-header__btn--primary:hover {
-  background: var(--accent-hover);
-}
+/* .workspace-header__btn--nav/--soft/--primary rules removed: the nav
+   buttons now render as tokens.css's real .btn-secondary/.btn-primary
+   (WorkspaceHeader.jsx), and --soft/--primary have no call sites left
+   inside .clinical-ink's scope (see index.css's own comment at the
+   --primary/--nav deletion site). */
 
 /* Notification dot: alarm hue, not accent — matches the prototype's own
    .notif-dot (design/prototype/prototype.css), which uses var(--error) for

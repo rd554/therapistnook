@@ -1,26 +1,26 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Menu, Bell, LogOut, User, Settings, Calendar, Clock, Plus, CalendarPlus } from 'lucide-react'
+import { Menu, Bell, LogOut, User, Settings, Clock, Plus, CalendarPlus } from 'lucide-react'
 import { listNotifications } from '../api/client'
 
 function getInitials(name = '') {
   return name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'
 }
 
-function formatHeaderDate(date) {
-  return date.toLocaleDateString('en-US', {
+// One string, weekday + no year: "Thursday, Sep 11 · 10:42 AM" — collapsed
+// from separate date/time chips per the Clinical Ink spec.
+function formatHeaderDateTime(date) {
+  const datePart = date.toLocaleDateString('en-US', {
+    weekday: 'long',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
   })
-}
-
-function formatHeaderTime(date) {
-  return date.toLocaleTimeString('en-US', {
+  const timePart = date.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
   })
+  return `${datePart} · ${timePart}`
 }
 
 export default function WorkspaceHeader({
@@ -75,12 +75,8 @@ export default function WorkspaceHeader({
 
         <div className="workspace-header__datetime hidden sm:flex">
           <div className="workspace-header__datetime-item">
-            <Calendar size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span>{formatHeaderDate(now)}</span>
-          </div>
-          <div className="workspace-header__datetime-item">
             <Clock size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span>{formatHeaderTime(now)}</span>
+            <span>{formatHeaderDateTime(now)}</span>
           </div>
         </div>
       </div>
@@ -90,21 +86,21 @@ export default function WorkspaceHeader({
         <div className="workspace-header__actions">
           <button
             type="button"
-            className="workspace-header__btn workspace-header__btn--nav"
+            className="btn btn-secondary"
             onClick={() => navigate('/patients', { state: { openCreate: true } })}
-            aria-label="Add Patient"
+            aria-label="Add patient"
           >
             <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span className="hidden md:inline">Add Patient</span>
+            <span className="hidden md:inline">Add patient</span>
           </button>
           <button
             type="button"
-            className="workspace-header__btn workspace-header__btn--nav"
+            className="btn btn-primary"
             onClick={() => navigate('/calendar')}
-            aria-label="Schedule Session"
+            aria-label="Schedule session"
           >
             <CalendarPlus size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span className="hidden md:inline">Schedule Session</span>
+            <span className="hidden md:inline">Schedule session</span>
           </button>
         </div>
 
@@ -163,7 +159,7 @@ export default function WorkspaceHeader({
                   className="workspace-header__dropdown-link workspace-header__dropdown-link--danger"
                 >
                   <LogOut size={16} strokeWidth={1.5} />
-                  Sign Out
+                  Sign out
                 </button>
               </div>
             )}

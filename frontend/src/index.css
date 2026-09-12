@@ -989,32 +989,13 @@
     color: #FFFFFF;
   }
 
-  .workspace-header__btn--primary {
-    background: var(--color-primary);
-    color: #FFFFFF;
-    border: none;
-    box-shadow: none;
-  }
-
-  .workspace-header__btn--primary:hover {
-    background: var(--color-primary-hover);
-  }
-
-  /* Navbar action buttons (Add Patient / Add Practitioner / Schedule Session) —
-     lavender by default, solid purple on hover/active */
-  .workspace-header__btn--nav {
-    background: var(--color-lavender-soft);
-    color: var(--color-primary);
-    border: none;
-    box-shadow: none;
-  }
-
-  .workspace-header__btn--nav:hover,
-  .workspace-header__btn--nav:focus-visible,
-  .workspace-header__btn--nav:active {
-    background: var(--color-primary-hover);
-    color: #FFFFFF;
-  }
+  /* .workspace-header__btn--primary and --nav were deleted here: --primary
+     had zero JSX usages (confirmed via grep), and --nav's only two call
+     sites (WorkspaceHeader's Add patient / Schedule session buttons) were
+     converted to tokens.css's real .btn-secondary / .btn-primary as part of
+     the Clinical Ink migration (design/live-vs-prototype-gaps.md). --soft
+     stays: PatientProfile.jsx and PractitionerPatients.jsx still use it and
+     haven't been converted yet. */
 
   @media (max-width: 767px) {
     .workspace-header__btn {

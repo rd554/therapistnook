@@ -89,7 +89,7 @@ export default function RecentPatientsTable({ appointments = [] }) {
     <section className="dash-section">
       <div className="dash-section__heading dash-section__heading--narrow">
         <div className="dash-section__heading-left">
-          <h2 className="dash-section__title">Recent Patients</h2>
+          <h2 className="dash-section__title">Recent patients</h2>
         </div>
         {rows.length > 0 && (
           <Link to="/calendar" className="dash-section__action">

@@ -96,7 +96,7 @@ export default function TherapistNote() {
     <section className="dash-section">
       <div className="dash-section__heading">
         <div className="dash-section__heading-left">
-          <h2 className="dash-section__title">Therapist&apos;s Note</h2>
+          <h2 className="dash-section__title">Therapist&apos;s note</h2>
           {!isToday && (
             <span className="dash-section__badge">{formatNoteDate(noteDate)}</span>
           )}
