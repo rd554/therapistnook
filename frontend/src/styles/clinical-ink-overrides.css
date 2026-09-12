@@ -121,34 +121,13 @@
 .clinical-ink .dash-session-card__error { color: var(--error); }
 
 /* ==========================================================================
-   Recent Patients (components/dashboard/RecentPatientsTable.jsx)
+   Recent Patients (components/dashboard/RecentPatients.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §7) — see
+   RecentPatients.jsx and styles/clinical-ink.css's .rp-* classes. The old
+   mode-dot, tinted card, and check/pill overrides below have no call sites
+   left (the .seg/.seg-option control tokens.css already ships is colorless
+   by design — "zero color" is the point, not something to override).
    ========================================================================== */
-
-/* Same neutral-modality rule as the session cards above. */
-.clinical-ink .dash-mode-dot--online,
-.clinical-ink .dash-mode-dot--offline {
-  background: var(--icon-muted);
-}
-
-.clinical-ink .dash-recent-card,
-.clinical-ink .dash-recent-card-m { background: var(--surface); }
-
-/* Present/Absent attendance toggle: a real binary state (not a category
-   tint), so a filled "on" state is appropriate — but "absent" was using a
-   gold (#DDBD63) that isn't in the Clinical Ink palette. --warning is the
-   closest closed-palette hue that still reads distinctly from accent. */
-.clinical-ink .dash-check--present.dash-check--on,
-.clinical-ink .dash-recent-pill--present.dash-recent-pill--on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--text-inverse);
-}
-.clinical-ink .dash-check--absent.dash-check--on,
-.clinical-ink .dash-recent-pill--absent.dash-recent-pill--on {
-  background: var(--warning);
-  border-color: var(--warning);
-  color: var(--text-inverse);
-}
 
 /* ==========================================================================
    Payments (components/dashboard/PaymentsList.jsx)

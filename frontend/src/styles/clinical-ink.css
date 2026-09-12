@@ -38,3 +38,42 @@
 .clinical-ink .sched-right {
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none;
 }
+
+/* ==========================================================================
+   Recent Patients (components/dashboard/RecentPatients.jsx)
+   1:1 port of prototype.css's .rp-row/.rp-id/.rp-datetime, plus a media-
+   query version of its .rp-row--stacked narrow-width variant. The prototype
+   has two frozen artboards (desktop and mobile) each with their own static
+   markup; the live app is one fluid component, so the same visual result
+   — name+date side by side above a fixed-width column on wide screens,
+   name-left/date-right above a full-width segmented control below the
+   lg breakpoint — comes from one render path plus this breakpoint, instead
+   of a second JSX branch. Same reasoning as TodaySchedule's four-state
+   rebuild: one component, no duplicate markup for what's really one row.
+   ========================================================================== */
+
+.clinical-ink .rp-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4);
+}
+.clinical-ink .rp-id {
+  display: flex; align-items: center; gap: var(--space-4); min-width: 0;
+}
+.clinical-ink .rp-datetime { width: 150px; flex: none; }
+
+/* .truncate (ellipsis) only shrinks a flex item that can itself shrink below
+   its content width; .rp-id has min-width:0 but that doesn't inherit to its
+   children, so the name span needs its own. */
+.clinical-ink .rp-id > .truncate { min-width: 0; }
+
+/* Numeral tabular-nums utility (prototype.css's own "gap-fill" section:
+   .t-num carries its own size/weight/color opinion, so it can't be reused
+   for a 12px caption date that needs tabular figures at a different size). */
+.clinical-ink .tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+
+@media (max-width: 1023px) {
+  .clinical-ink .rp-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .clinical-ink .rp-id { justify-content: space-between; }
+  .clinical-ink .rp-datetime { width: auto; order: 1; }
+  .clinical-ink .rp-row .seg { align-self: flex-start; }
+}

@@ -1137,11 +1137,11 @@
     min-height: 28px;
   }
 
-  /* Constrained heading widths — align "View all" with card edges */
-  .dash-section__heading--narrow {
-    width: 88%;
-  }
-
+  /* Constrained heading widths — align "View all" with card edges.
+     --narrow (Recent Patients) deleted: that section now renders a bare
+     .section-head, same as TodaySchedule (see the TODAY'S SCHEDULE comment
+     below) — no width constraint needed once the row container itself
+     (.table-wrap) sets the card's true edge. */
   .dash-section__heading--medium {
     width: 94%;
   }
@@ -1229,187 +1229,19 @@
   }
 
   /* ============================================
-     RECENT PATIENTS TABLE — Refined
-     Header: 13px, 400 weight, #94A3B8
-     Rows: 58-60px height
-     Patient Name: 500 weight
-     Checkbox: #CBD5E1
+     RECENT PATIENTS
+     .dash-recent-wrap/-labels/-list/-card(-m)/__appt, .dash-mode-dot(--online/
+     --offline), .dash-check(--present/--absent), .dash-recent-mobile,
+     .dash-recent-pill(--present/--absent) were deleted here: RecentPatients.jsx
+     (renamed from RecentPatientsTable.jsx — it's a flush list now, not a
+     table) renders one .table-wrap.card-flush of .list-row.rp-row rows,
+     with tokens.css's real .seg/.seg-option segmented control replacing the
+     old check-square/pill split, per design system §7. The identity dot is
+     gone entirely — it duplicated modality, which Today's Schedule already
+     shows. One render path now covers both the old desktop grid and mobile
+     stacked-card variants; styles/clinical-ink.css's .rp-row media query
+     handles the width difference that used to need two JSX branches.
      ============================================ */
-
-  .dash-recent-wrap {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 88%;
-  }
-
-  .dash-recent-labels {
-    display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px;
-    gap: 8px;
-    padding: 0 14px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 12px;
-    font-weight: 400;
-    color: #64748B;
-    letter-spacing: 0.01em;
-    background: transparent;
-    border: none;
-    box-shadow: none;
-  }
-
-  .dash-recent-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .dash-recent-card {
-    display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px;
-    align-items: center;
-    gap: 8px;
-    padding: 14px;
-    height: 58px;
-    background: #FAFBFC;
-    border: none;
-    border-radius: 16px;
-    box-shadow: var(--shadow-card-elevation);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-secondary);
-    transition: background 150ms ease, box-shadow 150ms ease;
-  }
-
-  .dash-recent-card:hover {
-    background: #F1F5F9;
-  }
-
-  .dash-recent-card__appt {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .dash-mode-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .dash-mode-dot--online {
-    background: #9FBAD2;
-  }
-
-  .dash-mode-dot--offline {
-    background: #9FC39A;
-  }
-
-  .dash-check {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    border: 1.5px solid #CBD5E1;
-    background: #FFFFFF;
-    cursor: pointer;
-    transition: background 150ms ease, border-color 150ms ease;
-  }
-
-  .dash-check--present.dash-check--on {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    color: #FFFFFF;
-  }
-
-  .dash-check--absent.dash-check--on {
-    background: var(--color-overdue-accent);
-    border-color: var(--color-overdue-accent);
-    color: #FFFFFF;
-  }
-
-  /* Phone/tablet stacked cards for Recent Patients (< lg only; desktop grid
-     above is untouched) — labeled buttons instead of bare checkboxes since
-     there's no room for a header row to explain them. */
-
-  .dash-recent-mobile {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    width: 100%;
-  }
-
-  .dash-recent-card-m {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px;
-    background: #FAFBFC;
-    border-radius: 16px;
-    box-shadow: var(--shadow-card-elevation);
-  }
-
-  .dash-recent-card-m__top {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .dash-recent-card-m__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .dash-recent-card-m__meta {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    color: #64748B;
-  }
-
-  .dash-recent-card-m__actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .dash-recent-pill {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    flex: 1;
-    padding: 7px 0;
-    border-radius: 8px;
-    border: 1.5px solid #CBD5E1;
-    background: #FFFFFF;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: #64748B;
-    cursor: pointer;
-    transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-  }
-
-  .dash-recent-pill--present.dash-recent-pill--on {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    color: #FFFFFF;
-  }
-
-  .dash-recent-pill--absent.dash-recent-pill--on {
-    background: var(--color-overdue-accent);
-    border-color: var(--color-overdue-accent);
-    color: #FFFFFF;
-  }
 
   /* ============================================
      PAYMENTS — Only Received & Overdue

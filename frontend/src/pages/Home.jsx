@@ -7,7 +7,7 @@ import {
 } from '../api/client'
 import {
   TodaySchedule,
-  RecentPatientsTable,
+  RecentPatients,
   TherapistNote,
   PaymentsList,
 } from '../components/dashboard'
@@ -73,7 +73,7 @@ export default function Home() {
     <div className="clinical-ink dashboard-layout">
       <div className="dashboard-column">
         <TodaySchedule schedule={todaySchedule} />
-        <RecentPatientsTable appointments={recentAppointments} />
+        <RecentPatients appointments={recentAppointments} />
       </div>
 
       <div className="dashboard-column">
