@@ -354,6 +354,13 @@
    Sidebar & nav
    ========================================================================== */
 
+/* Compound selector: the <aside> itself carries both `clinical-ink` and
+   `sidebar` (Sidebar.jsx puts the scope class directly on its own root,
+   since WorkspaceLayout's shared root can't carry it without leaking to
+   every un-migrated screen — see the scope-leak fix in 2e0ae52). A plain
+   descendant selector matches nothing on a same-element pair, so this needs
+   both forms. Revisit if B8's Sidebar rebuild changes which element is root. */
+.clinical-ink.sidebar,
 .clinical-ink .sidebar {
   width: var(--sidebar-w); background: var(--canvas);
   border-right: var(--border-width) solid var(--border);

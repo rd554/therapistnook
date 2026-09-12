@@ -30,6 +30,10 @@
    Sidebar (frontend/src/layouts/Sidebar.jsx) — global, every workspace screen
    ========================================================================== */
 
+/* Compound selector needed: Sidebar.jsx's <aside> carries `clinical-ink` and
+   `sidebar` on the same element (see tokens.css's matching comment), so a
+   bare descendant selector matches nothing. */
+.clinical-ink.sidebar,
 .clinical-ink .sidebar {
   box-shadow: none;
   border-right: var(--border-width) solid var(--border);
@@ -59,6 +63,9 @@
    Workspace header (frontend/src/layouts/WorkspaceHeader.jsx) — global
    ========================================================================== */
 
+/* Same same-element issue as .sidebar above: WorkspaceHeader.jsx's <header>
+   carries `clinical-ink` and `workspace-header` together. */
+.clinical-ink.workspace-header,
 .clinical-ink .workspace-header {
   box-shadow: none;
   border-bottom: var(--border-width) solid var(--border);
