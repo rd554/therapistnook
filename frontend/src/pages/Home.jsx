@@ -70,7 +70,7 @@ export default function Home() {
   }
 
   return (
-    <div className="dashboard-layout">
+    <div className="clinical-ink dashboard-layout">
       <div className="dashboard-column">
         <TodaySchedule schedule={todaySchedule} />
         <RecentPatientsTable appointments={recentAppointments} />

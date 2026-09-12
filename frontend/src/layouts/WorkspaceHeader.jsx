@@ -62,7 +62,7 @@ export default function WorkspaceHeader({
   }, [])
 
   return (
-    <header className="workspace-header">
+    <header className="clinical-ink workspace-header">
       {/* Left: mobile menu + date/time */}
       <div className="workspace-header__left">
         <button

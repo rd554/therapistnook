@@ -88,14 +88,14 @@ Everything in this document follows from these. If a future decision conflicts w
 ### Fonts
 
 ```css
---font-ui:      'Switzer', 'Inter', -apple-system, 'Segoe UI', sans-serif;
+--font-ui:      'Manrope', 'Inter', -apple-system, 'Segoe UI', sans-serif;
 --font-serif:   'Newsreader', Georgia, serif;       /* clinical narrative only */
---font-numeric: 'Inter', system-ui, sans-serif;      /* tabular figures */
+--font-numeric: 'Manrope', system-ui, sans-serif;    /* tabular figures */
 ```
 
-- **Switzer** (free, Fontshare) replaces Roboto for all UI. It's a neo-grotesque with slightly humanist terminals: colder and more precise than Roboto at small sizes, and it holds up at 28px+ where Roboto goes soft. Load weights 400, 500, 600 only.
+- **Manrope** (free, Google Fonts) for all UI. Load weights 400, 500, 600, 700. Manrope runs lighter and wider than a standard grotesque, so this scale sits one weight step above the usual values and tightens tracking as size increases. Do not use weights below 400 or the 800 weight.
 - **Newsreader** (Google Fonts) for clinical narrative body text: the AI clinical summary, session note body, assessment report prose. This is the typographic signature of the product. A therapist's words are set in a reading face; the software's chrome is set in a UI face. Load 400 and 400 italic.
-- All numeric columns (money, times, dates, ages, scores) get `font-variant-numeric: tabular-nums`. Verify Switzer's tabular figures render aligned; if they don't, apply `--font-numeric` to numeric cells.
+- All numeric columns (money, times, dates, ages, scores) get `font-variant-numeric: tabular-nums`. Verify Manrope's tabular figures align in a column of amounts (₹2,500 over ₹3,000); if they don't, point `--font-numeric` at Inter and apply it to numeric cells only.
 
 Never use a monospace face for labels or data. Never load a fourth family.
 
@@ -103,22 +103,22 @@ Never use a monospace face for labels or data. Never load a fourth family.
 
 | Role | Element | Size / Line-height | Weight | Tracking | Color |
 |---|---|---|---|---|---|
-| H1 | Page title ("Patients", "Dashboard") | 28 / 34 | 600 | -0.02em | `--text-primary` |
-| H2 | Section heading ("Today's Schedule", "Payments") | 19 / 26 | 600 | -0.01em | `--text-primary` |
-| H3 | Card heading, modal title, patient name in a detail header | 15 / 22 | 600 | -0.005em | `--text-primary` |
+| H1 | Page title ("Patients", "Dashboard") | 28 / 34 | 700 | -0.025em | `--text-primary` |
+| H2 | Section heading ("Today's Schedule", "Payments") | 19 / 26 | 600 | -0.015em | `--text-primary` |
+| H3 | Card heading, modal title, patient name in a detail header | 15 / 22 | 600 | -0.01em | `--text-primary` |
 | H4 | Sub-group label inside a card | 13 / 18 | 600 | 0 | `--text-secondary` |
 | Body | Default UI text, list primary text | 15 / 24 | 400 | 0 | `--text-primary` |
-| Body S | Metadata, demographics, helper text | 13 / 20 | 400 | 0 | `--text-secondary` |
-| Caption | Timestamps, dates, "3 sessions" | 12 / 16 | 400 | 0 | `--text-muted` |
-| Table header | Column labels | 12 / 16 | 500 | 0 | `--text-muted` |
-| Table cell | Row data | 14 / 20 | 400 | 0 | `--text-secondary` |
-| Table cell (key) | Patient name in a row | 14 / 20 | 600 | 0 | `--text-primary` |
+| Body S | Metadata, demographics, helper text | 13 / 20 | 500 | 0 | `--text-secondary` |
+| Caption | Timestamps, dates, "3 sessions" | 12 / 16 | 500 | 0 | `--text-muted` |
+| Table header | Column labels | 12 / 16 | 600 | 0 | `--text-muted` |
+| Table cell | Row data | 14 / 20 | 500 | 0 | `--text-secondary` |
+| Table cell (key) | Patient name in a row | 14 / 20 | 700 | 0 | `--text-primary` |
 | Numeric | Amounts, times, scores | 14 / 20 | 500 | 0 | `--text-secondary` |
-| Numeric (key) | Amount needing attention | 14 / 20 | 600 | 0 | `--text-primary` |
+| Numeric (key) | Amount needing attention | 14 / 20 | 700 | 0 | `--text-primary` |
 | Label | Input label | 13 / 18 | 500 | 0 | `--text-secondary` |
-| Button | All button text | 14 / 20 | 500 | -0.005em | per button spec |
-| Button S | Compact / row-level button | 13 / 18 | 500 | 0 | per button spec |
-| Chip | Status chip text | 11 / 16 | 600 | 0.01em | per chip spec |
+| Button | All button text | 14 / 20 | 600 | -0.01em | per button spec |
+| Button S | Compact / row-level button | 13 / 18 | 600 | 0 | per button spec |
+| Chip | Status chip text | 11 / 16 | 700 | 0.015em | per chip spec |
 | Narrative | Clinical summary, note body (Newsreader) | 16 / 28 | 400 | 0 | `--text-primary` |
 
 **Table column headers are sentence case.** Not uppercase, not tracked out. "Name", "Created", "Status" — not "NAME". Uppercase micro-labels are the single fastest way to make this look like a generic admin template.
@@ -437,7 +437,7 @@ Token-first, non-destructive. You have 10 practices on the live UI, so each phas
 **Phase 0 — foundations, no component edits.**
 1. Add `tokens.css` (provided alongside this doc) and import it once at the app root.
 2. Extend `tailwind.config.js` from the mapping in section 13. Do not delete the default palette yet; add the semantic names.
-3. Load Switzer (400/500/600) and Newsreader (400, 400i). Set `--font-ui` on `body`.
+3. Load Manrope (400/500/600/700) and Newsreader (400, 400i). Set `--font-ui` on `body`, and clear any `fontFamily` entry in `tailwind.config.js` that names the old face.
 4. Add a `type.css` layer with the section 3 scale as utility classes (`.t-h1`, `.t-h2`, `.t-h3`, `.t-body`, `.t-body-s`, `.t-caption`, `.t-table-head`, `.t-cell`, `.t-cell-key`, `.t-num`, `.t-label`, `.t-chip`, `.t-narrative`).
 
 **Phase 1 — strip the fills.** Grep and replace, app-wide:
@@ -484,9 +484,9 @@ theme: {
       ok: '#1F7A5C',
     },
     fontFamily: {
-      sans: ['Switzer', 'Inter', 'system-ui', 'sans-serif'],
+      sans: ['Manrope', 'Inter', 'system-ui', 'sans-serif'],
       serif: ['Newsreader', 'Georgia', 'serif'],
-      num: ['Inter', 'system-ui', 'sans-serif'],
+      num: ['Manrope', 'system-ui', 'sans-serif'],
     },
     borderRadius: { sm: '6px', md: '8px', lg: '12px', xl: '16px' },
     boxShadow: {

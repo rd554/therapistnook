@@ -16,11 +16,20 @@
     
     <!-- Manrope — Premium mental health portal typography -->
     <!-- Weights: 400 (Regular), 500 (Medium), 600 (SemiBold for emphasis), 700 (Bold) -->
-    <link 
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" 
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    
+
+    <!-- Newsreader — Clinical Ink's serif for narrative/note text (.t-narrative),
+         scoped under .clinical-ink. Loaded as a <link>, not a CSS @import,
+         since a remote @import inside an already-@import'ed file is the same
+         silent-drop risk that bit the tokens.css import in Phase 0. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&display=swap"
+      rel="stylesheet"
+    />
+
     <style>
       /* Prevent FOUC (Flash of Unstyled Content) */
       html {

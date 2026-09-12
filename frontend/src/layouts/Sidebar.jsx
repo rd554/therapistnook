@@ -126,7 +126,7 @@ export default function Sidebar({
 
       {/* Mobile Drawer */}
       <aside
-        className={`sidebar sidebar--mobile ${isMobileOpen ? 'sidebar--open' : ''}`}
+        className={`clinical-ink sidebar sidebar--mobile ${isMobileOpen ? 'sidebar--open' : ''}`}
         aria-label="Mobile navigation"
       >
         <button
@@ -140,7 +140,7 @@ export default function Sidebar({
       </aside>
 
       {/* Desktop Sidebar */}
-      <aside className="sidebar sidebar--desktop" aria-label="Main navigation">
+      <aside className="clinical-ink sidebar sidebar--desktop" aria-label="Main navigation">
         {sidebarContent}
       </aside>
     </>
