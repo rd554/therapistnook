@@ -90,7 +90,7 @@ export default function TodaySchedule({ schedule }) {
   }
 
   return (
-    <section className="dash-section">
+    <section>
       <div className="section-head">
         <h2 className="t-h2">Today&apos;s schedule</h2>
         {hasAppointments && (
@@ -102,7 +102,7 @@ export default function TodaySchedule({ schedule }) {
 
       {!hasAppointments ? (
         <div className="empty">
-          <Calendar size={16} strokeWidth={1.5} color="var(--icon-muted)" style={{ margin: '0 auto 12px' }} />
+          <Calendar size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} />
           <h3 className="empty-title">No appointments today</h3>
           <p className="empty-body">Your schedule is clear for today</p>
           <Link to="/calendar" className="btn btn-primary btn-sm inline-flex items-center gap-2">
