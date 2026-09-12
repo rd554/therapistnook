@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Therapist Nook — Clinical Ink review prototype</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+
+<!-- ==========================================================================
+     Icon sprite — every glyph used below, defined once, referenced with <use>.
+     1.5px stroke, no fill, per design system §5 "Icons".
+     ========================================================================== -->
+<svg style="display:none">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5L12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M9.5 20v-6.5h5V20"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20v-1c0-3 3-5 6.5-5s6.5 2 6.5 5v1"/><path d="M16.3 8.3a2.4 2.4 0 1 1 0 4.8"/><path d="M18 14.3c2.2.5 3.5 2.1 3.5 4.2V20"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></symbol>
+  <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2"/><path d="M9 4.5V3.8a1.3 1.3 0 0 1 1.3-1.3h3.4A1.3 1.3 0 0 1 15 3.8v.7"/><path d="M9 10.5h6M9 14h6M9 17.5h3.5"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="13" rx="2"/><path d="M2.5 10.2h19"/><path d="M6 14.5h4"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4.5 20V10.5M12 20V4.5M19.5 20v-7"/><path d="M2.5 20h19"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.3 13.2a7.7 7.7 0 0 0 0-2.4l1.9-1.4-1.9-3.3-2.3.9a7.6 7.6 0 0 0-2-1.2L14.6 3.5h-4L10.2 5.8a7.6 7.6 0 0 0-2 1.2l-2.3-.9-1.9 3.3 1.9 1.4a7.7 7.7 0 0 0 0 2.4l-1.9 1.4 1.9 3.3 2.3-.9a7.6 7.6 0 0 0 2 1.2l.4 2.3h4l.4-2.3a7.6 7.6 0 0 0 2-1.2l2.3.9 1.9-3.3-1.9-1.4Z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 8.5a5.5 5.5 0 0 1 11 0c0 4 1.4 5.3 2 6H4.5c.6-.7 2-2 2-6Z"/><path d="M10.2 19.5a1.9 1.9 0 0 0 3.6 0"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2"/><path d="M15.5 10.3l6-3.3v10l-6-3.3Z"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s6.5-6 6.5-10.5a6.5 6.5 0 1 0-13 0C5.5 15 12 21 12 21Z"/><circle cx="12" cy="10.3" r="2.3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5 10-11"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-kebab" viewBox="0 0 24 24" stroke="none" fill="currentColor"><circle cx="12" cy="5.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="18.5" r="1.6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3.2 2.5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-6.5 10-6.5S22 12 22 12s-4 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M15 4.5l4.5 4.5-11 11h-4.5v-4.5l11-11Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9 7V4.5h6V7"/><path d="M6.5 7l1 12.5h9L17.5 7"/></symbol>
+</svg>
+
+<!-- QA control — Law 4. Removing color must not remove hierarchy. -->
+<div class="qa-toggle t-body-s">
+  <label><input type="checkbox" id="qa-grayscale"> Grayscale</label>
+</div>
+<script>
+  document.getElementById('qa-grayscale').addEventListener('change', function (e) {
+    document.body.classList.toggle('qa-grayscale', e.target.checked);
+  });
+</script>
+
+<div class="proto-page">
+
+<!-- ==========================================================================
+     1. DASHBOARD — DESKTOP  (1280 wide)
+     Accent objects: active nav (1), "Schedule session" header primary (2),
+     hero session card = rule-accent + "Join now" bundled as one signal (3).
+     Raw count if the hero bundle is split into rule + button separately: 4.
+     Flag: this screen has two .btn-primary elements (header "Schedule
+     session" and the hero card's "Join now"). §5/tokens.css say one primary
+     per screen; prompt line 66 and design-system §6 each independently
+     require one of these. Built both as specified rather than demoting one.
+     ========================================================================== -->
+<div class="artboard-block">
+  <div class="artboard-label t-caption">Dashboard — desktop</div>
+  <div class="artboard artboard-desktop">
+    <div class="app-shell">
+
+      <aside class="sidebar" style="padding: var(--space-5) var(--space-3);">
+        <div class="logo-row">
+          <div class="logo-tile">TN</div>
+          <span class="t-h3">Therapist Nook</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a class="nav-item is-active"><svg class="icon icon-18"><use href="#i-home"/></svg>Dashboard</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-users"/></svg>Patients</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-calendar"/></svg>Calendar</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-clipboard"/></svg>Assessments</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-card"/></svg>Billing</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-chart"/></svg>Analytics</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-settings"/></svg>Settings</a>
+        </nav>
+        <div class="sidebar-footer">
+          <span class="avatar">RD</span>
+          <div class="sidebar-footer-text">
+            <span class="t-label" style="color: var(--text-primary);">Ravi D</span>
+            <span class="t-caption">Practice Owner</span>
+          </div>
+        </div>
+      </aside>
+
+      <div class="shell-main">
+        <header class="app-header">
+          <div class="header-left t-body-s">
+            <svg class="icon icon-16"><use href="#i-clock"/></svg>
+            Thursday, Sep 11 &middot; 10:42 AM
+          </div>
+          <div class="header-right">
+            <button class="btn btn-primary">Schedule session</button>
+            <button class="btn btn-secondary">Add patient</button>
+            <span class="bell-wrap"><svg class="icon icon-20"><use href="#i-bell"/></svg><span class="notif-dot"></span></span>
+            <span class="avatar">RD</span>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="dash-body">
+
+            <div class="dash-col-main">
+              <section>
+                <div class="section-head">
+                  <h2 class="t-h2">Today's schedule</h2>
+                  <span class="t-caption">3 sessions</span>
+                </div>
+                <div class="stack-cards">
+
+                  <div class="card rule-accent sched-card">
+                    <div class="sched-left">
+                      <span class="icon-badge"><svg class="icon icon-16"><use href="#i-video"/></svg></span>
+                      <div class="sched-text">
+                        <span class="t-h3">Priya Sharma</span>
+                        <span class="t-body-s">Therapy session &middot; Online</span>
+                      </div>
+                    </div>
+                    <div class="sched-right">
+                      <span class="t-num-key tnum">10:00 AM</span>
+                      <button class="btn btn-primary btn-sm">Join now</button>
+                    </div>
+                  </div>
+
+                  <div class="card sched-card">
+                    <div class="sched-left">
+                      <span class="icon-badge"><svg class="icon icon-16"><use href="#i-pin"/></svg></span>
+                      <div class="sched-text">
+                        <span class="t-h3" style="font-weight:500;">Arjun Mehta</span>
+                        <span class="t-body-s">Follow-up &middot; In person</span>
+                      </div>
+                    </div>
+                    <div class="sched-right">
+                      <span class="t-num tnum">11:30 AM</span>
+                    </div>
+                  </div>
+
+                  <div class="card sched-card">
+                    <div class="sched-left">
+                      <span class="icon-badge"><svg class="icon icon-16"><use href="#i-video"/></svg></span>
+                      <div class="sched-text">
+                        <span class="t-h3" style="font-weight:500;">Sana Kapoor</span>
+                        <span class="t-body-s">Assessment &middot; Online</span>
+                      </div>
+                    </div>
+                    <div class="sched-right">
+                      <span class="t-num tnum">2:00 PM</span>
+                      <button class="btn btn-secondary btn-sm">Get link</button>
+                    </div>
+                  </div>
+
+                </div>
+              </section>
+
+              <section>
+                <div class="section-head">
+                  <h2 class="t-h2">Recent patients</h2>
+                </div>
+                <div class="table-wrap card-flush">
+
+                  <div class="list-row rp-row">
+                    <div class="rp-id">
+                      <span class="t-caption tnum rp-datetime">Sep 10 &middot; 4:00 PM</span>
+                      <span class="t-cell-key">Priya Sharma</span>
+                    </div>
+                    <div class="seg">
+                      <button class="seg-option" aria-pressed="true"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                      <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+                    </div>
+                  </div>
+
+                  <div class="list-row rp-row">
+                    <div class="rp-id">
+                      <span class="t-caption tnum rp-datetime">Sep 10 &middot; 2:30 PM</span>
+                      <span class="t-cell-key">Arjun Mehta</span>
+                    </div>
+                    <div class="seg">
+                      <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                      <button class="seg-option" aria-pressed="true"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+                    </div>
+                  </div>
+
+                  <div class="list-row rp-row">
+                    <div class="rp-id">
+                      <span class="t-caption tnum rp-datetime">Sep 9 &middot; 11:00 AM</span>
+                      <span class="t-cell-key">Sana Kapoor</span>
+                    </div>
+                    <div class="seg">
+                      <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                      <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+                    </div>
+                  </div>
+
+                  <div class="list-row rp-row">
+                    <div class="rp-id">
+                      <span class="t-caption tnum rp-datetime">Sep 9 &middot; 9:30 AM</span>
+                      <span class="t-cell-key">Rohan Verma</span>
+                    </div>
+                    <div class="seg">
+                      <button class="seg-option" aria-pressed="true"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                      <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+                    </div>
+                  </div>
+
+                  <div class="list-row rp-row">
+                    <div class="rp-id">
+                      <span class="t-caption tnum rp-datetime">Sep 8 &middot; 3:00 PM</span>
+                      <span class="t-cell-key">Meera Iyer</span>
+                    </div>
+                    <div class="seg">
+                      <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                      <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+                    </div>
+                  </div>
+
+                </div>
+              </section>
+            </div>
+
+            <div class="dash-col-rail">
+              <section>
+                <div class="card-narrative">
+                  <div class="t-h3" style="margin-bottom:4px;">Clinical summary</div>
+                  <div class="t-caption" style="margin-bottom:12px;">Priya Sharma &middot; Today</div>
+                  <p class="t-narrative">Priya showed good progress with grounding exercises. Continue breathing techniques next session.</p>
+                </div>
+              </section>
+
+              <section>
+                <div class="section-head">
+                  <h2 class="t-h2">Payments</h2>
+                  <span class="status-alert">₹5,500 overdue</span>
+                </div>
+                <div class="table-wrap card-flush">
+
+                  <div class="list-row pay-row">
+                    <div class="pay-name-received">Priya Sharma
+                      <div class="status-quiet">Received</div>
+                    </div>
+                    <div class="pay-right">
+                      <span class="t-num tnum"><span style="color:var(--text-muted);">₹</span>2,500</span>
+                      <span class="t-caption">Today</span>
+                    </div>
+                  </div>
+
+                  <div class="list-row pay-row rule-error">
+                    <div class="t-cell-key">Arjun Mehta
+                      <div class="status-alert">Overdue</div>
+                    </div>
+                    <div class="pay-right">
+                      <span class="t-num-key tnum"><span style="color:var(--text-muted);">₹</span>3,000</span>
+                      <span class="t-caption">Yesterday</span>
+                    </div>
+                  </div>
+
+                  <div class="list-row pay-row">
+                    <div class="pay-name-received">Sana Kapoor
+                      <div class="status-quiet">Received</div>
+                    </div>
+                    <div class="pay-right">
+                      <span class="t-num tnum"><span style="color:var(--text-muted);">₹</span>2,000</span>
+                      <span class="t-caption">Sep 8</span>
+                    </div>
+                  </div>
+
+                  <div class="list-row pay-row rule-error">
+                    <div class="t-cell-key">Rohan Verma
+                      <div class="status-alert">Overdue</div>
+                    </div>
+                    <div class="pay-right">
+                      <span class="t-num-key tnum"><span style="color:var(--text-muted);">₹</span>2,500</span>
+                      <span class="t-caption">Sep 6</span>
+                    </div>
+                  </div>
+
+                  <div class="list-row pay-row">
+                    <div class="pay-name-received">Meera Iyer
+                      <div class="status-quiet">Received</div>
+                    </div>
+                    <div class="pay-right">
+                      <span class="t-num tnum"><span style="color:var(--text-muted);">₹</span>3,500</span>
+                      <span class="t-caption">Sep 5</span>
+                    </div>
+                  </div>
+
+                </div>
+              </section>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
+     2. PATIENTS — DESKTOP (1280 wide)
+     Accent objects, bundled reading: active nav (1), "Add patient" primary
+     (2), Kabir's new-intake signal — chip + left rule + accent avatar
+     counted as one bundled treatment (3). Raw reading (each object counted
+     separately): nav(1) + button(2) + chip(3) + rule(4) + avatar(5) = 5.
+     Design system §9 itself states "4 accent-family objects" for this exact
+     row set without fully itemizing which four — this prototype does not
+     delete the rule or the avatar-accent to force a count of 3; all three
+     of Kabir's signals are built as specified.
+     ========================================================================== -->
+<div class="artboard-block">
+  <div class="artboard-label t-caption">Patients — desktop</div>
+  <div class="artboard artboard-desktop">
+    <div class="app-shell">
+
+      <aside class="sidebar" style="padding: var(--space-5) var(--space-3);">
+        <div class="logo-row">
+          <div class="logo-tile">TN</div>
+          <span class="t-h3">Therapist Nook</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-home"/></svg>Dashboard</a>
+          <a class="nav-item is-active"><svg class="icon icon-18"><use href="#i-users"/></svg>Patients</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-calendar"/></svg>Calendar</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-clipboard"/></svg>Assessments</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-card"/></svg>Billing</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-chart"/></svg>Analytics</a>
+          <a class="nav-item"><svg class="icon icon-18"><use href="#i-settings"/></svg>Settings</a>
+        </nav>
+        <div class="sidebar-footer">
+          <span class="avatar">RD</span>
+          <div class="sidebar-footer-text">
+            <span class="t-label" style="color: var(--text-primary);">Ravi D</span>
+            <span class="t-caption">Practice Owner</span>
+          </div>
+        </div>
+      </aside>
+
+      <div class="shell-main">
+        <header class="app-header">
+          <div class="header-left t-body-s">
+            <svg class="icon icon-16"><use href="#i-clock"/></svg>
+            Thursday, Sep 11 &middot; 10:42 AM
+          </div>
+          <div class="header-right">
+            <span class="bell-wrap"><svg class="icon icon-20"><use href="#i-bell"/></svg><span class="notif-dot"></span></span>
+            <span class="avatar">RD</span>
+          </div>
+        </header>
+
+        <div class="page">
+          <h1 class="t-h1" style="margin-bottom: var(--space-6);">Patients</h1>
+
+          <div class="patients-header">
+            <button class="btn btn-ghost btn-filter">Active <svg class="icon icon-16"><use href="#i-chevron-down"/></svg></button>
+            <div class="patients-actions">
+              <button class="btn btn-secondary">Bulk upload</button>
+              <button class="btn btn-primary">Add patient</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th style="width:auto;">Patient</th>
+                  <th style="width:160px;">Details</th>
+                  <th style="width:100px;">Created</th>
+                  <th style="width:120px;">Status</th>
+                  <th style="width:140px;">Intake</th>
+                  <th style="width:96px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+
+                <tr class="needs-action">
+                  <td><span class="t-cell-key" style="display:flex; align-items:center; gap:12px;"><span class="avatar avatar-accent">KN</span>Kabir Nair</span></td>
+                  <td>29 &middot; Male</td>
+                  <td class="cell-num t-cell-muted">Sep 11</td>
+                  <td><span class="chip chip-intake">New Intake</span></td>
+                  <td class="t-cell-muted">&mdash;</td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-eye"/></svg></button>
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-pencil"/></svg></button>
+                      <button class="icon-btn is-destructive"><svg class="icon icon-16"><use href="#i-trash"/></svg></button>
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td><span class="t-cell-key" style="display:flex; align-items:center; gap:12px;"><span class="avatar">PS</span>Priya Sharma</span></td>
+                  <td>34 &middot; Female</td>
+                  <td class="cell-num t-cell-muted">Aug 2</td>
+                  <td><span class="status-plain">Active</span></td>
+                  <td class="t-cell-muted">Completed</td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-eye"/></svg></button>
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-pencil"/></svg></button>
+                      <button class="icon-btn is-destructive"><svg class="icon icon-16"><use href="#i-trash"/></svg></button>
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td><span class="t-cell-key" style="display:flex; align-items:center; gap:12px;"><span class="avatar">AM</span>Arjun Mehta</span></td>
+                  <td>41 &middot; Male</td>
+                  <td class="cell-num t-cell-muted">Jul 19</td>
+                  <td><span class="status-plain">Active</span></td>
+                  <td><span class="chip chip-pending">Pending</span></td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-eye"/></svg></button>
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-pencil"/></svg></button>
+                      <button class="icon-btn is-destructive"><svg class="icon icon-16"><use href="#i-trash"/></svg></button>
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td><span class="t-cell-key" style="display:flex; align-items:center; gap:12px;"><span class="avatar">SK</span>Sana Kapoor</span></td>
+                  <td>27 &middot; Female</td>
+                  <td class="cell-num t-cell-muted">Jun 30</td>
+                  <td><span class="status-plain">Active</span></td>
+                  <td class="t-cell-muted">Completed</td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-eye"/></svg></button>
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-pencil"/></svg></button>
+                      <button class="icon-btn is-destructive"><svg class="icon icon-16"><use href="#i-trash"/></svg></button>
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td><span class="t-cell-key" style="display:flex; align-items:center; gap:12px;"><span class="avatar">RV</span>Rohan Verma</span></td>
+                  <td>52 &middot; Male</td>
+                  <td class="cell-num t-cell-muted">May 4</td>
+                  <td><span class="status-quiet">Archived</span></td>
+                  <td class="t-cell-muted">&mdash;</td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-eye"/></svg></button>
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-pencil"/></svg></button>
+                      <button class="icon-btn is-destructive"><svg class="icon icon-16"><use href="#i-trash"/></svg></button>
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td><span class="t-cell-key" style="display:flex; align-items:center; gap:12px;"><span class="avatar">MI</span>Meera Iyer</span></td>
+                  <td>38 &middot; Female</td>
+                  <td class="cell-num t-cell-muted">Apr 21</td>
+                  <td><span class="status-plain">Active</span></td>
+                  <td class="t-cell-muted">Completed</td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-eye"/></svg></button>
+                      <button class="icon-btn"><svg class="icon icon-16"><use href="#i-pencil"/></svg></button>
+                      <button class="icon-btn is-destructive"><svg class="icon icon-16"><use href="#i-trash"/></svg></button>
+                    </div>
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================================
+     3. DASHBOARD — MOBILE (390 wide)
+     No sidebar nav is visible on mobile (hamburger opens an off-canvas
+     drawer), so the active-nav accent object doesn't count here. Accent
+     objects: hero session signal only (rule + "Join now" bundled = 1;
+     raw = 2). Well under budget.
+     ========================================================================== -->
+<!-- ==========================================================================
+     4. PATIENTS — MOBILE (390 wide)
+     Accent objects: "Add patient" primary (1), Kabir's bundled new-intake
+     signal (2; raw 4 with chip/rule/avatar split out). "Bulk upload" is
+     rendered as a neutral ghost text button, not the accent-colored .link
+     style, specifically to avoid spending a third accent object on a
+     secondary action.
+     ========================================================================== -->
+<div class="mobile-row">
+
+  <div class="artboard-block">
+    <div class="artboard-label t-caption is-centered">Dashboard — mobile</div>
+    <div class="artboard artboard-mobile mobile-scope">
+
+      <div class="mobile-topbar">
+        <div class="mobile-topbar-left">
+          <svg class="icon icon-20" style="color:var(--icon-muted);"><use href="#i-menu"/></svg>
+        </div>
+        <div class="mobile-topbar-right">
+          <span class="bell-wrap"><svg class="icon icon-20"><use href="#i-bell"/></svg><span class="notif-dot"></span></span>
+          <span class="avatar">RD</span>
+        </div>
+      </div>
+
+      <div class="mobile-dash-stack">
+
+        <section>
+          <div class="section-head">
+            <h2 class="t-h2">Today's schedule</h2>
+            <span class="t-caption">3 sessions</span>
+          </div>
+          <div class="stack-cards">
+
+            <div class="card card-compact rule-accent sched-card" style="flex-wrap:wrap;">
+              <div class="sched-left">
+                <span class="icon-badge"><svg class="icon icon-16"><use href="#i-video"/></svg></span>
+                <div class="sched-text">
+                  <span class="t-h3">Priya Sharma</span>
+                  <span class="t-body-s">Therapy session &middot; Online</span>
+                </div>
+              </div>
+              <div class="sched-right">
+                <span class="t-num-key tnum">10:00 AM</span>
+                <button class="btn btn-primary btn-sm">Join now</button>
+              </div>
+            </div>
+
+            <div class="card card-compact sched-card">
+              <div class="sched-left">
+                <span class="icon-badge"><svg class="icon icon-16"><use href="#i-pin"/></svg></span>
+                <div class="sched-text">
+                  <span class="t-h3" style="font-weight:500;">Arjun Mehta</span>
+                  <span class="t-body-s">Follow-up &middot; In person</span>
+                </div>
+              </div>
+              <div class="sched-right">
+                <span class="t-num tnum">11:30 AM</span>
+              </div>
+            </div>
+
+            <div class="card card-compact sched-card">
+              <div class="sched-left">
+                <span class="icon-badge"><svg class="icon icon-16"><use href="#i-video"/></svg></span>
+                <div class="sched-text">
+                  <span class="t-h3" style="font-weight:500;">Sana Kapoor</span>
+                  <span class="t-body-s">Assessment &middot; Online</span>
+                </div>
+              </div>
+              <div class="sched-right">
+                <span class="t-num tnum">2:00 PM</span>
+                <button class="btn btn-secondary btn-sm">Get link</button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head"><h2 class="t-h2">Recent patients</h2></div>
+          <div class="table-wrap card-flush">
+
+            <div class="list-row rp-row rp-row--stacked">
+              <div class="rp-top">
+                <span class="t-cell-key">Priya Sharma</span>
+                <span class="t-caption tnum">Sep 10 &middot; 4:00 PM</span>
+              </div>
+              <div class="seg">
+                <button class="seg-option" aria-pressed="true"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+              </div>
+            </div>
+
+            <div class="list-row rp-row rp-row--stacked">
+              <div class="rp-top">
+                <span class="t-cell-key">Arjun Mehta</span>
+                <span class="t-caption tnum">Sep 10 &middot; 2:30 PM</span>
+              </div>
+              <div class="seg">
+                <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                <button class="seg-option" aria-pressed="true"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+              </div>
+            </div>
+
+            <div class="list-row rp-row rp-row--stacked">
+              <div class="rp-top">
+                <span class="t-cell-key">Sana Kapoor</span>
+                <span class="t-caption tnum">Sep 9 &middot; 11:00 AM</span>
+              </div>
+              <div class="seg">
+                <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+              </div>
+            </div>
+
+            <div class="list-row rp-row rp-row--stacked">
+              <div class="rp-top">
+                <span class="t-cell-key">Rohan Verma</span>
+                <span class="t-caption tnum">Sep 9 &middot; 9:30 AM</span>
+              </div>
+              <div class="seg">
+                <button class="seg-option" aria-pressed="true"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+              </div>
+            </div>
+
+            <div class="list-row rp-row rp-row--stacked">
+              <div class="rp-top">
+                <span class="t-cell-key">Meera Iyer</span>
+                <span class="t-caption tnum">Sep 8 &middot; 3:00 PM</span>
+              </div>
+              <div class="seg">
+                <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-check"/></svg>Present</button>
+                <button class="seg-option" aria-pressed="false"><svg class="icon icon-14"><use href="#i-x"/></svg>Absent</button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <section>
+          <div class="card-narrative">
+            <div class="t-h3" style="margin-bottom:4px;">Clinical summary</div>
+            <div class="t-caption" style="margin-bottom:12px;">Priya Sharma &middot; Today</div>
+            <p class="t-narrative">Priya showed good progress with grounding exercises. Continue breathing techniques next session.</p>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <h2 class="t-h2">Payments</h2>
+            <span class="status-alert">₹5,500 overdue</span>
+          </div>
+          <div class="table-wrap card-flush">
+
+            <div class="list-row pay-row">
+              <div class="pay-name-received">Priya Sharma
+                <div class="status-quiet">Received</div>
+              </div>
+              <div class="pay-right">
+                <span class="t-num tnum"><span style="color:var(--text-muted);">₹</span>2,500</span>
+                <span class="t-caption">Today</span>
+              </div>
+            </div>
+
+            <div class="list-row pay-row rule-error">
+              <div class="t-cell-key">Arjun Mehta
+                <div class="status-alert">Overdue</div>
+              </div>
+              <div class="pay-right">
+                <span class="t-num-key tnum"><span style="color:var(--text-muted);">₹</span>3,000</span>
+                <span class="t-caption">Yesterday</span>
+              </div>
+            </div>
+
+            <div class="list-row pay-row">
+              <div class="pay-name-received">Sana Kapoor
+                <div class="status-quiet">Received</div>
+              </div>
+              <div class="pay-right">
+                <span class="t-num tnum"><span style="color:var(--text-muted);">₹</span>2,000</span>
+                <span class="t-caption">Sep 8</span>
+              </div>
+            </div>
+
+            <div class="list-row pay-row rule-error">
+              <div class="t-cell-key">Rohan Verma
+                <div class="status-alert">Overdue</div>
+              </div>
+              <div class="pay-right">
+                <span class="t-num-key tnum"><span style="color:var(--text-muted);">₹</span>2,500</span>
+                <span class="t-caption">Sep 6</span>
+              </div>
+            </div>
+
+            <div class="list-row pay-row">
+              <div class="pay-name-received">Meera Iyer
+                <div class="status-quiet">Received</div>
+              </div>
+              <div class="pay-right">
+                <span class="t-num tnum"><span style="color:var(--text-muted);">₹</span>3,500</span>
+                <span class="t-caption">Sep 5</span>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="artboard-block">
+    <div class="artboard-label t-caption is-centered">Patients — mobile</div>
+    <div class="artboard artboard-mobile mobile-scope">
+
+      <div class="mobile-topbar">
+        <div class="mobile-topbar-left">
+          <svg class="icon icon-20" style="color:var(--icon-muted);"><use href="#i-menu"/></svg>
+        </div>
+        <div class="mobile-topbar-right">
+          <span class="bell-wrap"><svg class="icon icon-20"><use href="#i-bell"/></svg><span class="notif-dot"></span></span>
+          <span class="avatar">RD</span>
+        </div>
+      </div>
+
+      <div class="mobile-page-pad">
+        <h1 class="t-h1" style="margin-bottom: var(--space-4);">Patients</h1>
+
+        <button class="btn btn-ghost btn-filter" style="margin-bottom: var(--space-3);">Active <svg class="icon icon-16"><use href="#i-chevron-down"/></svg></button>
+        <button class="btn btn-primary btn-lg" style="width:100%; margin-bottom: var(--space-3);">Add patient</button>
+        <button class="btn btn-ghost btn-sm" style="width:100%; margin-bottom: var(--space-6);">Bulk upload</button>
+
+        <div class="stack-cards">
+
+          <div class="card card-compact rule-accent">
+            <div class="p-card-top">
+              <div class="p-card-id">
+                <span class="avatar avatar-accent">KN</span>
+                <span class="t-cell-key">Kabir Nair</span>
+              </div>
+              <div class="p-card-right">
+                <span class="chip chip-intake">New Intake</span>
+                <button class="icon-btn"><svg class="icon icon-16" style="color:var(--icon-muted);"><use href="#i-kebab"/></svg></button>
+              </div>
+            </div>
+            <div class="p-card-meta t-body-s">29 yrs &middot; Male &middot; Sep 11</div>
+          </div>
+
+          <div class="card card-compact">
+            <div class="p-card-top">
+              <div class="p-card-id">
+                <span class="avatar">PS</span>
+                <span class="t-cell-key">Priya Sharma</span>
+              </div>
+              <div class="p-card-right">
+                <button class="icon-btn"><svg class="icon icon-16" style="color:var(--icon-muted);"><use href="#i-kebab"/></svg></button>
+              </div>
+            </div>
+            <div class="p-card-meta t-body-s">34 yrs &middot; Female &middot; Aug 2</div>
+            <div class="p-card-status t-cell-muted">Active &middot; Intake completed</div>
+          </div>
+
+          <div class="card card-compact">
+            <div class="p-card-top">
+              <div class="p-card-id">
+                <span class="avatar">AM</span>
+                <span class="t-cell-key">Arjun Mehta</span>
+              </div>
+              <div class="p-card-right">
+                <span class="chip chip-pending">Pending</span>
+                <button class="icon-btn"><svg class="icon icon-16" style="color:var(--icon-muted);"><use href="#i-kebab"/></svg></button>
+              </div>
+            </div>
+            <div class="p-card-meta t-body-s">41 yrs &middot; Male &middot; Jul 19</div>
+            <div class="p-card-status t-cell-muted">Active</div>
+          </div>
+
+          <div class="card card-compact">
+            <div class="p-card-top">
+              <div class="p-card-id">
+                <span class="avatar">SK</span>
+                <span class="t-cell-key">Sana Kapoor</span>
+              </div>
+              <div class="p-card-right">
+                <button class="icon-btn"><svg class="icon icon-16" style="color:var(--icon-muted);"><use href="#i-kebab"/></svg></button>
+              </div>
+            </div>
+            <div class="p-card-meta t-body-s">27 yrs &middot; Female &middot; Jun 30</div>
+            <div class="p-card-status t-cell-muted">Active &middot; Intake completed</div>
+          </div>
+
+          <div class="card card-compact">
+            <div class="p-card-top">
+              <div class="p-card-id">
+                <span class="avatar">RV</span>
+                <span class="t-cell-key">Rohan Verma</span>
+              </div>
+              <div class="p-card-right">
+                <button class="icon-btn"><svg class="icon icon-16" style="color:var(--icon-muted);"><use href="#i-kebab"/></svg></button>
+              </div>
+            </div>
+            <div class="p-card-meta t-body-s">52 yrs &middot; Male &middot; May 4</div>
+            <div class="p-card-status t-cell-muted">Archived</div>
+          </div>
+
+          <div class="card card-compact">
+            <div class="p-card-top">
+              <div class="p-card-id">
+                <span class="avatar">MI</span>
+                <span class="t-cell-key">Meera Iyer</span>
+              </div>
+              <div class="p-card-right">
+                <button class="icon-btn"><svg class="icon icon-16" style="color:var(--icon-muted);"><use href="#i-kebab"/></svg></button>
+              </div>
+            </div>
+            <div class="p-card-meta t-body-s">38 yrs &middot; Female &middot; Apr 21</div>
+            <div class="p-card-status t-cell-muted">Active &middot; Intake completed</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</div>
+</body>
+</html>
