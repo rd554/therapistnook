@@ -1,3 +1,13 @@
+/* Clinical Ink design system (in-progress migration, see design/therapist-nook-design-system.md).
+   Everything in this file is scoped under `.clinical-ink` and is a no-op
+   until a screen root is given that class — see the header comment in
+   styles/tokens.css for the full cascade/collision writeup.
+   Must precede @tailwind (a plain CSS @import has to come before all other
+   statements besides @charset) — this is fine: the scoped selectors below
+   win on specificity (0,2,0 vs Tailwind utilities' 0,1,0), not on source
+   order, against anything Tailwind emits after it. */
+@import './styles/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
