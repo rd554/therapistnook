@@ -99,61 +99,24 @@
 .clinical-ink .dash-section__action { color: var(--accent); }
 .clinical-ink .dash-section__action:hover { color: var(--accent-hover); }
 
-/* index.css's .btn-primary already loses its background/color to tokens.css
-   (Phase 0's .clinical-ink .btn-primary), but not its colored box-shadow —
-   tokens.css never set box-shadow, so nothing overrode it. Kill it here. */
-.clinical-ink .btn-primary,
-.clinical-ink .btn-primary:hover:not(:disabled),
-.clinical-ink .btn-primary:active:not(:disabled) {
-  box-shadow: none;
-}
-
-/* .btn-primary-sm is `@apply btn-primary` in index.css — Tailwind's @apply
-   bakes those declarations into btn-primary-sm's OWN compiled rule at build
-   time, so it doesn't inherit anything from .clinical-ink .btn-primary via
-   the cascade. Needs its own override. */
-.clinical-ink .btn-primary-sm {
-  background: var(--accent);
-  color: var(--text-inverse);
-  box-shadow: none;
-}
-.clinical-ink .btn-primary-sm:hover:not(:disabled) { background: var(--accent-hover); }
+/* index.css's own .btn-primary/.btn-primary-sm (Tailwind-composed, distinct
+   from tokens.css's real .btn-primary) used to need box-shadow overrides
+   here, back when WorkspaceHeader/TodaySchedule rendered those classes bare.
+   Both call sites now render tokens.css's actual `btn btn-primary` instead
+   (WorkspaceHeader, TodaySchedule), so there's nothing left inside
+   .clinical-ink's scope using index.css's versions — nothing to override. */
 
 /* ==========================================================================
    Today's Schedule (components/dashboard/TodaySchedule.jsx)
-   Design system rule: "modality/entity badge — neutral, never tinted by
-   category" (tokens.css .icon-badge comment). Online/offline previously
-   got distinct blue/green fills on the whole card — that's a category tint,
-   and green is off the palette entirely. Made neutral; the Video/MapPin
-   icon plus the "Online"/"In-person" text still carry the distinction.
+   Fully converted to tokens.css's own vocabulary (design system §6) — see
+   TodaySchedule.jsx and styles/clinical-ink.css's .sched-* classes. Only the
+   two bespoke, prototype-unmodeled affordances survive here.
    ========================================================================== */
 
-.clinical-ink .dash-session-card {
-  background: var(--canvas);
-  border: var(--border-width) solid var(--border);
-  box-shadow: var(--shadow-xs);
-}
-.clinical-ink .dash-session-card:hover { box-shadow: var(--ci-shadow-sm); }
-.clinical-ink .dash-session-card--online,
-.clinical-ink .dash-session-card--offline {
-  background: var(--canvas);
-}
-.clinical-ink .dash-session-card--online .dash-session-card__chip,
-.clinical-ink .dash-session-card--offline .dash-session-card__chip {
-  background: var(--surface);
-  color: var(--icon);
-}
-.clinical-ink .dash-session-card__join {
-  background: var(--accent);
-  box-shadow: none;
-}
-.clinical-ink .dash-session-card__join:hover:not(:disabled) {
-  background: var(--accent-hover);
-  filter: none;
-}
 .clinical-ink .dash-session-card__icon-btn {
   color: var(--icon);
   border-color: var(--border);
+  background: var(--canvas);
 }
 .clinical-ink .dash-session-card__error { color: var(--error); }
 

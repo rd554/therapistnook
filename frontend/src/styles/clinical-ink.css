@@ -1,0 +1,40 @@
+/* ==========================================================================
+   Clinical Ink — layout scaffolding
+   --------------------------------------------------------------------------
+   tokens.css ports the design system's token/component vocabulary (.card,
+   .btn-primary, .icon-badge, ...) — pure design-system surface, kept a
+   byte-faithful scoped copy of design/tokens.css so the two never drift.
+
+   Some prototype markup needs plain structural glue around those tokens
+   (flex direction/gap with no color or type opinion of its own) that isn't
+   part of the design system's vocabulary — e.g. design/prototype/prototype.css
+   defines `.sched-card`/`.sched-left`/`.sched-right` as pure layout, the same
+   way this file relates to tokens.css. This file is the live app's equivalent:
+   component-composition classes, ported 1:1 from prototype.css as each
+   component is converted, scoped under `.clinical-ink` like everything else.
+
+   Colored/typed restyles of the app's OLD bespoke BEM classes still live in
+   clinical-ink-overrides.css until their component is fully converted; once
+   converted, the old class is deleted from JSX and its override entry is
+   deleted from that file. This file only ever grows with genuinely new,
+   colorless structure — nothing here should ever need deleting.
+   ========================================================================== */
+
+/* ==========================================================================
+   Today's Schedule (components/dashboard/TodaySchedule.jsx)
+   1:1 port of prototype.css's .sched-card/.sched-left/.sched-text/.sched-right
+   ========================================================================== */
+
+.clinical-ink .sched-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4);
+}
+.clinical-ink .sched-left {
+  display: flex; align-items: center; gap: var(--space-3); min-width: 0;
+}
+.clinical-ink .sched-text {
+  min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.clinical-ink .sched-right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none;
+}

@@ -8,6 +8,11 @@
    order, against anything Tailwind emits after it. */
 @import './styles/tokens.css';
 
+/* Layout-only scaffolding classes ported from design/prototype/prototype.css
+   (e.g. .sched-card) — see this file's own header for why it's separate
+   from tokens.css. Same import-order reasoning as tokens.css above. */
+@import './styles/clinical-ink.css';
+
 /* Restyles the app's OWN existing classes (not tokens.css's) under
    .clinical-ink, for the classes tokens.css has no equivalent for — see the
    header comment in this file for why. Every selector in it includes the
@@ -1185,94 +1190,15 @@
   }
 
   /* ============================================
-     TODAY'S SCHEDULE CARDS — Tinted backgrounds
-     Online: #EEF5FF bg, #A7BED3 accent
-     Offline: #F2FBF4 bg, #A8C7A1 accent
-     No borders, subtle tint
+     TODAY'S SCHEDULE CARDS
+     .dash-session-card, --online/--offline, __chip, __name, __meta, __join
+     were deleted here: TodaySchedule.jsx now renders sessions with tokens.css's
+     real .card/.rule-accent/.icon-badge/.btn-primary/.btn-secondary and the
+     layout-only .sched-* classes (styles/clinical-ink.css), per design system
+     §6. __icon-btn and __error survive below — they're app-specific affordances
+     (email-a-link, link-generation error) the prototype doesn't model, so they
+     stay bespoke, restyled neutral/error via clinical-ink-overrides.css.
      ============================================ */
-
-  .dash-session-card {
-    @apply flex items-center;
-    width: 88%;
-    gap: 14px;
-    padding: 16px 20px;
-    border-radius: var(--radius-card);
-    border: none;
-    box-shadow: var(--shadow-card-elevation);
-    transition: transform 150ms ease, box-shadow 150ms ease;
-    cursor: pointer;
-  }
-
-  .dash-session-card:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-card-hover);
-  }
-
-  .dash-session-card--online {
-    background: var(--color-online-bg);
-  }
-
-  .dash-session-card--offline {
-    background: var(--color-offline-bg);
-  }
-
-  .dash-session-card__chip {
-    @apply flex items-center justify-center shrink-0;
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
-  }
-
-  .dash-session-card--online .dash-session-card__chip {
-    background: rgba(159, 186, 210, 0.28);
-    color: #1E5F8A;
-  }
-
-  .dash-session-card--offline .dash-session-card__chip {
-    background: rgba(159, 195, 154, 0.28);
-    color: #3F5F49;
-  }
-
-  .dash-session-card__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 15px;
-    font-weight: 500;
-    line-height: 1.4;
-    color: var(--color-text-primary);
-  }
-
-  .dash-session-card__meta {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 400;
-    line-height: 1.4;
-    color: var(--color-text-secondary);
-    margin-top: 2px;
-  }
-
-  .dash-session-card__join {
-    @apply flex items-center justify-center shrink-0;
-    gap: 6px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    background: var(--color-primary);
-    border-radius: 999px;
-    padding: 8px 14px;
-    white-space: nowrap;
-    transition: filter 150ms ease, transform 150ms ease;
-  }
-
-  .dash-session-card__join:hover:not(:disabled) {
-    filter: brightness(0.94);
-    transform: translateY(-1px);
-  }
-
-  .dash-session-card__join:disabled {
-    opacity: 0.7;
-    cursor: default;
-  }
 
   .dash-session-card__error {
     font-family: 'Manrope', system-ui, sans-serif;
