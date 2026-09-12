@@ -8,6 +8,13 @@
    order, against anything Tailwind emits after it. */
 @import './styles/tokens.css';
 
+/* Restyles the app's OWN existing classes (not tokens.css's) under
+   .clinical-ink, for the classes tokens.css has no equivalent for — see the
+   header comment in this file for why. Every selector in it includes the
+   `.clinical-ink` class, so it always out-specifies this same file's bare
+   rules below regardless of import order (0,N+1,0 vs 0,N,0). */
+@import './styles/clinical-ink-overrides.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

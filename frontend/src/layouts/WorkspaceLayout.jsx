@@ -37,7 +37,7 @@ export default function WorkspaceLayout({ auth, onLogout }) {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="clinical-ink min-h-screen bg-white">
       {/* Sidebar */}
       <Sidebar
         userName={auth?.name || 'Ravi D'}

@@ -1,0 +1,230 @@
+/* ==========================================================================
+   Clinical Ink — restyle overrides
+   --------------------------------------------------------------------------
+   tokens.css (Phase 0) ports the design system's OWN class vocabulary
+   (.card, .btn-primary, .nav-item, ...) so it's ready for new screens. But
+   the live app's markup is almost entirely bespoke BEM classes defined in
+   index.css (.dash-session-card, .workspace-header__btn--nav, ...) — the
+   JSX rarely uses tokens.css's class names at all. Renaming every call site
+   to match tokens.css would be a huge, purely mechanical rewrite for zero
+   visual gain (same intended look, different class name).
+
+   So this file takes the other approach: restyle the app's EXISTING class
+   definitions in place, scoped under `.clinical-ink`, to satisfy the design
+   system's rules (single accent hue, no green, no colored shadows, closed
+   palette) — without touching JSX structure or class names. JSX changes
+   below are limited to adding `className="clinical-ink"` to the screen/
+   layout root that should adopt this file.
+
+   tokens.css remains the source of truth for what a value SHOULD be (it's
+   the literal design-system spec); this file is where that spec gets
+   applied to the app's actual selectors. Add one block per screen as it's
+   migrated — an untouched screen's classes simply aren't listed here yet,
+   so it renders exactly as before.
+
+   Written against index.css as of the Phase 3+4 (chrome + Dashboard) pass,
+   2026-09-13.
+   ========================================================================== */
+
+/* ==========================================================================
+   Sidebar (frontend/src/layouts/Sidebar.jsx) — global, every workspace screen
+   ========================================================================== */
+
+.clinical-ink .sidebar {
+  box-shadow: none;
+  border-right: var(--border-width) solid var(--border);
+}
+
+.clinical-ink .sidebar-nav-item--active,
+.clinical-ink .sidebar-nav-item--active:hover {
+  background: var(--selected);
+  border: none;
+  color: var(--accent);
+  box-shadow: none;
+}
+.clinical-ink .sidebar-nav-item--active span,
+.clinical-ink .sidebar-nav-item--active svg { color: var(--accent); }
+
+.clinical-ink .sidebar-nav-item:focus-visible,
+.clinical-ink .sidebar-profile:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.clinical-ink .sidebar-profile__avatar--placeholder {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   Workspace header (frontend/src/layouts/WorkspaceHeader.jsx) — global
+   ========================================================================== */
+
+.clinical-ink .workspace-header {
+  box-shadow: none;
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+.clinical-ink .workspace-header__btn--nav,
+.clinical-ink .workspace-header__btn--soft {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.clinical-ink .workspace-header__btn--nav:hover,
+.clinical-ink .workspace-header__btn--nav:focus-visible,
+.clinical-ink .workspace-header__btn--nav:active,
+.clinical-ink .workspace-header__btn--soft:hover,
+.clinical-ink .workspace-header__btn--soft:focus-visible,
+.clinical-ink .workspace-header__btn--soft:active {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+.clinical-ink .workspace-header__btn--primary {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+.clinical-ink .workspace-header__btn--primary:hover {
+  background: var(--accent-hover);
+}
+
+/* Notification dot: alarm hue, not accent — matches the prototype's own
+   .notif-dot (design/prototype/prototype.css), which uses var(--error) for
+   the same "you have something unread" signal. Keeps this off the accent
+   budget instead of adding a second accent object to every screen. */
+.clinical-ink .workspace-header__notif-dot { background: var(--error); }
+
+.clinical-ink .workspace-header__avatar {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   Dashboard section chrome (shared by all four dashboard/* widgets)
+   ========================================================================== */
+
+.clinical-ink .dash-section__badge {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.clinical-ink .dash-section__action { color: var(--accent); }
+.clinical-ink .dash-section__action:hover { color: var(--accent-hover); }
+
+/* index.css's .btn-primary already loses its background/color to tokens.css
+   (Phase 0's .clinical-ink .btn-primary), but not its colored box-shadow —
+   tokens.css never set box-shadow, so nothing overrode it. Kill it here. */
+.clinical-ink .btn-primary,
+.clinical-ink .btn-primary:hover:not(:disabled),
+.clinical-ink .btn-primary:active:not(:disabled) {
+  box-shadow: none;
+}
+
+/* .btn-primary-sm is `@apply btn-primary` in index.css — Tailwind's @apply
+   bakes those declarations into btn-primary-sm's OWN compiled rule at build
+   time, so it doesn't inherit anything from .clinical-ink .btn-primary via
+   the cascade. Needs its own override. */
+.clinical-ink .btn-primary-sm {
+  background: var(--accent);
+  color: var(--text-inverse);
+  box-shadow: none;
+}
+.clinical-ink .btn-primary-sm:hover:not(:disabled) { background: var(--accent-hover); }
+
+/* ==========================================================================
+   Today's Schedule (components/dashboard/TodaySchedule.jsx)
+   Design system rule: "modality/entity badge — neutral, never tinted by
+   category" (tokens.css .icon-badge comment). Online/offline previously
+   got distinct blue/green fills on the whole card — that's a category tint,
+   and green is off the palette entirely. Made neutral; the Video/MapPin
+   icon plus the "Online"/"In-person" text still carry the distinction.
+   ========================================================================== */
+
+.clinical-ink .dash-session-card {
+  background: var(--canvas);
+  border: var(--border-width) solid var(--border);
+  box-shadow: var(--shadow-xs);
+}
+.clinical-ink .dash-session-card:hover { box-shadow: var(--ci-shadow-sm); }
+.clinical-ink .dash-session-card--online,
+.clinical-ink .dash-session-card--offline {
+  background: var(--canvas);
+}
+.clinical-ink .dash-session-card--online .dash-session-card__chip,
+.clinical-ink .dash-session-card--offline .dash-session-card__chip {
+  background: var(--surface);
+  color: var(--icon);
+}
+.clinical-ink .dash-session-card__join {
+  background: var(--accent);
+  box-shadow: none;
+}
+.clinical-ink .dash-session-card__join:hover:not(:disabled) {
+  background: var(--accent-hover);
+  filter: none;
+}
+.clinical-ink .dash-session-card__icon-btn {
+  color: var(--icon);
+  border-color: var(--border);
+}
+.clinical-ink .dash-session-card__error { color: var(--error); }
+
+/* ==========================================================================
+   Recent Patients (components/dashboard/RecentPatientsTable.jsx)
+   ========================================================================== */
+
+/* Same neutral-modality rule as the session cards above. */
+.clinical-ink .dash-mode-dot--online,
+.clinical-ink .dash-mode-dot--offline {
+  background: var(--icon-muted);
+}
+
+.clinical-ink .dash-recent-card,
+.clinical-ink .dash-recent-card-m { background: var(--surface); }
+
+/* Present/Absent attendance toggle: a real binary state (not a category
+   tint), so a filled "on" state is appropriate — but "absent" was using a
+   gold (#DDBD63) that isn't in the Clinical Ink palette. --warning is the
+   closest closed-palette hue that still reads distinctly from accent. */
+.clinical-ink .dash-check--present.dash-check--on,
+.clinical-ink .dash-recent-pill--present.dash-recent-pill--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
+.clinical-ink .dash-check--absent.dash-check--on,
+.clinical-ink .dash-recent-pill--absent.dash-recent-pill--on {
+  background: var(--warning);
+  border-color: var(--warning);
+  color: var(--text-inverse);
+}
+
+/* ==========================================================================
+   Payments (components/dashboard/PaymentsList.jsx)
+   --success is documented in tokens.css as "text only" — never a fill — so
+   collected/received drops its green card background entirely and carries
+   the status via text color alone. Overdue/outstanding gets --error (a
+   missed-deadline is closer to "alarm" than "in progress"); pending stays
+   at --warning (upcoming, not yet urgent).
+   ========================================================================== */
+
+.clinical-ink .dash-payment-card--collected,
+.clinical-ink .dash-payment-card--received {
+  background: var(--canvas);
+  border: var(--border-width) solid var(--border);
+}
+.clinical-ink .dash-payment-card--pending {
+  background: var(--warning-tint);
+}
+.clinical-ink .dash-payment-card--overdue,
+.clinical-ink .dash-payment-card--outstanding {
+  background: var(--error-tint);
+}
+.clinical-ink .dash-payment-card--collected .dash-payment-card__status,
+.clinical-ink .dash-payment-card--received .dash-payment-card__status {
+  color: var(--success);
+}
+.clinical-ink .dash-payment-card--pending .dash-payment-card__status {
+  color: var(--warning);
+}
+.clinical-ink .dash-payment-card--overdue .dash-payment-card__status,
+.clinical-ink .dash-payment-card--outstanding .dash-payment-card__status {
+  color: var(--error);
+}
