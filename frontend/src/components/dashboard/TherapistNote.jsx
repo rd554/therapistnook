@@ -22,6 +22,7 @@ function formatNoteDate(dateStr) {
 
 export default function TherapistNote() {
   const [noteDate, setNoteDate] = useState(() => toDateInputValue(new Date()))
+  const isToday = noteDate === toDateInputValue(new Date())
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [saveState, setSaveState] = useState('idle') // idle | saving | saved
@@ -59,7 +60,10 @@ export default function TherapistNote() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showPicker])
 
-  // Auto-grow textarea
+  // Auto-grow textarea. Math.max(120, ...) is the only 120px floor left —
+  // the old .dash-note-card__textarea CSS rule that used to set
+  // min-height:120px was deleted with the rest of that class (replaced by
+  // tokens.css's .t-narrative, which has no min-height opinion).
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -90,26 +94,15 @@ export default function TherapistNote() {
     setShowPicker(false)
   }
 
-  const isToday = noteDate === toDateInputValue(new Date())
-
   return (
-    <section className="dash-section">
-      <div className="dash-section__heading">
-        <div className="dash-section__heading-left">
-          <h2 className="dash-section__title">Therapist&apos;s note</h2>
-          {!isToday && (
-            <span className="dash-section__badge">{formatNoteDate(noteDate)}</span>
-          )}
-        </div>
-        {saveState === 'saving' && (
-          <span className="text-caption text-content-muted">Saving…</span>
-        )}
-        {saveState === 'saved' && (
-          <span className="text-caption text-content-muted">Saved</span>
-        )}
-      </div>
-
-      <div className="dash-note-card">
+    <section>
+      {/* .card-narrative (design system §C): the note shares --paper with the
+          prototype's "Clinical summary" card — the only two blocks of human
+          language on the screen, on a surface operational chrome never uses.
+          No second card-narrative added above it: the prototype's "Clinical
+          summary" is per-patient content with no confirmed backend source
+          yet, so this stays the one card until that data exists. */}
+      <div className="card-narrative" style={{ position: 'relative' }}>
         <div ref={pickerRef}>
           <button
             type="button"
@@ -117,7 +110,7 @@ export default function TherapistNote() {
             onClick={() => setShowPicker((v) => !v)}
             aria-label="Pick note date"
           >
-            <Clock size={18} strokeWidth={1.75} />
+            <Clock size={16} strokeWidth={1.75} />
           </button>
           {showPicker && (
             <div className="dash-note-card__popover">
@@ -132,12 +125,24 @@ export default function TherapistNote() {
           )}
         </div>
 
+        {/* paddingRight on both lines clears the absolutely-positioned picker
+            button (32px wide, 16px from the edge) — the caption is the one
+            at risk: a non-today date plus " · Saving…" runs noticeably
+            longer than the title in this narrow rail. */}
+        <h2 className="t-h3" style={{ marginBottom: 4, paddingRight: 40 }}>Therapist&apos;s note</h2>
+        <div className="t-caption" style={{ marginBottom: 12, paddingRight: 40 }}>
+          {formatNoteDate(noteDate)}
+          {saveState === 'saving' && ' · Saving…'}
+          {saveState === 'saved' && ' · Saved'}
+        </div>
+
         {loading ? (
-          <p className="text-secondary" style={{ fontSize: 14 }}>Loading note…</p>
+          <p className="t-narrative" style={{ color: 'var(--text-muted)' }}>Loading note…</p>
         ) : (
           <textarea
             ref={textareaRef}
-            className="dash-note-card__textarea"
+            className="t-narrative"
+            style={{ display: 'block', width: '100%', border: 'none', outline: 'none', background: 'transparent', resize: 'none' }}
             placeholder={isToday ? "What's on your mind today…" : 'Note for this day…'}
             value={content}
             onChange={handleChange}

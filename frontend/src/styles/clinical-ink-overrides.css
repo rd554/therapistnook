@@ -90,14 +90,12 @@
 
 /* ==========================================================================
    Dashboard section chrome (shared by all four dashboard/* widgets)
+   .dash-section__badge/__action(:hover) deleted here: TherapistNote.jsx (the
+   last consumer of .dash-section__badge) now renders its date inline inside
+   .card-narrative's own .t-caption instead of a separate badge chip;
+   .dash-section__action already had no call sites left before this (dead
+   since Recent Patients' §7 rebuild).
    ========================================================================== */
-
-.clinical-ink .dash-section__badge {
-  background: var(--accent-tint);
-  color: var(--accent);
-}
-.clinical-ink .dash-section__action { color: var(--accent); }
-.clinical-ink .dash-section__action:hover { color: var(--accent-hover); }
 
 /* index.css's own .btn-primary/.btn-primary-sm (Tailwind-composed, distinct
    from tokens.css's real .btn-primary) used to need box-shadow overrides
@@ -119,6 +117,36 @@
   background: var(--canvas);
 }
 .clinical-ink .dash-session-card__error { color: var(--error); }
+
+/* ==========================================================================
+   Therapist's note (components/dashboard/TherapistNote.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §C) — the
+   card itself is .card-narrative/.t-h3/.t-caption/.t-narrative. Only the
+   date-picker button + popover survive as bespoke overrides: neither has a
+   prototype equivalent (it's a static mockup with no editable note), so
+   they keep their old index.css structure and get colors here instead,
+   same pattern as .dash-session-card__icon-btn above.
+   ========================================================================== */
+
+.clinical-ink .dash-note-card__picker { color: var(--icon-muted); }
+.clinical-ink .dash-note-card__picker:hover {
+  background: var(--surface);
+  color: var(--icon);
+}
+.clinical-ink .dash-note-card__popover {
+  background: var(--canvas);
+  box-shadow: var(--ci-shadow-md);
+}
+.clinical-ink .dash-note-card__popover input[type="date"] {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+/* tokens.css's .t-narrative has no ::placeholder rule of its own (the
+   prototype never puts it on a form control) — without one this textarea's
+   placeholder falls back to the browser default (~54% opacity of the text
+   color), which reads as body text rather than a prompt. */
+.clinical-ink textarea.t-narrative::placeholder { color: var(--text-muted); }
 
 /* ==========================================================================
    Recent Patients (components/dashboard/RecentPatients.jsx)
