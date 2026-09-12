@@ -1,5 +1,4 @@
-import { Link } from 'react-router-dom'
-import { Wallet, ArrowRight } from 'lucide-react'
+import { Wallet } from 'lucide-react'
 
 function formatCurrency(amount, currency = 'INR') {
   return new Intl.NumberFormat('en-IN', {
@@ -7,6 +6,22 @@ function formatCurrency(amount, currency = 'INR') {
     currency,
     minimumFractionDigits: 0,
   }).format((amount || 0) / 100)
+}
+
+// Splits a formatted amount into its currency symbol and digits so the two
+// can carry different colors (B6: "the ₹ symbol renders at --text-muted
+// while the digits take the row's colour"). formatToParts keeps this
+// locale/currency-agnostic instead of assuming ₹.
+function formatAmountParts(amount, currency = 'INR') {
+  const parts = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 0,
+  }).formatToParts((amount || 0) / 100)
+  return {
+    symbol: parts.filter((p) => p.type === 'currency').map((p) => p.value).join(''),
+    digits: parts.filter((p) => p.type !== 'currency').map((p) => p.value).join(''),
+  }
 }
 
 function toDayKey(dateValue) {
@@ -33,17 +48,6 @@ function displayStatus(tx) {
   return 'overdue'
 }
 
-const STATUS_LABEL = {
-  received: 'Received',
-  overdue: 'Overdue',
-}
-
-const STATUS_CARD_CLASS = {
-  received: 'dash-payment-card dash-payment-card--received',
-  overdue: 'dash-payment-card dash-payment-card--overdue',
-}
-
-
 function sortRecentFirst(transactions) {
   return [...transactions].sort((a, b) => {
     const da = new Date(a.date || a.appointment_date).getTime()
@@ -54,50 +58,59 @@ function sortRecentFirst(transactions) {
 
 const DASHBOARD_LIMIT = 5
 
+// .t-num (received) or .t-num-key (overdue) — B6.
+function AmountCell({ amount, currency, overdue }) {
+  const { symbol, digits } = formatAmountParts(amount, currency)
+  return (
+    <span className={overdue ? 't-num-key tnum' : 't-num tnum'}>
+      <span style={{ color: 'var(--text-muted)' }}>{symbol}</span>
+      {digits}
+    </span>
+  )
+}
+
 export default function PaymentsList({ transactions = [] }) {
-  const items = sortRecentFirst(transactions).slice(0, DASHBOARD_LIMIT)
+  const sorted = sortRecentFirst(transactions)
+  const items = sorted.slice(0, DASHBOARD_LIMIT)
+  // Summed over all fetched transactions, not just the 5 displayed rows —
+  // otherwise an account with >5 overdue payments would silently under-report
+  // the total in this --status-alert. Still bounded by however many
+  // transactions the caller fetched (Home.jsx currently asks for 30), not a
+  // true account-wide figure.
+  const overdueTotal = sorted
+    .filter((tx) => displayStatus(tx) === 'overdue')
+    .reduce((sum, tx) => sum + (tx.amount || 0), 0)
 
   return (
-    <section className="dash-section">
-      <div className="dash-section__heading dash-section__heading--medium">
-        <div className="dash-section__heading-left">
-          <h2 className="dash-section__title">Payments</h2>
-        </div>
-        <Link to="/payments" className="dash-section__action">
-          View all
-          <ArrowRight size={14} strokeWidth={1.5} />
-        </Link>
+    <section>
+      <div className="section-head">
+        <h2 className="t-h2">Payments</h2>
+        {overdueTotal > 0 && (
+          <span className="status-alert">{formatCurrency(overdueTotal)} overdue</span>
+        )}
       </div>
 
       {items.length === 0 ? (
-        <div className="dash-empty">
-          <div className="empty-state-icon mx-auto mb-3">
-            <Wallet size={28} strokeWidth={1.5} />
-          </div>
-          <h3 className="text-card-title mb-1">No payments yet</h3>
-          <p className="text-secondary" style={{ fontSize: '14px' }}>
-            Payment activity will show here
-          </p>
+        <div className="empty">
+          <Wallet size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} />
+          <h3 className="empty-title">No payments yet</h3>
+          <p className="empty-body">Payment activity will show here</p>
         </div>
       ) : (
-        <div className="dash-payment-list">
+        <div className="table-wrap card-flush">
           {items.map((tx) => {
-            const status = displayStatus(tx)
+            const overdue = displayStatus(tx) === 'overdue'
             return (
-              <div key={tx.id} className={STATUS_CARD_CLASS[status] || STATUS_CARD_CLASS.overdue}>
-                <div className="min-w-0">
-                  <p className="dash-payment-card__name truncate">{tx.patient_name}</p>
-                  <p className="dash-payment-card__amount">
-                    {formatCurrency(tx.amount, tx.currency)}
-                  </p>
+              <div key={tx.id} className={overdue ? 'list-row pay-row rule-error' : 'list-row pay-row'}>
+                <div className={overdue ? 't-cell-key' : 'pay-name-received'}>
+                  {tx.patient_name}
+                  <div className={overdue ? 'status-alert' : 'status-quiet'}>
+                    {overdue ? 'Overdue' : 'Received'}
+                  </div>
                 </div>
-                <div className="dash-payment-card__right">
-                  <span className="dash-payment-card__status">
-                    {STATUS_LABEL[status]}
-                  </span>
-                  <span className="dash-payment-card__date">
-                    {formatChipDate(tx.date || tx.appointment_date)}
-                  </span>
+                <div className="pay-right">
+                  <AmountCell amount={tx.amount} currency={tx.currency} overdue={overdue} />
+                  <span className="t-caption">{formatChipDate(tx.date || tx.appointment_date)}</span>
                 </div>
               </div>
             )

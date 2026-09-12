@@ -1138,13 +1138,10 @@
   }
 
   /* Constrained heading widths — align "View all" with card edges.
-     --narrow (Recent Patients) deleted: that section now renders a bare
-     .section-head, same as TodaySchedule (see the TODAY'S SCHEDULE comment
-     below) — no width constraint needed once the row container itself
-     (.table-wrap) sets the card's true edge. */
-  .dash-section__heading--medium {
-    width: 94%;
-  }
+     --narrow (Recent Patients) and --medium (Payments) both deleted: both
+     sections now render a bare .section-head, same as TodaySchedule (see
+     the TODAY'S SCHEDULE comment below) — no width constraint needed once
+     the row container itself (.table-wrap) sets the card's true edge. */
 
   .dash-section__heading-left {
     @apply flex items-center;
@@ -1244,93 +1241,16 @@
      ============================================ */
 
   /* ============================================
-     PAYMENTS — Only Received & Overdue
-     Received: #F3FAF5 bg, #A8C7A1 accent, #3F5F49 text
-     Overdue: #FFF8E8 bg, #E8C66A accent, #6E5A18 text
+     PAYMENTS — deleted here: .dash-payment-list/-card(--collected/--received/
+     --pending/--overdue/--outstanding)/__name/__amount/__right/__status/__date
+     were the whole-card-tinted version this comment used to document.
+     PaymentsList.jsx now renders one .table-wrap.card-flush of .list-row
+     .pay-row rows, white with a .rule-error left stripe on overdue rows
+     instead of a tinted background, per design system §8/B4/B6/A3. The
+     name/amount/date type comes from tokens.css's own .t-cell-key/.t-num/
+     .t-num-key/.t-caption plus clinical-ink.css's .pay-name-received gap-fill
+     class — nothing bespoke left to restyle here.
      ============================================ */
-
-  .dash-payment-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--card-gap);
-    width: 94%;
-  }
-
-  .dash-payment-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 18px;
-    border: none;
-    border-radius: var(--radius-card);
-    box-shadow: var(--shadow-card-elevation);
-  }
-
-  .dash-payment-card--collected,
-  .dash-payment-card--received {
-    background: var(--color-received-bg);
-  }
-
-  .dash-payment-card--pending,
-  .dash-payment-card--overdue,
-  .dash-payment-card--outstanding {
-    background: var(--color-overdue-bg);
-  }
-
-  .dash-payment-card__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.35;
-    color: var(--color-text-primary);
-  }
-
-  .dash-payment-card__amount {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 400;
-    line-height: 1.35;
-    color: var(--color-text-muted);
-    margin-top: 2px;
-  }
-
-  .dash-payment-card__right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 2px;
-    flex-shrink: 0;
-  }
-
-  .dash-payment-card__status {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    line-height: 1.35;
-    text-align: right;
-    white-space: nowrap;
-  }
-
-  .dash-payment-card--collected .dash-payment-card__status,
-  .dash-payment-card--received .dash-payment-card__status {
-    color: var(--color-received-text);
-  }
-
-  .dash-payment-card--pending .dash-payment-card__status,
-  .dash-payment-card--overdue .dash-payment-card__status,
-  .dash-payment-card--outstanding .dash-payment-card__status {
-    color: var(--color-overdue-text);
-  }
-
-  .dash-payment-card__date {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 1.3;
-    color: var(--color-text-muted);
-    text-align: right;
-  }
 
   /* ============================================
      THERAPIST NOTE CARD
@@ -1407,15 +1327,11 @@
 
   /* ============================================
      EMPTY STATES
+     .dash-empty deleted here: PaymentsList.jsx (its last consumer) now
+     renders tokens.css's own .empty/.empty-title/.empty-body, same as
+     RecentPatients.jsx. .empty-state-icon below stays — components/ui/
+     EmptyState.jsx still uses it.
      ============================================ */
-
-  .dash-empty {
-    @apply flex flex-col items-center justify-center text-center;
-    padding: 48px 24px;
-    background: #FFFFFF;
-    border-radius: var(--radius-card);
-    box-shadow: var(--shadow-card);
-  }
 
   /* ============================================
      WORKSPACE MAIN CONTENT

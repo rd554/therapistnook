@@ -77,3 +77,23 @@
   .clinical-ink .rp-datetime { width: auto; order: 1; }
   .clinical-ink .rp-row .seg { align-self: flex-start; }
 }
+
+/* ==========================================================================
+   Payments (components/dashboard/PaymentsList.jsx)
+   1:1 port of prototype.css's .pay-row/.pay-right, plus .pay-name-received
+   from its own "gap-fill" section (design system §8 wants the *received*
+   row name at 14/500/primary — between .t-cell's 400 and .t-cell-key's
+   600 — a weight tokens.css doesn't otherwise expose). Unlike Recent
+   Patients, the prototype's desktop and mobile artboards use identical
+   .pay-row markup, so no narrow-width media query is needed here.
+   ========================================================================== */
+
+.clinical-ink .pay-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+}
+.clinical-ink .pay-right {
+  text-align: right; display: flex; flex-direction: column; gap: 2px; flex: none;
+}
+.clinical-ink .pay-name-received {
+  font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--text-primary);
+}

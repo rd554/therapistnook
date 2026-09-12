@@ -131,33 +131,10 @@
 
 /* ==========================================================================
    Payments (components/dashboard/PaymentsList.jsx)
-   --success is documented in tokens.css as "text only" — never a fill — so
-   collected/received drops its green card background entirely and carries
-   the status via text color alone. Overdue/outstanding gets --error (a
-   missed-deadline is closer to "alarm" than "in progress"); pending stays
-   at --warning (upcoming, not yet urgent).
+   Fully converted to tokens.css's own vocabulary (design system §8) — see
+   PaymentsList.jsx and styles/clinical-ink.css's .pay-* classes. Received
+   rows carry status via .status-quiet text only (no green fill, per
+   tokens.css's "success is text-only" rule); overdue rows get a white row
+   plus a .rule-error left stripe and .status-alert text instead of a
+   tinted card background.
    ========================================================================== */
-
-.clinical-ink .dash-payment-card--collected,
-.clinical-ink .dash-payment-card--received {
-  background: var(--canvas);
-  border: var(--border-width) solid var(--border);
-}
-.clinical-ink .dash-payment-card--pending {
-  background: var(--warning-tint);
-}
-.clinical-ink .dash-payment-card--overdue,
-.clinical-ink .dash-payment-card--outstanding {
-  background: var(--error-tint);
-}
-.clinical-ink .dash-payment-card--collected .dash-payment-card__status,
-.clinical-ink .dash-payment-card--received .dash-payment-card__status {
-  color: var(--success);
-}
-.clinical-ink .dash-payment-card--pending .dash-payment-card__status {
-  color: var(--warning);
-}
-.clinical-ink .dash-payment-card--overdue .dash-payment-card__status,
-.clinical-ink .dash-payment-card--outstanding .dash-payment-card__status {
-  color: var(--error);
-}
