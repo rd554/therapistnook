@@ -8,7 +8,6 @@ import {
   BarChart3,
   Settings,
   X,
-  ChevronRight,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -45,24 +44,29 @@ export default function Sidebar({
   const NavItemComponent = ({ item }) => {
     const Icon = item.icon
     const active = isActive(item.path)
-    
+
     return (
       <NavLink
         to={item.path}
         onClick={onMobileClose}
-        className={`sidebar-nav-item${active ? ' sidebar-nav-item--active' : ''}`}
+        className={`nav-item${active ? ' is-active' : ''}`}
         aria-label={item.label}
         aria-current={active ? 'page' : undefined}
       >
         <Icon size={18} strokeWidth={1.5} aria-hidden="true" />
-        <span>{item.label}</span>
+        {item.label}
       </NavLink>
     )
   }
 
+  // Avatar + name + role only (design system B8) — the trailing chevron the
+  // old .sidebar-profile carried is gone; the prototype's static
+  // .sidebar-footer has no affordance hinting at "this opens something" and
+  // doesn't need one, and this row is already announced as a link/button by
+  // its own role + hover state.
   const PractitionerProfile = () => (
-    <div 
-      className="sidebar-profile"
+    <div
+      className="sidebar-footer"
       onClick={() => navigate('/profile-settings')}
       role="button"
       tabIndex={0}
@@ -75,30 +79,28 @@ export default function Sidebar({
       }}
     >
       {userAvatar ? (
-        <img 
-          src={userAvatar} 
+        <img
+          src={userAvatar}
           alt={userName}
-          className="sidebar-profile__avatar"
+          className="sidebar-footer__avatar-img"
         />
       ) : (
-        <div className="sidebar-profile__avatar sidebar-profile__avatar--placeholder">
-          {getInitials(userName)}
-        </div>
+        <span className="avatar">{getInitials(userName)}</span>
       )}
-      <div className="sidebar-profile__info">
-        <span className="sidebar-profile__name">{userName}</span>
-        <span className="sidebar-profile__role">{userRoleLabel}</span>
+      <div className="sidebar-footer-text">
+        <span className="t-label truncate" style={{ color: 'var(--text-primary)' }}>{userName}</span>
+        <span className="t-caption truncate">{userRoleLabel}</span>
       </div>
-      <ChevronRight size={16} strokeWidth={1.5} className="text-content-muted flex-shrink-0" />
     </div>
   )
 
   const sidebarContent = (
     <>
-      {/* Logo / wordmark */}
-      <div className="sidebar-logo">
-        <img src="/logo.png" alt="" className="sidebar-logo__mark" />
-        <span className="sidebar-logo__text">Therapist Nook</span>
+      {/* Logo tile (B8): 32px --accent square + "TN", replacing the purple
+          blob mark, which didn't read at sidebar scale. */}
+      <div className="logo-row">
+        <div className="logo-tile">TN</div>
+        <span className="t-h3">Therapist Nook</span>
       </div>
 
       {/* Navigation — flush list, no group header */}

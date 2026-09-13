@@ -27,37 +27,24 @@
    ========================================================================== */
 
 /* ==========================================================================
-   Sidebar (frontend/src/layouts/Sidebar.jsx) — global, every workspace screen
+   Sidebar (frontend/src/layouts/Sidebar.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §B8) — see
+   Sidebar.jsx and styles/clinical-ink.css's .logo-row/.logo-tile/
+   .sidebar-footer* classes. Nav items render tokens.css's real .nav-item/
+   .is-active now (old .sidebar-nav-item--active + its :focus-visible
+   override are gone: tokens.css's own .nav-item.is-active and its global
+   *:focus-visible rule already cover both). The old .sidebar-profile avatar
+   placeholder is gone too — the footer now uses tokens.css's neutral
+   .avatar (background: var(--surface)), matching the prototype's own
+   choice for the practitioner's own account, not an --accent-tinted one.
+   The compound `.clinical-ink.sidebar, .clinical-ink .sidebar` box-shadow/
+   border-right rule that used to live here is gone as pure duplication:
+   tokens.css's own .sidebar rule already declares both.
+   Only the footer's hover feedback survives, since the prototype's
+   .sidebar-footer is static and doesn't need one.
    ========================================================================== */
 
-/* Compound selector needed: Sidebar.jsx's <aside> carries `clinical-ink` and
-   `sidebar` on the same element (see tokens.css's matching comment), so a
-   bare descendant selector matches nothing. */
-.clinical-ink.sidebar,
-.clinical-ink .sidebar {
-  box-shadow: none;
-  border-right: var(--border-width) solid var(--border);
-}
-
-.clinical-ink .sidebar-nav-item--active,
-.clinical-ink .sidebar-nav-item--active:hover {
-  background: var(--selected);
-  border: none;
-  color: var(--accent);
-  box-shadow: none;
-}
-.clinical-ink .sidebar-nav-item--active span,
-.clinical-ink .sidebar-nav-item--active svg { color: var(--accent); }
-
-.clinical-ink .sidebar-nav-item:focus-visible,
-.clinical-ink .sidebar-profile:focus-visible {
-  box-shadow: 0 0 0 2px var(--focus-ring);
-}
-
-.clinical-ink .sidebar-profile__avatar--placeholder {
-  background: var(--accent-tint);
-  color: var(--accent);
-}
+.clinical-ink .sidebar-footer:hover { background: var(--surface-hover); }
 
 /* ==========================================================================
    Workspace header (frontend/src/layouts/WorkspaceHeader.jsx) — global

@@ -97,3 +97,52 @@
 .clinical-ink .pay-name-received {
   font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--text-primary);
 }
+
+/* ==========================================================================
+   Sidebar (layouts/Sidebar.jsx)
+   1:1 port of prototype.css's .sidebar-nav/.logo-row/.logo-tile/
+   .sidebar-footer/.sidebar-footer-text. .logo-tile carries color
+   (var(--accent)/var(--text-inverse)) straight from prototype.css itself,
+   same as .pay-name-received above — a real component prototype.css defines
+   outside tokens.css's own vocabulary (B8), not a restyle of an old bespoke
+   class, so it belongs here rather than in clinical-ink-overrides.css.
+   Further additions the static prototype's footer doesn't need since it
+   isn't clickable there: cursor/border-radius on .sidebar-footer (the live
+   footer navigates to Profile settings on click); .sidebar-footer__avatar-
+   img, a bespoke sizing rule for the photo-avatar case — tokens.css's own
+   .avatar only styles the text-initials treatment; and min-width:0 on
+   .sidebar-footer-text so a long name/role can actually ellipsis (.truncate,
+   Tailwind) instead of overflowing the sidebar — same flex-shrink issue as
+   .rp-id > .truncate above, this time in a row rather than the row's child.
+   ========================================================================== */
+
+/* Sidebar.jsx puts both classes on the same <aside> (`clinical-ink sidebar
+   sidebar--desktop`/`--mobile`) — a bare descendant selector wouldn't match
+   that element, so both compound forms are needed, same as tokens.css's own
+   .sidebar rule (tokens.css:363-364) does for its own declarations. */
+.clinical-ink.sidebar, .clinical-ink .sidebar { display: flex; flex-direction: column; }
+
+.clinical-ink .sidebar-nav { flex: 1; display: flex; flex-direction: column; }
+
+.clinical-ink .logo-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 var(--space-3); margin-bottom: var(--space-6);
+}
+.clinical-ink .logo-tile {
+  width: 32px; height: 32px; border-radius: var(--radius-md);
+  background: var(--accent); color: var(--text-inverse);
+  display: flex; align-items: center; justify-content: center;
+  font: 600 13px var(--font-ui); flex: none;
+}
+
+.clinical-ink .sidebar-footer {
+  margin-top: auto; padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--hairline);
+  display: flex; align-items: center; gap: var(--space-3);
+  cursor: pointer; border-radius: var(--radius-md);
+}
+.clinical-ink .sidebar-footer-text { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.clinical-ink .sidebar-footer__avatar-img {
+  width: 32px; height: 32px; border-radius: var(--radius-full);
+  object-fit: cover; flex: none;
+}

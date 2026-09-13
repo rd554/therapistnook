@@ -719,17 +719,25 @@
   }
 
   /* ============================================
-     SIDEBAR — 220px width, 44px item height, 16px radius
+     SIDEBAR
+     .sidebar/.sidebar-logo(__mark/__text)/.sidebar-nav/.sidebar-nav-item
+     (span/svg/:hover/--active/--active:hover/--active span/--active svg/
+     :focus-visible)/.sidebar-section-label/.nav-group-label/.nav-item
+     (alias)/.sidebar-item(alias)/.sidebar-profile(:hover/:focus-visible)/
+     __avatar/__avatar--placeholder/__info/__name/__role were all deleted
+     here: Sidebar.jsx now renders tokens.css's real .sidebar/.nav-item/
+     .is-active/.avatar, plus the layout-only .logo-row/.logo-tile/
+     .sidebar-footer/.sidebar-footer-text/.sidebar-footer__avatar-img
+     from styles/clinical-ink.css (1:1 ports of prototype.css, per design
+     system §B8). .sidebar-nav-item's global un-scoped `.nav-item { @apply
+     sidebar-nav-item }`/`.sidebar-item` aliases had to go in the same pass
+     as .sidebar-nav-item itself — leaving either alone would either orphan
+     a dead @apply target (build error) or leave the old bespoke styles
+     reachable through the alias after Sidebar.jsx stopped using them.
+     .sidebar--desktop/--mobile/--mobile.sidebar--open below survive: they're
+     the responsive-drawer mechanics (fixed positioning, slide transform),
+     which have no prototype equivalent — it's a static desktop artboard.
      ============================================ */
-  
-  .sidebar {
-    @apply flex flex-col;
-    width: var(--sidebar-width);
-    height: 100vh;
-    background: var(--sidebar-bg);
-    border-right: none;
-    padding: 24px;
-  }
 
   .sidebar--desktop {
     @apply hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:z-30;
@@ -744,174 +752,6 @@
 
   .sidebar--mobile.sidebar--open {
     transform: translateX(0);
-  }
-
-  .sidebar-logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 0;
-  }
-
-  .sidebar-logo__mark {
-    width: 36px;
-    height: 36px;
-    flex-shrink: 0;
-  }
-
-  .sidebar-logo__text {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 17px;
-    font-weight: 700;
-    line-height: 1.3;
-    color: var(--color-text-primary);
-    white-space: nowrap;
-  }
-
-  /* Navigation — 36-40px gap from logo */
-  .sidebar-nav {
-    @apply flex flex-col flex-1;
-    margin-top: var(--logo-nav-gap);
-    gap: var(--nav-item-gap);
-  }
-
-  /* Navigation Item - 44px height, 16px radius
-     Thin outline icons (~1.5px stroke) */
-  .sidebar-nav-item {
-    @apply flex items-center cursor-pointer no-underline;
-    height: var(--nav-item-height);
-    padding: 0 var(--nav-item-padding-left);
-    gap: var(--nav-icon-gap);
-    border-radius: var(--radius-nav);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 15px;
-    font-weight: 500;
-    line-height: 1.5;
-    color: var(--sidebar-text);
-    background: transparent;
-    box-shadow: none;
-    transition: color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
-    width: 100%;
-  }
-
-  .sidebar-nav-item span {
-    font-weight: 500;
-    color: inherit;
-  }
-
-  .sidebar-nav-item svg {
-    color: var(--sidebar-icon-idle);
-    stroke: currentColor;
-    stroke-width: 1.5;
-    flex-shrink: 0;
-  }
-
-  .sidebar-nav-item:hover:not(.sidebar-nav-item--active) {
-    background: var(--sidebar-bg-hover);
-    color: var(--sidebar-text);
-  }
-
-  /* Active state - Soft lavender bg + subtle border + lavender icon/text */
-  .sidebar-nav-item--active,
-  .sidebar-nav-item--active:hover {
-    border-radius: var(--radius-nav);
-    background: #F3F0FF;
-    border: 1px solid #DDD6FE;
-    color: var(--color-primary);
-    font-weight: 500;
-    box-shadow: none;
-  }
-
-  .sidebar-nav-item--active span {
-    color: var(--color-primary);
-    font-weight: 500;
-  }
-
-  .sidebar-nav-item--active svg {
-    color: var(--color-primary);
-    stroke: currentColor;
-  }
-
-  .sidebar-nav-item:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(124, 114, 232, 0.3);
-  }
-
-  .sidebar-section-label,
-  .nav-group-label {
-    display: none;
-  }
-
-  .nav-item {
-    @apply sidebar-nav-item;
-  }
-
-  .sidebar-item {
-    @apply sidebar-nav-item;
-  }
-
-  /* Practitioner Profile */
-  .sidebar-profile {
-    @apply flex items-center cursor-pointer;
-    gap: 12px;
-    margin-top: auto;
-    padding: 12px;
-    border-radius: var(--radius-nav);
-    transition: background-color 150ms ease;
-  }
-
-  .sidebar-profile:hover {
-    background: var(--sidebar-bg-hover);
-  }
-
-  .sidebar-profile:focus-visible {
-    @apply outline-none;
-    box-shadow: 0 0 0 2px rgba(124, 114, 232, 0.3);
-    border-radius: var(--radius-nav);
-  }
-
-  .sidebar-profile__avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-  }
-
-  .sidebar-profile__avatar--placeholder {
-    @apply flex items-center justify-center;
-    background: var(--color-lavender-soft);
-    color: var(--color-primary);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  .sidebar-profile__info {
-    @apply flex flex-col flex-1 min-w-0;
-    gap: 2px;
-  }
-
-  .sidebar-profile__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-secondary);
-    line-height: 1.5;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .sidebar-profile__role {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 400;
-    color: var(--color-text-muted);
-    line-height: 1.4;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   /* ============================================
