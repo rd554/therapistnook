@@ -75,6 +75,7 @@
   --shadow-xs: 0 1px 2px rgba(21, 21, 27, 0.04);
   --shadow-sm: 0 1px 3px rgba(21, 21, 27, 0.06), 0 1px 2px rgba(21, 21, 27, 0.03);
   --shadow-md: 0 8px 24px -4px rgba(21, 21, 27, 0.10), 0 2px 6px rgba(21, 21, 27, 0.04);
+  --shadow-panel: 0 16px 48px -8px rgba(21, 21, 27, 0.16), 0 4px 12px rgba(21, 21, 27, 0.06);
 }
 
 @media (max-width: 640px) {
@@ -130,6 +131,19 @@ body {
 .t-narrative  { font-family: var(--font-serif); font-size: 16px; line-height: 28px;
                 font-weight: 400; color: var(--text-primary); max-width: 62ch; }
 
+/* markdown rendered inside .t-narrative (report interpretation) — headings and
+   scale-name emphasis switch to the UI font so they read as structure, not prose */
+.t-narrative h1, .t-narrative h2, .t-narrative h3 {
+  font-family: var(--font-ui); font-size: 13px; line-height: 18px; font-weight: 600;
+  color: var(--text-secondary); margin: var(--space-6) 0 var(--space-2);
+}
+.t-narrative h1:first-child, .t-narrative h2:first-child, .t-narrative h3:first-child { margin-top: 0; }
+.t-narrative p { margin: 0 0 var(--space-4); }
+.t-narrative p:last-child { margin-bottom: 0; }
+.t-narrative ul, .t-narrative ol { margin: 0 0 var(--space-4); padding-left: 1.25em; }
+.t-narrative li + li { margin-top: 8px; }
+.t-narrative strong { font-family: var(--font-ui); font-weight: 600; }
+
 @media (max-width: 640px) {
   .t-h1        { font-size: 24px; line-height: 30px; }
   .t-h2        { font-size: 17px; line-height: 24px; }
@@ -166,6 +180,11 @@ body {
 .btn-danger       { background: var(--error); color: var(--text-inverse); }
 .btn-danger:hover { filter: brightness(0.92); }
 
+/* active/open state for a toggle-style button whose panel now owns the
+   accent (e.g. "Ask Nook" while its panel is open) — not a fifth button
+   colour, just .btn-secondary's tint swapped for --selected/--accent. */
+.btn-active { background: var(--selected); color: var(--accent); border-color: transparent; }
+
 .btn:disabled {
   background: var(--surface); color: var(--text-muted);
   border-color: var(--hairline); cursor: not-allowed;
@@ -176,6 +195,37 @@ body {
   text-decoration: none; cursor: pointer;
 }
 .link:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---- icon-only buttons ---------------------------------------------------
+   Compose with a variant: class="btn btn-primary btn-icon".
+   EVERY instance requires aria-label. Add title= on pointer:fine for a
+   native tooltip. Only ONE icon button per screen may be .btn-primary —
+   it still counts against the 3-object accent budget.
+   -------------------------------------------------------------------------- */
+.btn-icon {
+  width: 36px; height: 36px; padding: 0;
+  border-radius: var(--radius-md); flex: none;
+}
+.btn-icon svg { width: 18px; height: 18px; }
+.btn-icon-lg { width: 40px; height: 40px; }
+.btn-icon-sm { width: 32px; height: 32px; }
+.btn-icon-sm svg { width: 16px; height: 16px; }
+
+/* touch devices: never below the 44px target, regardless of variant */
+@media (pointer: coarse) {
+  .btn-icon, .btn-icon-lg, .btn-icon-sm { width: 44px; height: 44px; }
+  .btn-icon svg { width: 20px; height: 20px; }
+}
+
+/* one line: filter grows, icon buttons stay fixed at the end */
+.action-row {
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.action-row > .grow { flex: 1 1 auto; min-width: 0; }
+.action-row > .btn-icon { flex: none; }
+
+/* top bar icon cluster (mobile app bar) */
+.topbar-actions { display: flex; align-items: center; gap: var(--space-2); }
 
 /* ==========================================================================
    Cards
@@ -246,7 +296,7 @@ body {
 .table tbody tr.is-selected td:first-child { box-shadow: inset var(--rule-width) 0 0 var(--accent); }
 .table tbody tr.needs-action td:first-child { box-shadow: inset var(--rule-width) 0 0 var(--accent); }
 
-.cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+.cell-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* row actions: hidden until hover, never colored at rest */
 .row-actions { display: inline-flex; gap: var(--space-3); opacity: 0; transition: opacity 120ms ease; }
@@ -279,10 +329,10 @@ tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
 .chip-overdue { background: var(--error-tint);   color: var(--error); }
 
 /* statuses that are true of most rows are plain text, not chips */
-.status-plain { font: 400 13px/20px var(--font-ui); color: var(--text-secondary); }
-.status-quiet { font: 400 13px/20px var(--font-ui); color: var(--text-muted); }
-.status-alert { font: 600 13px/20px var(--font-ui); color: var(--error); }
-.status-warn  { font: 500 13px/20px var(--font-ui); color: var(--warning); }
+.status-plain { margin: 0; font: 400 13px/20px var(--font-ui); color: var(--text-secondary); }
+.status-quiet { margin: 0; font: 400 13px/20px var(--font-ui); color: var(--text-muted); }
+.status-alert { margin: 0; font: 600 13px/20px var(--font-ui); color: var(--error); }
+.status-warn  { margin: 0; font: 500 13px/20px var(--font-ui); color: var(--warning); }
 
 /* ==========================================================================
    Segmented control  ·  Present / Absent.  No hue, by design.
@@ -302,7 +352,11 @@ tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
   cursor: pointer; transition: background-color 120ms ease;
 }
 .seg-option:hover { background: var(--canvas); color: var(--text-primary); }
-.seg-option[aria-pressed='true'] {
+/* two different consumers, two correct ARIA patterns for the same visual
+   component: a toggle-style filter uses aria-pressed, a true tablist (e.g.
+   the auth Log in / Sign up switcher) uses role="tab" + aria-selected. Both
+   drive the identical selected-state look. */
+.seg-option[aria-pressed='true'], .seg-option[aria-selected='true'] {
   background: var(--text-primary); color: var(--text-inverse); font-weight: 700;
 }
 .seg-option:disabled { color: var(--text-muted); cursor: not-allowed; }
@@ -381,6 +435,83 @@ tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
 .input[aria-invalid='true'] { border-color: var(--error); }
 .input-error-text { font: 400 12px/16px var(--font-ui); color: var(--error); margin-top: 6px; }
 
+/* Chrome autofill paints inputs blue/yellow and ignores background-color.
+   This is the only reliable override — without it every login screenshot
+   shows tinted fields that are not in the palette. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-primary);
+  -webkit-box-shadow: 0 0 0 1000px var(--canvas) inset;
+  box-shadow: 0 0 0 1000px var(--canvas) inset;
+  caret-color: var(--text-primary);
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* ==========================================================================
+   Auth pages  ·  login / signup
+   ========================================================================== */
+
+.auth-page {
+  /* svh, not vh: this sits inside AuthLayout's own min-h-screen wrapper, so
+     two stacked 100vh boxes let the outer one grow past the visible viewport
+     on mobile Safari/Chrome (address bar collapse) and the page scrolls with
+     dead space above/below the card. svh matches the *visible* viewport and
+     was the fix already shipped once for this exact symptom (d4d7e21) — vh
+     falls back for browsers that don't support svh. */
+  min-height: 100vh; min-height: 100svh;
+  background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-6);
+}
+.auth-card {
+  width: 100%; max-width: 420px;
+  background: var(--canvas);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-8);
+}
+.auth-head { text-align: center; margin-bottom: var(--space-7); }
+.auth-head .auth-mark { margin: 0 auto var(--space-4); }
+/* the wordmark reads as a page label here, not a page title — one step
+   down from .t-h1's default 28/34 */
+.auth-head .t-h1 { font-size: 24px; line-height: 30px; }
+.auth-mark {
+  width: 40px; height: 40px; border-radius: var(--radius-md);
+  background: var(--accent); color: var(--text-inverse);
+  display: flex; align-items: center; justify-content: center;
+  font: 700 15px/1 var(--font-ui);
+}
+
+/* segmented tab — same component as Present/Absent, full width */
+.auth-tabs { display: flex; gap: 2px; padding: 2px; height: 40px;
+             background: var(--surface); border: var(--border-width) solid var(--border);
+             border-radius: var(--radius-md); margin-bottom: var(--space-5); }
+.auth-tabs .seg-option { flex: 1; min-width: 0; height: 100%; }
+
+.auth-divider { display: flex; align-items: center; gap: var(--space-3);
+                margin: var(--space-5) 0; color: var(--text-muted);
+                font: 500 12px/16px var(--font-ui); }
+.auth-divider::before, .auth-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--hairline);
+}
+
+.field { margin-bottom: var(--space-4); }
+.field label { display: block; font: 500 13px/18px var(--font-ui);
+               color: var(--text-secondary); margin-bottom: 6px; }
+.field-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+
+.auth-legal { margin-top: var(--space-5); text-align: center;
+              font: 400 12px/18px var(--font-ui); color: var(--text-muted); }
+.auth-legal a { color: var(--text-secondary); text-decoration: underline;
+                text-underline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .auth-page { padding: var(--space-5); }              /* 20px page padding */
+  .auth-card { max-width: none; padding: var(--space-6); }  /* full width, 24px padding */
+}
+
 /* ==========================================================================
    Modal, alert, toast, empty state
    ========================================================================== */
@@ -434,3 +565,845 @@ tr:hover .row-actions, tr:focus-within .row-actions { opacity: 1; }
    ========================================================================== */
 
 .qa-grayscale { filter: grayscale(1); }
+
+/* ==========================================================================
+   Patient profile  ·  .profile-* and the field grid
+   ========================================================================== */
+
+.profile-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-4); margin-bottom: var(--space-7);
+}
+.profile-id { display: flex; align-items: center; gap: var(--space-4); }
+.profile-name { display: flex; flex-direction: column; gap: 2px; }
+.profile-actions { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+
+/* field grid — 3 up on wide, 2 up on medium, 1 up on mobile */
+.field-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5) var(--space-6);
+  margin: 0;
+}
+@media (max-width: 1119px) { .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px)  { .field-grid { grid-template-columns: 1fr; gap: var(--space-4); } }
+
+.field-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0; }
+.field-label { font: 500 12px/16px var(--font-ui); color: var(--text-muted); }
+.field-value { font: 500 14px/21px var(--font-ui); color: var(--text-primary); word-break: break-word; margin: 0; }
+.field-value-num { font-variant-numeric: tabular-nums; }
+
+/* a field with no data — quieter than a real value, never the same weight */
+.field-empty { font: 400 14px/21px var(--font-ui); color: var(--text-muted); margin: 0; }
+
+/* phone / email: actionable but not accent, since they repeat per record */
+.field-link { color: var(--text-primary); text-decoration: none; }
+.field-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* wrapper for an empty value + its "Add" action, stacked inside a <dd> —
+   .field-item's own flex-column doesn't reach this far, since the <dd> sits
+   between it and this div */
+.field-empty-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+
+/* inline "Add" for a missing field worth filling */
+.field-add {
+  background: none; border: 0; padding: 0;
+  font: 600 12px/16px var(--font-ui); color: var(--accent); cursor: pointer;
+}
+.field-add:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 2px; }
+
+/* group heading inside a profile card */
+.field-group + .field-group { margin-top: var(--space-6); padding-top: var(--space-6);
+                              border-top: var(--border-width) solid var(--hairline); }
+.field-group-label { display: block; margin-bottom: var(--space-4); }
+
+/* ==========================================================================
+   Forms  ·  edit / create screens
+   ========================================================================== */
+
+.form-card { max-width: 860px; }
+
+.form-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5) var(--space-6);
+}
+.form-grid .span-2 { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .form-grid { grid-template-columns: 1fr; gap: var(--space-4); }
+  .form-grid .span-2 { grid-column: auto; }
+}
+
+/* label row: label left, "(optional)" right — no red asterisks */
+.field-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; gap: var(--space-3); }
+.field-optional { font: 500 12px/16px var(--font-ui); color: var(--text-muted); }
+.field-hint { margin-top: 6px; font: 400 12px/17px var(--font-ui); color: var(--text-muted); }
+
+/* native select, restyled to match .input exactly */
+.select {
+  height: 40px; width: 100%; padding: 0 36px 0 12px;
+  background: var(--canvas);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  font: 500 14px/20px var(--font-ui); color: var(--text-primary);
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238A8A96' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 16px;
+  cursor: pointer;
+}
+.select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+
+.textarea {
+  width: 100%; min-height: 88px; padding: 10px 12px;
+  background: var(--canvas);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  font: 500 14px/21px var(--font-ui); color: var(--text-primary);
+  resize: vertical;
+}
+.textarea::placeholder { color: var(--text-muted); }
+.textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+
+/* error state — shared by any field-level control; deliberately NOT applied
+   to the phone .input-group's country .select (only the number .input gets
+   aria-invalid), so the joined outline's transparent seam border is never
+   repainted opaque by this rule. See PatientEdit.jsx. */
+.select[aria-invalid='true'],
+.textarea[aria-invalid='true'] { border-color: var(--error); }
+
+/* two controls that are one value (country code + number) share an outline */
+.input-group { display: flex; }
+.input-group > :first-child {
+  border-top-right-radius: 0; border-bottom-right-radius: 0;
+  border-right-color: transparent; width: auto; flex: none; max-width: 132px;
+}
+.input-group > :last-child {
+  border-top-left-radius: 0; border-bottom-left-radius: 0; flex: 1; min-width: 0;
+}
+.input-group > :focus { position: relative; z-index: 1; }
+
+/* date input: strip the native indicator, keep our own affordance */
+input[type="date"].input {
+  padding-right: 12px;
+  /* iOS Safari sizes its native date control by its own internal segments
+     rather than the box's width:100% unless appearance is reset — without
+     this the field visibly overflows its own border on the right. Harmless
+     on desktop Chrome, which already respects width without it. */
+  -webkit-appearance: none; appearance: none;
+}
+input[type="date"].input::-webkit-calendar-picker-indicator {
+  opacity: .55; cursor: pointer;
+}
+/* iOS Safari renders the date value through its own shadow parts, ignoring
+   .input's font-size/line-height and defaulting to large, centered text —
+   pin it to match every other field instead. Harmless no-op on Chrome/
+   desktop, which already inherits the right size. */
+input[type="date"].input::-webkit-datetime-edit {
+  font: 400 14px/20px var(--font-ui); color: var(--text-primary); padding: 0;
+}
+input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
+
+/* iOS Safari shows no picker-indicator icon at all (unlike desktop Chrome's
+   native one) — screens wrap the date .input in .date-field to draw one
+   themselves. Purely decorative and pointer-events:none, so every tap still
+   reaches the native input underneath and opens the OS's own date picker —
+   not a replacement picker. */
+.date-field { position: relative; }
+.date-field input[type="date"].input { padding-right: 36px; }
+.date-field-icon {
+  position: absolute; top: 50%; right: 12px; transform: translateY(-50%);
+  color: var(--icon-muted); pointer-events: none;
+}
+
+/* sticky action bar at the foot of a form */
+.form-actions {
+  position: sticky; bottom: 0;
+  display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2);
+  margin-top: var(--space-7); padding-top: var(--space-5);
+  border-top: var(--border-width) solid var(--hairline);
+  background: var(--canvas);
+}
+.form-actions .form-status { margin-right: auto; }
+@media (max-width: 640px) {
+  .form-actions {
+    flex-direction: column-reverse; align-items: stretch;
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+  .form-actions .btn { width: 100%; }
+  .form-actions .form-status { margin: 0 0 var(--space-3); text-align: center; }
+}
+
+/* confirm-dialog body + footer — first real use of .modal (spec: right-
+   aligned, secondary before primary, 8px gap) */
+.modal-body { margin-top: var(--space-2); font: 400 14px/21px var(--font-ui); color: var(--text-secondary); }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); }
+
+/* ==========================================================================
+   Sessions · stat strip, date badge, session rows
+   ========================================================================== */
+
+/* one bordered card, hairline-divided — not four floating cards */
+.stat-row {
+  display: flex;
+  background: var(--canvas);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+.stat { flex: 1 1 0; min-width: 0; padding: var(--space-4) var(--space-5); border-left: var(--border-width) solid var(--hairline); }
+.stat:first-child { border-left: none; }
+.stat-label { display: block; font: 500 12px/16px var(--font-ui); color: var(--text-muted); margin-bottom: 2px; }
+.stat-value { display: block; font: 700 22px/28px var(--font-ui); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.stat-value.is-warn { color: var(--warning); }
+
+@media (max-width: 899px) {
+  .stat-row { flex-wrap: wrap; }
+  .stat { flex: 1 1 50%; border-left: none; border-top: var(--border-width) solid var(--hairline); }
+  .stat:nth-child(-n+2) { border-top: none; }
+  .stat:nth-child(odd) { border-right: var(--border-width) solid var(--hairline); }
+}
+
+/* full-width, equal-option .seg variant for the All / Upcoming / Past filter */
+.seg-filter { width: 100%; }
+.seg-filter .seg-option { flex: 1 1 0; }
+
+/* Sessions' own section head, stacked on mobile. A separate class rather
+   than a media query on .section-head: that class is already shared by the
+   Dashboard cards (Recent patients, Today's schedule, Payments), which must
+   not pick up a Sessions-only stacking behaviour. */
+.session-head-m { display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* neutral date marker — never status-tinted */
+.date-badge {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  flex: none; width: 44px; height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.date-badge-m { font: 600 10px/14px var(--font-ui); color: var(--text-muted); letter-spacing: 0.02em; }
+.date-badge-d { font: 700 16px/20px var(--font-ui); color: var(--text-primary); }
+
+.session-main { flex: 1 1 auto; min-width: 0; }
+/* the primary line — time distinguishes rows, session type doesn't */
+.session-time { margin: 0; font: 600 14px/20px var(--font-ui); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.session-meta {
+  display: flex; align-items: center; gap: 6px; margin: 2px 0 0;
+  font: 400 13px/18px var(--font-ui); color: var(--text-secondary);
+}
+.session-meta svg { flex: none; color: var(--icon-muted); }
+
+.session-status { flex: none; }
+.session-chevron { flex: none; color: var(--icon-muted); }
+
+/* flush row, the whole thing is the link */
+.session-row {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--hairline);
+  text-decoration: none;
+  transition: background-color 120ms ease;
+}
+.session-row:last-child { border-bottom: none; }
+.session-row:hover { background: var(--surface); }
+/* the next upcoming session, at most one per screen — same inset-rule idiom
+   as .table tr.is-selected */
+.session-row.is-next { box-shadow: inset var(--rule-width) 0 0 var(--accent); }
+
+@media (max-width: 899px) {
+  .session-row { flex-wrap: wrap; row-gap: var(--space-2); }
+  .session-status { margin-left: calc(44px + var(--space-4)); }
+  .session-chevron { margin-left: auto; }
+}
+
+/* ==========================================================================
+   Payments · month groups, payment rows, bulk selection
+   ========================================================================== */
+
+.month-group + .month-group { margin-top: var(--space-3); }
+
+.month-head {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 10px var(--space-4);
+  background: var(--surface);
+  border-bottom: var(--border-width) solid var(--hairline);
+}
+.month-head-label { font: 600 13px/18px var(--font-ui); color: var(--text-primary); }
+.month-head-meta {
+  margin-left: auto;
+  font: 500 12px/16px var(--font-ui); color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pay-row {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--canvas);
+  border-bottom: var(--border-width) solid var(--hairline);
+}
+.pay-row:last-child { border-bottom: none; }
+.pay-row:hover { background: var(--surface-hover); }
+.pay-row.is-selected { background: var(--selected); }
+.pay-row.is-overdue { box-shadow: inset var(--rule-width) 0 0 var(--error); }
+.pay-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pay-amount {
+  font: 700 14px/20px var(--font-ui); color: var(--text-primary);
+  font-variant-numeric: tabular-nums; flex: none; text-align: right;
+}
+.pay-amount .cur { font-weight: 500; color: var(--text-muted); }
+.pay-status { flex: none; width: 76px; text-align: right; }
+.pay-action { flex: none; }
+.pay-foot { display: flex; align-items: center; gap: var(--space-4); flex: none; }
+
+/* breakpoint matches .session-row/.stat-row (899px), not an independent one
+   — a split breakpoint would wrap Sessions rows before Payments rows in the
+   641-899px range. */
+@media (max-width: 899px) {
+  .month-head { flex-wrap: wrap; row-gap: var(--space-1); }
+
+  .pay-row { align-items: flex-start; padding: var(--space-4) var(--space-3); flex-wrap: wrap; }
+  /* not flex-basis:100% — that would split the date badge + session type
+     onto two lines instead of the intended one. */
+  .pay-main { flex: 1 1 auto; min-width: 0; }
+  .pay-amount, .pay-status, .pay-action { text-align: left; width: auto; }
+  .pay-foot {
+    flex: 1 1 100%;
+    margin-top: var(--space-2);
+  }
+  .pay-foot .pay-action { margin-left: auto; }
+}
+
+/* checkbox — one treatment, used for row and month select-all */
+.checkbox {
+  appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px; flex: none; margin: 0;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--canvas); cursor: pointer; position: relative;
+}
+.checkbox:hover { border-color: var(--text-muted); }
+.checkbox:checked, .checkbox:indeterminate {
+  background: var(--accent); border-color: var(--accent);
+}
+.checkbox:checked::after {
+  content: ''; position: absolute; left: 5px; top: 2px;
+  width: 6px; height: 10px; border: solid var(--text-inverse);
+  border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.checkbox:indeterminate::after {
+  content: ''; position: absolute; left: 3px; top: 7px;
+  width: 10px; height: 2px; background: var(--text-inverse); border-radius: 1px;
+}
+.checkbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.checkbox:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (pointer: coarse) {
+  .checkbox { width: 22px; height: 22px; }
+  .checkbox:checked::after { left: 7px; top: 3px; width: 6px; height: 11px; }
+}
+
+/* bulk action bar — graphite, appears only while rows are selected; the
+   only graphite surface on this screen, and only while the user has
+   actively made a selection */
+.bulk-bar {
+  position: sticky; bottom: var(--space-5); z-index: 20;
+  display: flex; align-items: center; gap: var(--space-4);
+  margin-top: var(--space-4); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  background: var(--text-primary); color: var(--text-inverse);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+}
+.bulk-count { font: 600 14px/20px var(--font-ui); font-variant-numeric: tabular-nums; }
+.bulk-sum { font: 500 13px/18px var(--font-ui); color: rgba(255,255,255,.66); font-variant-numeric: tabular-nums; }
+.bulk-note { font: 500 12px/16px var(--font-ui); color: rgba(255,255,255,.66); }
+.bulk-bar .bulk-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); flex: none; }
+.bulk-bar .btn-ghost { color: rgba(255,255,255,.72); }
+.bulk-bar .btn-ghost:hover { background: rgba(255,255,255,.12); color: var(--text-inverse); }
+.bulk-bar .btn-on-ink { background: var(--canvas); color: var(--text-primary); border-color: transparent; }
+.bulk-bar .btn-on-ink:hover { background: rgba(255,255,255,.88); }
+@media (max-width: 899px) {
+  .bulk-bar {
+    bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+    padding: var(--space-3); gap: var(--space-3); flex-wrap: wrap;
+  }
+  .bulk-sum { display: none; }
+}
+
+/* Multi-step forms: wizard header, progress, step rail, computed fields */
+.wizard-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4); margin-bottom: var(--space-5);
+}
+.wizard-step-switcher { display: none; }
+
+.wizard-progress {
+  display: flex; align-items: center; gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+.progress {
+  flex: 1; height: 6px; border-radius: var(--radius-full, 999px);
+  background: var(--surface); overflow: hidden;
+}
+.progress-bar {
+  display: block; height: 100%; border-radius: inherit;
+  background: var(--accent); transition: width .2s ease;
+}
+.step-count {
+  font: 500 13px/18px var(--font-ui); color: var(--text-secondary);
+  white-space: nowrap;
+}
+.step-saved {
+  font: 500 12px/16px var(--font-ui); color: var(--text-muted);
+  white-space: nowrap; margin-left: auto;
+}
+
+.wizard-body { display: flex; align-items: flex-start; gap: var(--space-8); }
+.wizard-main { flex: 1; min-width: 0; }
+.step-rail {
+  flex: none; width: 248px;
+  display: flex; flex-direction: column; gap: var(--space-1);
+}
+.step-rail-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
+  font: 500 14px/20px var(--font-ui); color: var(--text-secondary);
+  background: transparent; border: none; text-align: left; cursor: pointer;
+  width: 100%;
+}
+.step-rail-item:hover { background: var(--surface); color: var(--text-primary); }
+.step-rail-item.is-current { background: var(--selected); color: var(--accent); }
+.step-rail-item.is-done { color: var(--text-muted); }
+.step-rail-item[disabled] { cursor: not-allowed; opacity: .5; }
+.step-dot {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font: 600 11px/1 var(--font-ui); color: var(--text-muted);
+  background: var(--surface); border: var(--border-width) solid var(--hairline);
+}
+.step-rail-item.is-current .step-dot {
+  background: var(--accent); border-color: var(--accent); color: var(--text-inverse);
+}
+.step-rail-item.is-done .step-dot {
+  background: transparent; border-color: var(--hairline); color: var(--text-muted);
+}
+@media (max-width: 1023px) {
+  .step-rail { display: none; }
+  .wizard-body { display: block; }
+  .wizard-step-switcher { display: block; width: 100%; margin-bottom: var(--space-4); }
+}
+
+.field-static {
+  display: flex; align-items: center; min-height: 40px;
+  padding: 0 var(--space-3); border-radius: var(--radius-md);
+  border: var(--border-width) solid var(--hairline); background: var(--surface);
+  color: var(--text-secondary); font: 400 14px/20px var(--font-ui);
+}
+
+@media (min-width: 1120px) {
+  .wizard-main .form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (pointer: coarse) {
+  .step-rail-item { min-height: 44px; }
+  .wizard-step-switcher { min-height: 44px; }
+  .wizard-main .form-actions .btn { min-height: 44px; }
+}
+
+@media (max-width: 640px) {
+  .wizard-head { flex-wrap: wrap; }
+  .wizard-progress { flex-wrap: wrap; }
+  .wizard-progress .progress { flex: 1 1 100%; order: -1; margin-bottom: var(--space-2); }
+  .wizard-progress .step-saved { margin-left: 0; }
+
+  .wizard-main .form-actions {
+    flex-direction: row; flex-wrap: wrap; align-items: stretch;
+  }
+  .wizard-main .form-actions .btn-secondary,
+  .wizard-main .form-actions .btn-primary,
+  .wizard-main .form-actions .wizard-save-draft {
+    flex: 1; width: auto;
+  }
+  .wizard-main .form-actions .form-status {
+    flex: 1 1 100%; text-align: left; margin: 0 0 var(--space-2);
+  }
+}
+
+/* ==========================================================================
+   Documents & assessments  ·  toolbar, rows, upload
+   ========================================================================== */
+
+/* search + filter row above a flush table, inside the same card */
+.table-toolbar {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width) solid var(--hairline);
+}
+.table-toolbar .input { flex: 1; min-width: 0; }
+@media (max-width: 640px) {
+  .table-toolbar { flex-wrap: wrap; }
+  .table-toolbar .input,
+  .table-toolbar .input-search { flex: 1 1 100%; }
+}
+
+/* search field with a leading icon */
+.input-search { position: relative; display: flex; align-items: center; flex: 1; min-width: 0; }
+.input-search svg { position: absolute; left: 12px; color: var(--icon-muted); pointer-events: none; }
+.input-search .input { padding-left: 36px; }
+
+/* file / assessment type icon — neutral, never tinted by type */
+.type-icon {
+  width: 28px; height: 28px; flex: none; border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--icon);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* mobile card row for a document or assessment */
+.doc-row {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+  background: var(--canvas);
+  border-bottom: var(--border-width) solid var(--hairline);
+}
+.doc-row:last-child { border-bottom: none; }
+.doc-row:hover { background: var(--surface-hover); }
+.doc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.doc-name { font: 600 14px/20px var(--font-ui); color: var(--text-primary); }
+.doc-meta { font: 500 12px/17px var(--font-ui); color: var(--text-muted);
+            font-variant-numeric: tabular-nums; }
+.doc-end { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+
+/* upload dropzone */
+.dropzone {
+  border: 1px dashed var(--border); border-radius: var(--radius-lg);
+  background: var(--canvas); padding: var(--space-8) var(--space-5);
+  text-align: center; transition: background-color 120ms ease, border-color 120ms ease;
+}
+.dropzone:hover { background: var(--surface); }
+.dropzone.is-over { border-color: var(--accent); border-style: solid; background: var(--accent-tint); }
+.dropzone.is-invalid { border-color: var(--error); background: var(--error-tint); }
+.dropzone svg { color: var(--icon-muted); margin-bottom: var(--space-3); }
+.dropzone-prompt { font: 500 14px/20px var(--font-ui); color: var(--text-secondary); }
+.dropzone-hint { margin-top: 4px; font: 400 12px/17px var(--font-ui); color: var(--text-muted); }
+
+/* staged file list inside the upload panel */
+.file-list { margin-top: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+.file-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface); border-radius: var(--radius-md);
+}
+.file-item-name { flex: 1; min-width: 0; font: 500 13px/18px var(--font-ui);
+                  color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-item-size { font: 500 12px/16px var(--font-ui); color: var(--text-muted);
+                  font-variant-numeric: tabular-nums; flex: none; }
+.file-progress { height: 3px; border-radius: 999px; background: var(--hairline);
+                 overflow: hidden; margin-top: 6px; }
+.file-progress > div { height: 100%; background: var(--accent); border-radius: 999px; }
+
+/* labelled filter row above a flush table (date-range filters etc.) — like
+   .table-toolbar but for fields that need their own visible label, rather
+   than a single search input */
+.filter-bar { display: flex; align-items: flex-end; gap: var(--space-3);
+              padding: var(--space-3) var(--space-4);
+              border-bottom: var(--border-width) solid var(--hairline); }
+.filter-spacer { margin-left: auto; }
+@media (max-width: 640px) {
+  .filter-bar { flex-wrap: wrap; }
+  .filter-bar .field-inline { flex: 1 1 100%; max-width: none; }
+  .filter-spacer { margin-left: 0; }
+}
+
+/* label + input stack for a field-bar field (e.g. From/To dates) */
+.field-inline { display: flex; flex-direction: column; gap: 4px; }
+.field-inline label { font: 500 11px/14px var(--font-ui); color: var(--text-muted); }
+.field-inline .input, .field-inline .select { height: 36px; }
+.field-inline-sm { max-width: 168px; }
+
+/* ==========================================================================
+   Full-width button · mobile primary actions that own the row
+   ========================================================================== */
+.btn-block { width: 100%; }
+
+/* ==========================================================================
+   Segmented control, scrolling variant · more options than fit on one line
+   (e.g. Assessments' 5 status filters on mobile) scroll instead of wrapping.
+   ========================================================================== */
+.seg-scroll {
+  display: flex; gap: 2px; padding: 2px; height: 32px;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  overflow-x: auto; scrollbar-width: none;
+}
+.seg-scroll::-webkit-scrollbar { display: none; }
+.seg-scroll .seg-option { flex: none; white-space: nowrap; }
+
+/* neutral progress fill — used where an accent-colored bar would exceed the
+   screen's accent budget (e.g. the question-page progress bar, where the
+   Next button already carries the one accent object) */
+.progress-bar.is-neutral { background: var(--text-secondary); }
+
+/* ==========================================================================
+   Copy field · a readonly value plus its one action (a shareable link, etc)
+   ========================================================================== */
+.copy-field { display: flex; gap: var(--space-2); }
+.copy-field .input { flex: 1; min-width: 0; color: var(--text-secondary); }
+.copy-field .btn { flex: none; }
+
+/* ==========================================================================
+   Code display · a resume/access code meant to be read and copied, not typed
+   ========================================================================== */
+.code-display {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  padding: var(--space-5); border-radius: var(--radius-lg);
+  background: var(--surface); border: var(--border-width) solid var(--border);
+}
+.code-label { font: 500 12px/16px var(--font-ui); color: var(--text-muted); }
+.code-value { font: 700 28px/1 var(--font-numeric); letter-spacing: 0.2em; color: var(--text-primary); }
+
+/* ==========================================================================
+   Question-bank page navigator · answered / current / untouched states.
+   .is-current uses a graphite border, not accent — the Next button already
+   spends this screen's one accent object.
+   ========================================================================== */
+.page-grid { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.page-cell {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  font: 700 11px/1 var(--font-numeric); color: var(--text-muted);
+  background: var(--surface); border: var(--border-width) solid transparent;
+  cursor: pointer;
+}
+.page-cell.is-answered { background: var(--canvas); color: var(--text-secondary); border-color: var(--border); }
+.page-cell.is-current  { background: var(--canvas); color: var(--text-primary); border-color: var(--text-primary); font-weight: 700; }
+@media (max-width: 640px) {
+  .page-grid { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .page-grid::-webkit-scrollbar { display: none; }
+  .page-cell { flex: none; }
+}
+
+/* ==========================================================================
+   Question rows · one flush card of q-rows, not 20 separately gapped cards
+   ========================================================================== */
+.q-row {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-4); border-bottom: var(--border-width) solid var(--hairline);
+}
+.q-row:last-child { border-bottom: none; }
+.q-row.is-unanswered { background: var(--warning-tint); }
+.q-num {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 28px; height: 28px; border-radius: var(--radius-full);
+  background: var(--surface); color: var(--text-muted);
+  font: 600 11px/1 var(--font-ui);
+}
+.q-text { flex: 1; min-width: 0; font-size: 15px; line-height: 23px; color: var(--text-primary); }
+.q-nav {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  margin-top: var(--space-5); padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--hairline);
+}
+@media (max-width: 640px) {
+  .q-row { flex-wrap: wrap; }
+  .q-text { flex: 1 1 100%; }
+  .q-row .seg { flex: 1 1 100%; width: 100%; }
+  .q-row .seg-option { flex: 1; min-height: 44px; }
+  .q-nav {
+    /* Bleeds out to the edges of the patient shell's <main> (px-4 py-8, i.e. 1rem/2rem),
+       not var(--space-5), so the sticky bar reaches the true viewport edge. */
+    position: sticky; bottom: 0; background: var(--canvas);
+    margin: var(--space-5) -1rem -2rem -1rem;
+    padding: var(--space-3) 1rem;
+  }
+}
+
+/* ==========================================================================
+   Public / patient-facing shell · deliberately distinct from the
+   authenticated app chrome (no sidebar, no nav, calmer than the practitioner app)
+   ========================================================================== */
+.public-page { min-height: 100vh; background: var(--surface); }
+.public-header {
+  height: var(--header-h); background: var(--canvas);
+  border-bottom: var(--border-width) solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--page-pad);
+}
+.public-header-left { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.public-header-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.public-header-name { font: 500 13px/18px var(--font-ui); color: var(--text-secondary); flex: none; }
+.public-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: var(--radius-md);
+  background: var(--text-primary); color: var(--text-inverse);
+  font: 700 12px/1 var(--font-ui); flex: none;
+}
+.public-card {
+  max-width: 720px; margin: 0 auto;
+  background: var(--canvas); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-xl); box-shadow: var(--ci-shadow-sm);
+  padding: var(--space-8);
+}
+@media (max-width: 640px) {
+  .public-card { padding: var(--space-5); border-radius: var(--radius-lg); }
+  .public-header { padding: 0 var(--space-4); }
+}
+
+/* ==========================================================================
+   Fact row · neutral replacement for amber/green/purple icon-badge cards
+   ========================================================================== */
+.fact-row { display: flex; flex-direction: column; gap: var(--space-3); }
+@media (min-width: 641px) { .fact-row { flex-direction: row; } }
+.fact {
+  flex: 1; display: flex; align-items: flex-start; gap: var(--space-3);
+  border: var(--border-width) solid var(--hairline); border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+.fact-title { font: 600 13px/18px var(--font-ui); color: var(--text-primary); }
+.fact-sub   { margin-top: 2px; font: 400 12px/17px var(--font-ui); color: var(--text-muted); }
+
+/* ==========================================================================
+   Assessment report  ·  tabs, scale rows, profile chart
+   ========================================================================== */
+
+/* underline tabs — for switching sections of one record */
+.tabs {
+  display: flex; gap: var(--space-6); align-items: stretch;
+  border-bottom: var(--border-width) solid var(--border);
+  overflow-x: auto; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  position: relative; flex: none; padding: 10px 0 12px;
+  background: none; border: 0; cursor: pointer; white-space: nowrap;
+  font: 600 14px/20px var(--font-ui); color: var(--text-muted);
+}
+.tab:hover { color: var(--text-primary); }
+.tab.is-active { color: var(--text-primary); }
+.tab.is-active::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: var(--accent); border-radius: 2px;
+}
+.tab-count { margin-left: 6px; font-weight: 500; color: var(--text-muted);
+             font-variant-numeric: tabular-nums; }
+
+/* one scale: name, bar, T-score.
+   Bar is the widest element in the row — it is the thing being read.
+   Fill runs neutral up to T=65, then amber beyond it, so the row shows
+   both the value and how far past threshold it sits. */
+.scale-row {
+  display: flex; align-items: center; gap: var(--space-5);
+  padding: 12px var(--space-5);
+  border-bottom: var(--border-width) solid var(--hairline);
+}
+.scale-row:last-child { border-bottom: none; }
+.scale-row:hover { background: var(--surface-hover); }
+.scale-row.is-elevated { box-shadow: inset var(--rule-width) 0 0 var(--warning); }
+
+.scale-name { width: 236px; flex: none; min-width: 0; }
+.scale-abbr { font: 700 14px/20px var(--font-ui); color: var(--text-primary); }
+.scale-full { display: block; font: 500 12px/16px var(--font-ui); color: var(--text-muted); }
+
+/* raw + K-corrected, each on its own line, never wrapped mid-value */
+.scale-raw { width: 92px; flex: none; text-align: right; }
+.scale-raw b { display: block; font: 500 13px/18px var(--font-ui); color: var(--text-secondary);
+               font-variant-numeric: tabular-nums; }
+.scale-raw small { display: block; font: 500 11px/15px var(--font-ui); color: var(--text-muted);
+                   font-variant-numeric: tabular-nums; }
+
+.scale-track {
+  flex: 1 1 auto; min-width: 200px; height: 8px; border-radius: 999px;
+  background: var(--hairline); position: relative; overflow: hidden;
+}
+.scale-fill { position: absolute; left: 0; top: 0; height: 100%;
+              background: var(--text-secondary); border-radius: 999px 0 0 999px; }
+/* the portion of the bar above the clinical threshold */
+.scale-over { position: absolute; top: 0; height: 100%; background: var(--warning); }
+/* visible T=65 notch, not a whisper */
+.scale-track::after {
+  content: ''; position: absolute; top: 0; bottom: 0;
+  left: calc((65 - 30) / (120 - 30) * 100%);
+  width: 2px; background: var(--canvas); box-shadow: 0 0 0 1px var(--border);
+}
+
+.scale-t { width: 44px; flex: none; text-align: right;
+           font: 700 16px/22px var(--font-ui); color: var(--text-secondary);
+           font-variant-numeric: tabular-nums; }
+.scale-row.is-elevated .scale-t { color: var(--warning); }
+
+.scale-legend { display: flex; gap: var(--space-5); flex-wrap: wrap;
+                padding: var(--space-3) var(--space-5);
+                border-top: var(--border-width) solid var(--hairline);
+                font: 500 12px/16px var(--font-ui); color: var(--text-muted); }
+
+@media (max-width: 860px) {
+  .scale-row { flex-wrap: wrap; gap: var(--space-2) var(--space-4); padding: 12px var(--space-4); }
+  .scale-name { width: auto; flex: 1 1 auto; }
+  .scale-t { order: 2; width: auto; min-width: 44px; }
+  .scale-track { order: 3; flex: 1 1 100%; min-width: 0; }
+  .scale-raw { order: 4; width: auto; text-align: left; }
+  .scale-raw b, .scale-raw small { display: inline; }
+  .scale-raw small::before { content: ' · '; }
+}
+
+/* profile chart wrapper — scrolls on narrow screens, never squashes */
+.profile-chart { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: var(--space-2); }
+/* --pts is set per chart: width = points x 38px, floor 560. A 31-point
+   profile needs ~1180px; squeezing it into 350px is what makes the axis
+   labels collide. */
+.profile-chart > svg { display: block; min-width: max(560px, calc(var(--pts, 10) * 38px)); }
+.profile-hint { margin-top: var(--space-2); font: 500 12px/16px var(--font-ui); color: var(--text-muted); }
+@media (max-width: 760px) { .profile-chart-inline { display: none; } }
+@media (min-width: 761px) { .profile-chart-open { display: none; } }
+.profile-legend { display: flex; gap: var(--space-5); flex-wrap: wrap;
+                  margin-top: var(--space-3); font: 500 12px/16px var(--font-ui);
+                  color: var(--text-muted); }
+.profile-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 999px;
+                    margin-right: 6px; vertical-align: -1px; }
+
+/* report header block */
+.report-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-4); margin-bottom: var(--space-5);
+}
+.report-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* ==========================================================================
+   Clinical interpretation  ·  long-form report prose
+   Sans labels, serif body, one measure. Built to be skimmed, not just read.
+   ========================================================================== */
+
+.interp { max-width: 68ch; }                 /* the single most important rule here */
+.interp-section + .interp-section {
+  margin-top: var(--space-8); padding-top: var(--space-6);
+  border-top: var(--border-width) solid var(--border);
+}
+.interp-h {
+  font: 700 15px/22px var(--font-ui); letter-spacing: -.01em;
+  color: var(--text-primary); margin-bottom: var(--space-4);
+}
+.interp-item + .interp-item { margin-top: var(--space-4); }
+.interp-label {
+  display: block; font: 700 13px/18px var(--font-ui); color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.interp-body {
+  font-family: var(--font-serif); font-size: 16px; line-height: 27px;
+  font-weight: 400; color: var(--text-primary);
+}
+/* a scale reference inside the label row, right-aligned and quiet */
+.interp-t { float: right; font: 700 13px/18px var(--font-ui);
+            color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.interp-t.is-elevated { color: var(--warning); }
+
+/* plain lists (diagnostic considerations) get real bullets */
+.interp-list { margin: 0; padding-left: 1.1em; }
+.interp-list li { font-family: var(--font-serif); font-size: 16px; line-height: 27px;
+                  color: var(--text-primary); margin-bottom: 4px; }
+
+/* closing summary carries slightly more weight than the sections above it */
+.interp-summary {
+  margin-top: var(--space-8); padding-top: var(--space-6);
+  border-top: var(--rule-width) solid var(--border);
+}
+.interp-summary .interp-body { font-size: 17px; line-height: 29px; }
+
+@media (max-width: 640px) {
+  .interp-body, .interp-list li { font-size: 16px; line-height: 26px; }
+  .interp-summary .interp-body { font-size: 16px; line-height: 26px; }
+}
