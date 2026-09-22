@@ -2,6 +2,8 @@
 
 A comprehensive clinical psychology practice management platform for administering MMPI-2 assessments, managing patients, scheduling appointments, and handling payments.
 
+**Live at [therapistnook.com](https://therapistnook.com)** — backend on Fly.io, frontend on Vercel, auto-deployed from `main` via GitHub Actions.
+
 ## Features
 
 - **Landing Page & Self-Signup** - Public marketing site with practitioner self-registration, email verification, and "Continue with Google" login
@@ -11,7 +13,8 @@ A comprehensive clinical psychology practice management platform for administeri
 - **Clinical Documents** - Upload and organize clinical documents (PDF/.docx text extraction; legacy .doc/.xls/.xlsx are stored with a clear "format not readable" status rather than silently failing)
 - **Appointment Scheduling** - Calendar management with availability settings, synced to the practitioner's connected Google Calendar (create/update/cancel/delete kept in sync automatically)
 - **Payment Processing** - Payment tracking and receipt generation, with invoice PDF generation and signature/stamp upload
-- **Public Booking** - Patient self-service booking portal
+- **Public Profile** - Customizable public-facing practitioner page (bio, qualifications, specializations, fees, FAQ, resources) with a responsive desktop/tablet/mobile editor and live preview
+- **Public Booking** - Patients self-book a free introductory screening call from the practitioner's public profile (practitioner Accepts/Declines); paid sessions are scheduled from the first real session onward
 - **Practice Analytics** - Comprehensive business analytics
 - **Clinical Intelligence** - AI-powered, per-patient running summary assembled from clinical history, therapy session transcripts, uploaded documents, MMPI-2 results, and assessment completions, with an interactive chat panel (optional)
 - **Account Management** - Self-service account deletion (deactivation) for practitioners
@@ -78,7 +81,10 @@ Alternatively, practitioners can self-register from the landing page's signup fl
 MMPI/
 ├── backend/          # FastAPI backend
 ├── frontend/         # React frontend
-└── scoring_key.json # MMPI-2 scoring keys
+├── design/           # Design system docs/tokens
+├── scoring_key.json  # MMPI-2 scoring keys
+├── fly.toml          # Backend deploy config (Fly.io)
+└── .github/workflows/ # CI/CD (auto-deploy backend on push to main)
 ```
 
 ## Environment Variables
