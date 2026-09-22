@@ -1,0 +1,189 @@
+/* ==========================================================================
+   Therapist Nook — Clinical Ink prototype
+   prototype.css — layout only (grid/flex/widths/artboard frames).
+   All color, type, and component styling comes from tokens.css.
+   Everything below is either a pure layout rule, or a genuine gap in
+   tokens.css that this prototype needed and is flagged back to the design
+   system in the review notes.
+   ========================================================================== */
+
+/* ---- one deliberate exception to "never write a raw hex value": the grey
+   page backdrop behind the artboards is prototype chrome, not a product
+   surface, so it isn't a design token. Isolated here as a single variable. */
+:root { --proto-bg: #E9E9EC; }
+
+body { background: var(--proto-bg); }
+
+/* ---- icon sizing (dimension only, no color) ---------------------------- */
+.icon { display: inline-block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.icon-14 { width: 14px; height: 14px; }
+.icon-16 { width: 16px; height: 16px; }
+.icon-18 { width: 18px; height: 18px; }
+.icon-20 { width: 20px; height: 20px; }
+
+/* ---- unstyled icon-only button reset ------------------------------------ */
+.icon-btn { background: none; border: none; padding: 4px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+
+/* ==========================================================================
+   Artboard scaffolding
+   ========================================================================== */
+
+.proto-page { max-width: 1440px; margin: 0 auto; padding: 40px 24px 96px; display: flex; flex-direction: column; gap: 56px; }
+
+.artboard-block { display: flex; flex-direction: column; align-items: center; }
+.artboard-label { margin-bottom: 8px; align-self: flex-start; }
+.artboard-label.is-centered { align-self: center; }
+
+.artboard { background: var(--canvas); overflow: hidden; box-shadow: var(--shadow-md); }
+.artboard-desktop { width: 1280px; }
+.artboard-mobile { width: 390px; }
+
+.mobile-row { display: flex; gap: 32px; justify-content: center; flex-wrap: wrap; }
+.mobile-row .artboard-block { align-items: flex-start; }
+
+/* ---- mobile type/spacing scope --------------------------------------------
+   tokens.css gates its mobile values behind @media (max-width:640px), which
+   never fires while these artboards sit at full desktop viewport width.
+   This class reproduces the same overrides explicitly so the two mobile
+   artboards render the real mobile scale even though the browser window is
+   wide. */
+.mobile-scope {
+  --page-pad: 20px;
+  --section-gap: 32px;
+  --card-pad: 16px;
+}
+.mobile-scope .t-h1 { font-size: 24px; line-height: 30px; }
+.mobile-scope .t-h2 { font-size: 17px; line-height: 24px; }
+.mobile-scope .t-body { line-height: 23px; }
+.mobile-scope .t-narrative { line-height: 27px; }
+
+/* ==========================================================================
+   QA control
+   ========================================================================== */
+
+.qa-toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 1000;
+  background: var(--canvas); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 8px 12px; box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; gap: 8px;
+}
+.qa-toggle label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* ==========================================================================
+   App shell (desktop artboards: sidebar + header + content)
+   ========================================================================== */
+
+.app-shell { display: flex; align-items: stretch; }
+.sidebar { display: flex; flex-direction: column; }
+.sidebar-nav { flex: 1; display: flex; flex-direction: column; }
+.shell-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.logo-row { display: flex; align-items: center; gap: 10px; padding: 0 var(--space-3); margin-bottom: var(--space-6); }
+.logo-tile {
+  width: 32px; height: 32px; border-radius: var(--radius-md);
+  background: var(--accent); color: var(--text-inverse);
+  display: flex; align-items: center; justify-content: center;
+  font: 600 13px var(--font-ui); flex: none;
+}
+
+.sidebar-footer { margin-top: auto; padding-top: var(--space-4); border-top: 1px solid var(--hairline); display: flex; align-items: center; gap: var(--space-3); }
+.sidebar-footer-text { display: flex; flex-direction: column; line-height: 1.3; }
+
+.header-left { display: flex; align-items: center; gap: 8px; }
+.header-right { display: flex; align-items: center; gap: var(--space-3); }
+
+.bell-wrap { position: relative; display: inline-flex; color: var(--icon-muted); }
+.notif-dot { position: absolute; top: -1px; right: -1px; width: 6px; height: 6px; border-radius: 50%; background: var(--error); }
+
+/* mobile top bar (no sidebar shown; hamburger opens an off-canvas drawer) */
+.mobile-topbar {
+  height: 56px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--page-pad); background: var(--canvas); border-bottom: 1px solid var(--border);
+}
+.mobile-topbar-left, .mobile-topbar-right { display: flex; align-items: center; gap: var(--space-4); }
+
+/* ==========================================================================
+   Dashboard layout
+   ========================================================================== */
+
+.dash-body { display: flex; gap: var(--space-8); align-items: flex-start; }
+.dash-col-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--section-gap); }
+.dash-col-rail { width: 340px; flex: none; display: flex; flex-direction: column; gap: var(--section-gap); }
+
+/* padding-bottom is fixed at 24px (not --page-pad, not --section-gap) on
+   both mobile pages so neither artboard carries a large empty tail below
+   its last element */
+.mobile-page-pad { padding: var(--page-pad) var(--page-pad) 24px; }
+.mobile-dash-stack { display: flex; flex-direction: column; gap: var(--section-gap); padding: var(--page-pad) var(--page-pad) 24px; }
+
+/* schedule card */
+.sched-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.sched-left { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.sched-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sched-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+
+/* recent patients row */
+.rp-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.rp-id { display: flex; align-items: center; gap: var(--space-4); min-width: 0; }
+.rp-datetime { width: 150px; flex: none; }
+/* stacked variant for narrow (mobile) width, where date/name/control no
+   longer fit on one line. align-items:stretch is needed so .rp-top can
+   span the full row width for its space-between; without also pinning
+   .seg back to its own content width, stretch would inflate the
+   segmented-control track to the full row width too. */
+.rp-row--stacked { flex-direction: column; align-items: stretch; gap: 10px; }
+.rp-row--stacked .rp-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.rp-row--stacked .seg { align-self: flex-start; }
+
+/* payments row */
+.pay-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.pay-right { text-align: right; display: flex; flex-direction: column; gap: 2px; }
+
+/* ==========================================================================
+   Patients screen layout
+   ========================================================================== */
+
+.patients-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6); flex-wrap: wrap; gap: var(--space-3); }
+.patients-actions { display: flex; align-items: center; gap: var(--space-3); }
+
+/* ghost filter needs a border tokens.css doesn't give the ghost variant */
+.btn-filter { border: var(--border-width) solid var(--border); }
+
+.actions-col { display: flex; align-items: center; gap: var(--space-3); }
+
+/* mobile patient card */
+.p-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.p-card-id { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.p-card-right { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+.p-card-meta { margin-top: var(--space-2); }
+.p-card-status { margin-top: 4px; }
+.mobile-actions-row { display: flex; align-items: center; gap: var(--space-3); }
+
+/* ==========================================================================
+   Gap-fill type/color utilities
+   These aren't layout — they're genuine holes in tokens.css that this
+   content surfaced. Each is called out in the final review notes as a
+   candidate for the real design system rather than left as a prototype-only
+   patch.
+   ========================================================================== */
+
+/* .t-num carries its own 14px/500/secondary styling, so it collides with
+   anything that needs tabular figures at a different size/weight/color
+   (e.g. a 12px muted date). This is a bare numeral utility with no other
+   opinion. */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+
+/* tokens.css has .t-cell (14/400/secondary) and .t-cell-key (14/600/primary)
+   but no muted variant, needed for date columns and "—" placeholders that
+   must sit inside a 14px table row rather than drop to 12px caption size.
+   Longhand on purpose: tokens.css never uses the `font` shorthand for its
+   type classes, because the shorthand implicitly resets font-variant-numeric
+   to `normal` — that would silently strip tabular-nums whenever this class
+   is combined with .cell-num or .tnum, exactly the collision this file
+   exists to avoid. Same reasoning below for .pay-name-received. */
+.t-cell-muted { font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 400; color: var(--text-muted); }
+
+/* Payments spec (design system §8) calls for the *received* row name at
+   14/500/primary — between .t-cell (400) and .t-cell-key (600). Overdue
+   rows already match .t-cell-key exactly. */
+.pay-name-received { font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--text-primary); }

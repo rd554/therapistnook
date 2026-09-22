@@ -1,0 +1,326 @@
+/* ==========================================================================
+   Public Profile editor — .tn-profile tokens & layout
+   --------------------------------------------------------------------------
+   Scoped entirely under `.tn-profile`, nested *inside* a `.clinical-ink`
+   root (ProfileSettings.jsx renders `<div className="clinical-ink">
+   <div className="tn-profile">...`), never on the same element as
+   `.clinical-ink` — putting both classes on one node would make
+   `.clinical-ink .tn-profile { ... }` match nothing (same same-element
+   pitfall documented for .sidebar/.auth-page in styles/tokens.css and
+   styles/clinical-ink-overrides.css).
+
+   Token policy: the app's real global tokens (--accent, --text-*, --border,
+   --space-*, --radius-*, --shadow-*, all defined in styles/tokens.css's
+   :root) are reused directly wherever an equivalent exists. Only values
+   with no existing equivalent are declared here — mobile chrome heights,
+   switch/rail/preview sizing, and the phone-frame radius.
+
+   Loaded via one `@import` line added to index.css, after
+   clinical-ink-overrides.css (last in the chain), matching how every other
+   screen-specific stylesheet in this app is wired in (settings.css,
+   public-profile.css, marketing.css, clinical-ink.css) rather than each
+   page importing its own CSS module directly — this app has no precedent
+   for the latter.
+   ========================================================================== */
+
+.tn-profile {
+  --tn-rail-w: 200px;
+  --tn-preview-w: 300px;
+  --tn-radius-device: 34px;
+  --tn-device-border: 7px;
+  --tn-control-h-m: 46px;
+  --tn-header-h-m: 56px;
+  --tn-switch-w: 40px;
+  --tn-switch-h: 22px;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+
+.tn-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-4); flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+.tn-header-title { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.tn-header-actions { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+
+.tn-saved-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  background: var(--accent-tint); color: var(--accent);
+  font: 600 12px/16px var(--font-ui);
+}
+
+/* link + copy row — built on the app's existing .copy-field */
+.tn-link-field { max-width: 260px; }
+.tn-link-field .copy-field { background: var(--surface); border: var(--border-width) solid var(--border); border-radius: var(--radius-md); padding: 6px 10px; }
+
+/* ==========================================================================
+   Setup status bar
+   ========================================================================== */
+
+.tn-setup-status {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: 10px var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--error-tint); border: var(--border-width) solid var(--error-border);
+  margin-bottom: var(--space-5);
+}
+.tn-setup-status.is-complete {
+  background: var(--surface); border-color: var(--border);
+}
+.tn-setup-status-text { display: flex; align-items: center; gap: 8px; }
+.tn-setup-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--error); flex: none; }
+.tn-setup-status.is-complete .tn-setup-dot { background: var(--success); }
+
+/* ==========================================================================
+   Body grid — xl: rail + form + inline preview; lg: rail + form (preview
+   becomes the sheet ProfilePreview renders); below lg: single column, the
+   rail is replaced by SectionNav's dropdown variant instead of this grid.
+   ========================================================================== */
+
+.tn-body { display: block; }
+
+@media (min-width: 1024px) {
+  .tn-body {
+    display: grid;
+    grid-template-columns: var(--tn-rail-w) minmax(0, 1fr);
+    gap: var(--space-7);
+    align-items: start;
+  }
+}
+@media (min-width: 1280px) {
+  .tn-body { grid-template-columns: var(--tn-rail-w) minmax(0, 1fr) var(--tn-preview-w); }
+}
+
+/* ==========================================================================
+   Rail (desktop/tablet section nav)
+   ========================================================================== */
+
+.tn-rail { position: sticky; top: var(--space-6); display: flex; flex-direction: column; gap: 2px; }
+.tn-rail-group { display: flex; flex-direction: column; gap: 2px; }
+.tn-rail-heading { padding: 0 10px; margin-bottom: 4px; text-transform: none; }
+.tn-rail-divider { height: var(--border-width); background: var(--hairline); margin: var(--space-3) 0; }
+
+.tn-rail-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border: none; background: none; cursor: pointer;
+  border-radius: var(--radius-md); text-align: left;
+  font: 500 13px/18px var(--font-ui); color: var(--text-secondary);
+}
+.tn-rail-item:hover { background: var(--surface-hover); color: var(--text-primary); }
+.tn-rail-item.is-active {
+  background: var(--canvas); border: var(--border-width) solid var(--border);
+  box-shadow: var(--shadow-xs); color: var(--text-primary); font-weight: 700;
+}
+.tn-rail-dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: none; }
+.tn-rail-item.is-active .tn-rail-dot { background: var(--accent); }
+.tn-rail-badge {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-full);
+  background: var(--error); color: var(--text-inverse); font: 700 11px/18px var(--font-ui);
+}
+
+/* mobile dropdown switcher's own badge sits inline, not margin-left:auto,
+   since .menu-item already spaces its children with `gap` */
+.menu-item .tn-rail-badge { margin-left: 0; }
+
+/* ==========================================================================
+   Form column
+   ========================================================================== */
+
+.tn-form { min-width: 0; }
+.tn-section-heading { margin-bottom: var(--space-5); }
+
+/* two-up pairing that must stay two-up even on a 390px phone (unlike
+   .form-grid, which collapses to one column at 720px) — years+license,
+   fee+fee-note, etc. */
+.tn-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+
+.tn-field-group + .tn-field-group { margin-top: var(--space-7); }
+
+/* ==========================================================================
+   Toggle chip groups (specializations / therapy approaches) — .chip and
+   .seg-option exist already but neither has a checked-with-icon state, so
+   this is new .tn-profile vocabulary, built on the same button/radius/type
+   language as .seg-option.
+   ========================================================================== */
+
+.tn-chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.tn-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border-radius: var(--radius-full);
+  background: var(--surface); border: var(--border-width) solid var(--border);
+  font: 600 13px/18px var(--font-ui); color: var(--text-secondary);
+  cursor: pointer;
+}
+.tn-chip:hover { background: var(--surface-hover); }
+.tn-chip[aria-pressed='true'] {
+  background: var(--accent-tint); border-color: var(--accent-border); color: var(--accent);
+}
+.tn-chip svg { flex: none; }
+
+/* ==========================================================================
+   Switch (page-local — see Switch.jsx)
+   ========================================================================== */
+
+.tn-switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.tn-switch-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.tn-switch-track {
+  width: var(--tn-switch-w); height: var(--tn-switch-h); border-radius: var(--radius-full);
+  background: var(--border); position: relative; flex: none;
+  transition: background-color 120ms ease;
+}
+.tn-switch-thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: calc(var(--tn-switch-h) - 4px); height: calc(var(--tn-switch-h) - 4px);
+  border-radius: 50%; background: var(--canvas); box-shadow: var(--shadow-xs);
+  transition: transform 120ms ease;
+}
+.tn-switch-input:checked + .tn-switch-track { background: var(--accent); }
+.tn-switch-input:checked + .tn-switch-track .tn-switch-thumb { transform: translateX(calc(var(--tn-switch-w) - var(--tn-switch-h))); }
+.tn-switch-input:focus-visible + .tn-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tn-switch-input:disabled + .tn-switch-track { opacity: 0.5; cursor: not-allowed; }
+.tn-switch-label { color: var(--text-secondary); }
+
+/* ==========================================================================
+   FAQ editor
+   ========================================================================== */
+
+.tn-faq-row { align-items: flex-start; }
+.tn-faq-row-text { flex: 1 1 auto; min-width: 0; }
+.tn-faq-row-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.tn-faq-row--editing {
+  padding: var(--space-4); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg); margin-bottom: var(--space-3);
+}
+.tn-faq-edit-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.tn-faq-composer { max-width: 560px; }
+
+/* ==========================================================================
+   Live preview
+   ========================================================================== */
+
+.tn-preview--inline { position: sticky; top: var(--space-6); }
+.tn-preview-heading { margin-bottom: var(--space-3); }
+
+.tn-preview-phone {
+  border: var(--tn-device-border) solid var(--text-primary);
+  border-radius: var(--tn-radius-device);
+  overflow: hidden; background: var(--canvas);
+  box-shadow: var(--ci-shadow-md);
+}
+.tn-preview-page, .tn-preview-page-full { padding: var(--space-5); }
+.tn-preview-photo {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--surface); display: flex; align-items: center; justify-content: center;
+  color: var(--icon-muted); overflow: hidden;
+}
+.tn-preview-photo img { width: 100%; height: 100%; object-fit: cover; }
+.tn-preview-bio { margin: var(--space-3) 0 0; color: var(--text-secondary); }
+.tn-preview-block { margin-top: var(--space-4); }
+.tn-preview-label { margin-bottom: 6px; }
+.tn-preview-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tn-preview-hidden { padding: var(--space-6) var(--space-4); text-align: center; color: var(--text-muted); }
+
+.tn-preview-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(21, 21, 27, 0.32);
+  display: flex; justify-content: flex-end;
+}
+.tn-preview-backdrop--dialog { justify-content: stretch; align-items: stretch; }
+
+.tn-preview--sheet {
+  width: min(400px, 92vw); height: 100%;
+  background: var(--canvas); box-shadow: var(--shadow-panel);
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+.tn-preview--dialog {
+  width: 100%; height: 100%;
+  background: var(--canvas);
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+.tn-preview-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: var(--border-width) solid var(--hairline);
+  position: sticky; top: 0; background: var(--canvas); z-index: 1;
+}
+.tn-preview--dialog .tn-preview-page-full { max-width: 480px; margin: 0 auto; width: 100%; }
+
+/* ==========================================================================
+   Save bar — docked, not composed with the shared .form-actions sticky bar
+   (that class is already a different sticky-footer pattern used elsewhere;
+   composing the two would fight over position/background/padding).
+   ========================================================================== */
+
+.tn-savebar {
+  position: sticky; bottom: var(--space-4); z-index: 10;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  margin-top: var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  background: var(--text-primary); color: var(--text-inverse);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-panel);
+}
+.tn-savebar-text { color: rgba(255,255,255,0.72); }
+.tn-savebar-actions { display: flex; gap: var(--space-2); flex: none; }
+.tn-savebar .btn-secondary { background: transparent; border-color: rgba(255,255,255,0.3); color: var(--text-inverse); }
+.tn-savebar .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+
+/* ==========================================================================
+   Account section — notifications grid + compact cards, off green
+   ========================================================================== */
+
+.tn-notif-grid { display: grid; grid-template-columns: minmax(0,1fr) 84px 84px; gap: var(--space-3); align-items: center; }
+.tn-notif-grid-head { color: var(--text-muted); }
+.tn-notif-col-label { text-align: center; }
+.tn-account-card { padding: var(--space-4); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); }
+.tn-account-card + .tn-account-card { margin-top: var(--space-4); }
+.tn-danger-link { color: var(--error); font: 600 13px/18px var(--font-ui); background: none; border: var(--border-width) solid var(--error-border); border-radius: var(--radius-md); padding: 8px 14px; cursor: pointer; }
+.tn-danger-link:hover { background: var(--error-tint); }
+.tn-session-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: var(--border-width) solid var(--border); border-radius: var(--radius-md); }
+.tn-session-row + .tn-session-row { margin-top: var(--space-2); }
+.tn-session-row.is-current { border-color: var(--accent-border); background: var(--accent-tint); }
+.tn-session-badge { background: var(--accent); color: var(--text-inverse); border-radius: var(--radius-sm); padding: 2px 6px; font: 700 11px/16px var(--font-ui); }
+
+/* ==========================================================================
+   Responsive behaviour (Part 3)
+   ========================================================================== */
+
+/* iOS Safari zooms the page on focus of any input under 16px — the app-wide
+   fix in styles/tokens.css only covers <=640px, but this editor's own
+   mobile breakpoint is <1024px, so 641-1023px inputs would still be 14px
+   and still trigger the zoom. Written after the base .input rule (later
+   .clinical-ink .input rule wins in tokens.css; here the whole file loads
+   after tokens.css, so ordering is already correct without !important). */
+@media (max-width: 1023.98px) {
+  .tn-profile .input,
+  .tn-profile .select,
+  .tn-profile .textarea { font-size: 16px; }
+
+  .tn-header { margin-bottom: var(--space-4); }
+  .tn-header-actions { width: 100%; justify-content: space-between; }
+  .tn-link-field { max-width: none; flex: 1 1 auto; }
+
+  .tn-rail { display: none; }
+  .tn-section-switcher { margin-bottom: var(--space-5); }
+
+  .tn-form .btn.tn-faq-add,
+  .tn-faq-composer .btn-primary { width: 100%; justify-content: center; }
+
+  .tn-savebar { position: sticky; bottom: 0; margin-left: calc(var(--space-4) * -1); margin-right: calc(var(--space-4) * -1);
+    border-radius: 0; padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom)); }
+
+  .tn-notif-grid { grid-template-columns: minmax(0,1fr) 56px 56px; }
+  .tn-notif-desc { display: none; }
+}
+
+@media (min-width: 1024px) {
+  .tn-section-switcher { display: none; }
+}

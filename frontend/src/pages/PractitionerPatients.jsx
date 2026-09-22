@@ -1,40 +1,136 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
-  Users, Plus, Loader2, Archive, RotateCcw, Edit, Eye,
-  ArrowUpDown, Check, X, Upload, Download, FileSpreadsheet,
+  Users, Plus, Upload, Download, FileSpreadsheet, Check, X,
+  Eye, Pencil, Archive, RotateCcw, MoreVertical, ChevronDown,
 } from 'lucide-react'
 import {
   listPatients, createPatient, archivePatient, restorePatient,
   listIntakeSubmissions, acceptIntakeSubmission, declineIntakeSubmission,
+  listBookingRequests, acceptBookingRequest, cancelBookingRequest,
   downloadPatientBulkTemplate, bulkImportPatients,
 } from '../api/client'
 import {
-  StatusChip,
-  IntakeStatusChip,
-  NoPatients,
-  FormCard,
-  FormField,
-  FormGrid,
-  FormActions,
-  PageLoader,
-  Alert,
-  Button,
-  IconButton,
-  PhoneInput,
-  SectionDropdown,
+  FormCard, FormField, FormGrid, FormActions, Alert, Button, PhoneInput, PageLoader,
 } from '../components/ui'
+import { formatDate as formatCreated, formatDateTime } from '../utils/date'
+
+const STATUS_FILTERS = [
+  { value: 'active', label: 'Active' },
+  { value: 'archived', label: 'Archived' },
+  { value: 'all', label: 'All' },
+]
+
+function getInitials(name) {
+  if (!name) return '?'
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase()
+}
+
+// Status/Intake cell content, shared by the desktop table and the mobile
+// card's status line — design system's central "no green" law (§A): a
+// column where almost every row says the same thing is quiet text, not a
+// colored chip. Only a state that actually needs a decision (Pending) or
+// is genuinely new (New Intake, handled separately below) earns a chip.
+function StatusText({ status }) {
+  return status === 'active'
+    ? <span className="status-plain">Active</span>
+    : <span className="status-quiet">Archived</span>
+}
+
+function IntakeText({ status }) {
+  if (status === 'completed') return <span className="t-cell-muted">Completed</span>
+  if (status === 'in_progress') return <span className="chip chip-pending">Pending</span>
+  return <span className="t-cell-muted">—</span>
+}
+
+// Desktop row actions: hover/focus-reveal only (tokens.css's .row-actions),
+// never colored at rest. Archive is the one destructive verb here — restore
+// is a plain reversal, so it stays neutral even on hover (§B5).
+function RowActions({ patient, onView, onEdit, onArchive, onRestore }) {
+  return (
+    <div className="row-actions">
+      <button type="button" className="icon-btn" onClick={onView} aria-label="View profile" title="View profile">
+        <Eye size={16} strokeWidth={1.5} />
+      </button>
+      <button type="button" className="icon-btn" onClick={onEdit} aria-label="Edit patient" title="Edit patient">
+        <Pencil size={16} strokeWidth={1.5} />
+      </button>
+      {patient.status === 'active' ? (
+        <button type="button" className="icon-btn is-destructive" onClick={onArchive} aria-label="Archive patient" title="Archive patient">
+          <Archive size={16} strokeWidth={1.5} />
+        </button>
+      ) : (
+        <button type="button" className="icon-btn" onClick={onRestore} aria-label="Restore patient" title="Restore patient">
+          <RotateCcw size={16} strokeWidth={1.5} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Touch collapses the same three verbs into a single always-visible kebab +
+// popover (§C3) — .row-actions' hover-reveal has no equivalent without a
+// pointer, so an explicit disclosure trigger replaces it here instead.
+function CardMenu({ patient, onView, onEdit, onArchive, onRestore }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" className="icon-btn" onClick={() => setOpen((v) => !v)} aria-label="Patient actions">
+        <MoreVertical size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+      </button>
+      {open && (
+        <div className="menu-popover align-right">
+          <button type="button" className="menu-item" onClick={() => { setOpen(false); onView() }}>
+            <Eye size={14} strokeWidth={1.5} /> View profile
+          </button>
+          <button type="button" className="menu-item" onClick={() => { setOpen(false); onEdit() }}>
+            <Pencil size={14} strokeWidth={1.5} /> Edit patient
+          </button>
+          {patient.status === 'active' ? (
+            <button type="button" className="menu-item is-destructive" onClick={() => { setOpen(false); onArchive() }}>
+              <Archive size={14} strokeWidth={1.5} /> Archive patient
+            </button>
+          ) : (
+            <button type="button" className="menu-item" onClick={() => { setOpen(false); onRestore() }}>
+              <RotateCcw size={14} strokeWidth={1.5} /> Restore patient
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function PractitionerPatients() {
   const navigate = useNavigate()
+  const location = useLocation()
   const baseUrl = '/patients'
   const [patients, setPatients] = useState([])
   const [intakeSubmissions, setIntakeSubmissions] = useState([])
   const [resolvingIntakeId, setResolvingIntakeId] = useState(null)
+  // Public-profile "Book a session" requests — a free introductory call, a
+  // separate lead source from the intake form above but resolved the same
+  // way (Accept creates/matches a Patient + confirms the slot as a real
+  // Appointment; Decline just removes the request). See booking_service.py.
+  const [bookingRequests, setBookingRequests] = useState([])
+  const [resolvingBookingId, setResolvingBookingId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('active')
-  const [sortBy, setSortBy] = useState('created_at')
-  const [sortOrder, setSortOrder] = useState('desc')
+  const [filterOpen, setFilterOpen] = useState(false)
+  const filterRef = useRef(null)
+  const [sortBy] = useState('created_at')
+  const [sortOrder] = useState('desc')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
     full_name: '',
@@ -76,10 +172,36 @@ export default function PractitionerPatients() {
     } catch { /* handled */ }
   }
 
+  const loadBookingRequests = async () => {
+    try {
+      const data = await listBookingRequests({ status: 'requested' })
+      setBookingRequests(data)
+    } catch { /* handled */ }
+  }
+
   useEffect(() => {
     load()
     loadIntake()
+    loadBookingRequests()
   }, [statusFilter, sortBy, sortOrder])
+
+  // WorkspaceHeader's global "Add patient" navigates here with this flag
+  // (§B6) since the page owns the actual form now. Clear the flag once
+  // consumed so a back-navigation doesn't reopen it.
+  useEffect(() => {
+    if (location.state?.openCreate) {
+      setShowForm(true)
+      navigate(baseUrl, { replace: true, state: null })
+    }
+  }, [location.state])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false)
+    }
+    if (filterOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [filterOpen])
 
   const handleCreate = async (e) => {
     e.preventDefault()
@@ -160,6 +282,32 @@ export default function PractitionerPatients() {
     }
   }
 
+  const handleAcceptBooking = async (booking) => {
+    setResolvingBookingId(booking.id)
+    try {
+      await acceptBookingRequest(booking.id)
+      setBookingRequests(prev => prev.filter(b => b.id !== booking.id))
+      await load()
+    } catch (err) {
+      alert(err.userMessage || 'Failed to accept booking request')
+    } finally {
+      setResolvingBookingId(null)
+    }
+  }
+
+  const handleDeclineBooking = async (booking) => {
+    if (!window.confirm(`Decline ${booking.patient_name}'s call request? This can't be undone.`)) return
+    setResolvingBookingId(booking.id)
+    try {
+      await cancelBookingRequest(booking.id, 'Declined by practitioner')
+      setBookingRequests(prev => prev.filter(b => b.id !== booking.id))
+    } catch (err) {
+      alert(err.userMessage || 'Failed to decline booking request')
+    } finally {
+      setResolvingBookingId(null)
+    }
+  }
+
   const resetForm = () => {
     setForm({
       full_name: '',
@@ -212,56 +360,56 @@ export default function PractitionerPatients() {
     if (bulkFileInputRef.current) bulkFileInputRef.current.value = ''
   }
 
-  const formatDate = (dateStr) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    })
-  }
-
-  const getInitials = (name) => {
-    if (!name) return '?'
-    const parts = name.trim().split(/\s+/)
-    return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase()
-  }
-
   if (loading) {
     return <PageLoader />
   }
 
+  const currentFilterLabel = STATUS_FILTERS.find(f => f.value === statusFilter)?.label || 'Active'
+  const isEmpty = patients.length === 0 && intakeSubmissions.length === 0 && bookingRequests.length === 0
+
   return (
-    <div className="space-y-6">
-      {/* Section Header - Outside Card */}
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-section-title text-content-primary shrink-0">Patients</h1>
+    <div className="clinical-ink">
+      <h1 className="t-h1" style={{ marginBottom: 'var(--space-6)' }}>Patients</h1>
 
-        <div className="flex items-center gap-2 justify-end flex-wrap">
-          <SectionDropdown
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={[
-              { value: 'active', label: 'Active' },
-              { value: 'archived', label: 'Archived' },
-              { value: 'all', label: 'All' },
-            ]}
-            maxWidth="140px"
-          />
-
+      {/* One filter + actions row at every width — labels collapse to
+          icon-only below `sm` (space-between keeps the filter left, actions
+          right, same as before; text simply disappears on narrow screens
+          instead of swapping to a second, separately-styled row). */}
+      <div className="patients-header">
+        <div ref={filterRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => setShowForm(true)}
-            className="workspace-header__btn workspace-header__btn--soft"
+            type="button"
+            className="btn btn-ghost btn-filter"
+            onClick={() => setFilterOpen((v) => !v)}
+            aria-label="Filter patients"
           >
-            <Plus size={16} strokeWidth={1.5} />
-            <span className="hidden sm:inline">Add Patient</span>
+            {currentFilterLabel}
+            <ChevronDown size={16} strokeWidth={1.5} />
           </button>
+          {filterOpen && (
+            <div className="menu-popover">
+              {STATUS_FILTERS.map((f) => (
+                <button
+                  key={f.value}
+                  type="button"
+                  className="menu-item"
+                  onClick={() => { setStatusFilter(f.value); setFilterOpen(false) }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
-          <button
-            onClick={() => setShowBulkModal(true)}
-            className="workspace-header__btn workspace-header__btn--soft"
-          >
+        <div className="patients-actions">
+          <button type="button" className="btn btn-secondary" onClick={() => setShowBulkModal(true)} aria-label="Bulk upload" title="Bulk upload">
             <Upload size={16} strokeWidth={1.5} />
-            <span className="hidden sm:inline">Bulk Upload</span>
+            <span className="hidden sm:inline">Bulk upload</span>
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)} aria-label="Add patient" title="Add patient">
+            <Plus size={16} strokeWidth={1.5} />
+            <span className="hidden sm:inline">Add patient</span>
           </button>
         </div>
       </div>
@@ -468,226 +616,265 @@ export default function PractitionerPatients() {
         </div>
       )}
 
-      {/* Patient List */}
-      {patients.length === 0 && intakeSubmissions.length === 0 ? (
-        <NoPatients onAdd={() => setShowForm(true)} />
+      {/* Patient list */}
+      {isEmpty ? (
+        <div className="empty">
+          <Users size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} />
+          <h3 className="empty-title">No patients yet</h3>
+          <p className="empty-body">Add your first patient to get started with clinical management.</p>
+          <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}>
+            <Plus size={16} strokeWidth={1.5} /> Add patient
+          </button>
+        </div>
       ) : (
         <>
-        {/* Desktop/tablet: elevated rows — one soft grey card per patient,
-            matching the Dashboard's Recent Patients widget (bg #F1F5F9,
-            16px radius, soft shadow) instead of one flat table surface. */}
-        <div className="hidden lg:block space-y-2.5">
-          {/* Header Row */}
-          <div className="px-6 py-2 grid grid-cols-[minmax(0,1fr)_64px_84px_104px_104px_140px_96px] items-center gap-4 text-xs font-medium text-content-muted">
-            <span>Name</span>
-            <span>Age</span>
-            <span>Gender</span>
-            <span>Created</span>
-            <span>Status</span>
-            <span>Intake</span>
-            <span className="w-24"></span>
+          {/* Desktop/tablet: one flush table, per §B1 — rows are never
+              individually tinted/rounded/shadowed. A row awaiting a decision
+              (new intake) gets the shared .needs-action accent rule instead
+              of a color tint. */}
+          <div className="hidden lg:block table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 'auto' }}>Patient</th>
+                  <th style={{ width: 160 }}>Details</th>
+                  <th style={{ width: 120 }}>Created</th>
+                  <th style={{ width: 120 }}>Status</th>
+                  <th style={{ width: 140 }}>Intake</th>
+                  <th style={{ width: 96 }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {intakeSubmissions.map((s) => (
+                  <tr key={`intake-${s.id}`} className="needs-action">
+                    <td>
+                      <span className="t-cell-key" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span className="avatar avatar-accent">{getInitials(s.full_name)}</span>
+                        <span style={{ minWidth: 0 }}>
+                          {s.full_name}
+                          {s.chief_complaint && (
+                            <span className="t-caption truncate" style={{ display: 'block' }}>{s.chief_complaint}</span>
+                          )}
+                        </span>
+                      </span>
+                    </td>
+                    <td>{s.age} · {s.gender}</td>
+                    <td className="cell-num t-cell-muted">{formatCreated(s.created_at)}</td>
+                    <td><span className="chip chip-intake">New Intake</span></td>
+                    <td className="t-cell-muted">—</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-icon-sm"
+                          disabled={resolvingIntakeId === s.id}
+                          onClick={() => handleAcceptIntake(s)}
+                          aria-label="Accept intake"
+                          title="Accept"
+                        >
+                          <Check size={16} strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-icon-sm"
+                          disabled={resolvingIntakeId === s.id}
+                          onClick={() => handleDeclineIntake(s)}
+                          aria-label="Remove intake submission"
+                          title="Remove"
+                        >
+                          <X size={16} strokeWidth={2} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+
+                {bookingRequests.map((b) => (
+                  <tr key={`booking-${b.id}`} className="needs-action">
+                    <td>
+                      <span className="t-cell-key" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span className="avatar avatar-accent">{getInitials(b.patient_name)}</span>
+                        <span style={{ minWidth: 0 }}>
+                          {b.patient_name}
+                          {b.patient_notes && (
+                            <span className="t-caption truncate" style={{ display: 'block' }}>{b.patient_notes}</span>
+                          )}
+                        </span>
+                      </span>
+                    </td>
+                    <td>{formatDateTime(b.requested_start_time)}</td>
+                    <td className="cell-num t-cell-muted">{formatCreated(b.created_at)}</td>
+                    <td><span className="chip chip-intake">Intro call</span></td>
+                    <td className="t-cell-muted">—</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-icon-sm"
+                          disabled={resolvingBookingId === b.id}
+                          onClick={() => handleAcceptBooking(b)}
+                          aria-label="Accept booking request"
+                          title="Accept"
+                        >
+                          <Check size={16} strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-icon-sm"
+                          disabled={resolvingBookingId === b.id}
+                          onClick={() => handleDeclineBooking(b)}
+                          aria-label="Decline booking request"
+                          title="Decline"
+                        >
+                          <X size={16} strokeWidth={2} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+
+                {patients.map((p) => (
+                  <tr key={p.id}>
+                    <td>
+                      <button
+                        type="button"
+                        className="t-cell-key"
+                        style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                        onClick={() => navigate(`${baseUrl}/${p.id}`)}
+                      >
+                        <span className="avatar">{getInitials(p.full_name)}</span>
+                        {p.full_name}
+                      </button>
+                    </td>
+                    <td>{p.age} · {p.gender}</td>
+                    <td className="cell-num t-cell-muted">{formatCreated(p.created_at)}</td>
+                    <td><StatusText status={p.status} /></td>
+                    <td><IntakeText status={p.clinical_history_status} /></td>
+                    <td>
+                      <RowActions
+                        patient={p}
+                        onView={() => navigate(`${baseUrl}/${p.id}`)}
+                        onEdit={() => navigate(`${baseUrl}/${p.id}/edit`)}
+                        onArchive={() => handleArchive(p)}
+                        onRestore={() => handleRestore(p)}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
-          {/* New Intake Submissions - awaiting Accept/Remove, always pinned to top.
-              Lavender tint (not the neutral grey used for ordinary rows) so a
-              row that's blocking on a decision still reads as distinct/urgent. */}
-          {intakeSubmissions.map((s) => (
-            <div
-              key={`intake-${s.id}`}
-              className="relative px-6 py-3.5 grid grid-cols-[minmax(0,1fr)_64px_84px_104px_104px_140px_96px] items-center gap-4 bg-primary-50 rounded-btn border border-dashed border-primary-300 shadow-sm"
-            >
-              <div className="flex items-center gap-3 min-w-0 text-left">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warning-bg text-warning-text text-xs font-bold">
-                  {getInitials(s.full_name)}
+          {/* Mobile: stacked cards, single kebab per card (§C3) instead of
+              three separate icon buttons. */}
+          <div className="lg:hidden stack-cards">
+            {intakeSubmissions.map((s) => (
+              <div key={`intake-m-${s.id}`} className="card card-compact rule-accent">
+                <div className="p-card-top">
+                  <div className="p-card-id">
+                    <span className="avatar avatar-accent">{getInitials(s.full_name)}</span>
+                    <span className="t-cell-key truncate">{s.full_name}</span>
+                  </div>
+                  <div className="p-card-right">
+                    <span className="chip chip-intake">New Intake</span>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <div className="font-medium text-content-primary truncate">{s.full_name}</div>
-                  {s.chief_complaint && (
-                    <div className="text-content-muted text-xs truncate max-w-[220px]" title={s.chief_complaint}>
-                      {s.chief_complaint}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <span className="text-secondary text-sm">{s.age}</span>
-              <span className="text-secondary text-sm">{s.gender}</span>
-              <span className="text-content-muted text-xs">{formatDate(s.created_at)}</span>
-              <StatusChip status="new_intake" size="sm" />
-              <span className="text-content-muted text-xs">—</span>
-              <div className="flex items-center gap-2 justify-end">
-                <button
-                  onClick={() => handleAcceptIntake(s)}
-                  disabled={resolvingIntakeId === s.id}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-success-text hover:bg-green-800 rounded-btn transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Check className="w-3.5 h-3.5" strokeWidth={2} /> Accept
-                </button>
-                <button
-                  onClick={() => handleDeclineIntake(s)}
-                  disabled={resolvingIntakeId === s.id}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-error-text hover:bg-red-700 rounded-btn transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <X className="w-3.5 h-3.5" strokeWidth={2} /> Remove
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {/* Patient Rows */}
-          {patients.map((p) => (
-            <div
-              key={p.id}
-              className="group px-6 py-3.5 grid grid-cols-[minmax(0,1fr)_64px_84px_104px_104px_140px_96px] items-center gap-4 bg-surface-subtle rounded-btn border border-slate-100 shadow-sm hover:bg-border-light transition-all"
-            >
-              <button
-                onClick={() => navigate(`${baseUrl}/${p.id}`)}
-                className="flex items-center gap-3 min-w-0 text-left"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-light text-primary text-xs font-bold">
-                  {getInitials(p.full_name)}
-                </div>
-                <span className="font-medium text-content-primary group-hover:text-primary transition-colors truncate">
-                  {p.full_name}
-                </span>
-              </button>
-              <span className="text-secondary text-sm">{p.age}</span>
-              <span className="text-secondary text-sm">{p.gender}</span>
-              <span className="text-content-muted text-xs">{formatDate(p.created_at)}</span>
-              <StatusChip status={p.status} size="sm" />
-              <IntakeStatusChip status={p.clinical_history_status} size="sm" />
-              <div className="flex items-center gap-1 w-24 justify-end">
-                <IconButton
-                  icon={Eye}
-                  label="View profile"
-                  size="sm"
-                  onClick={() => navigate(`${baseUrl}/${p.id}`)}
-                />
-                <IconButton
-                  icon={Edit}
-                  label="Edit"
-                  size="sm"
-                  onClick={() => navigate(`${baseUrl}/${p.id}/edit`)}
-                />
-                {p.status === 'active' ? (
-                  <IconButton
-                    icon={Archive}
-                    label="Archive"
-                    size="sm"
-                    onClick={() => handleArchive(p)}
-                  />
-                ) : (
-                  <IconButton
-                    icon={RotateCcw}
-                    label="Restore"
-                    size="sm"
-                    onClick={() => handleRestore(p)}
-                  />
+                <div className="p-card-meta t-body-s">{s.age} yrs · {s.gender} · {formatCreated(s.created_at)}</div>
+                {s.chief_complaint && (
+                  <div className="p-card-status t-cell-muted truncate">{s.chief_complaint}</div>
                 )}
+                <div className="mobile-actions-row" style={{ marginTop: 'var(--space-3)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    style={{ flex: 1 }}
+                    disabled={resolvingIntakeId === s.id}
+                    onClick={() => handleAcceptIntake(s)}
+                  >
+                    <Check size={14} strokeWidth={2} /> Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1 }}
+                    disabled={resolvingIntakeId === s.id}
+                    onClick={() => handleDeclineIntake(s)}
+                  >
+                    <X size={14} strokeWidth={2} /> Remove
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
 
-        {/* Phone/tablet: same elevated-row-per-patient treatment as desktop,
-            stacked into a compact layout instead of grid columns since
-            there isn't room for them side by side. */}
-        <div className="lg:hidden space-y-2.5">
-          {/* New Intake Submissions */}
-          {intakeSubmissions.map((s) => (
-            <div key={`intake-m-${s.id}`} className="flex flex-col gap-2 px-4 py-3.5 bg-primary-50 rounded-btn border border-dashed border-primary-300 shadow-sm">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warning-bg text-warning-text text-xs font-bold">
-                    {getInitials(s.full_name)}
+            {bookingRequests.map((b) => (
+              <div key={`booking-m-${b.id}`} className="card card-compact rule-accent">
+                <div className="p-card-top">
+                  <div className="p-card-id">
+                    <span className="avatar avatar-accent">{getInitials(b.patient_name)}</span>
+                    <span className="t-cell-key truncate">{b.patient_name}</span>
                   </div>
-                  <div className="min-w-0">
-                    <div className="font-medium text-content-primary truncate">{s.full_name}</div>
-                    <div className="text-content-muted text-xs">{s.age} · {s.gender}</div>
+                  <div className="p-card-right">
+                    <span className="chip chip-intake">Intro call</span>
                   </div>
                 </div>
-                <StatusChip status="new_intake" size="sm" />
-              </div>
-              {s.chief_complaint && (
-                <div className="text-content-muted text-xs truncate pl-12" title={s.chief_complaint}>
-                  {s.chief_complaint}
+                <div className="p-card-meta t-body-s">{formatDateTime(b.requested_start_time)}</div>
+                {b.patient_notes && (
+                  <div className="p-card-status t-cell-muted truncate">{b.patient_notes}</div>
+                )}
+                <div className="mobile-actions-row" style={{ marginTop: 'var(--space-3)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    style={{ flex: 1 }}
+                    disabled={resolvingBookingId === b.id}
+                    onClick={() => handleAcceptBooking(b)}
+                  >
+                    <Check size={14} strokeWidth={2} /> Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ flex: 1 }}
+                    disabled={resolvingBookingId === b.id}
+                    onClick={() => handleDeclineBooking(b)}
+                  >
+                    <X size={14} strokeWidth={2} /> Decline
+                  </button>
                 </div>
-              )}
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  onClick={() => handleAcceptIntake(s)}
-                  disabled={resolvingIntakeId === s.id}
-                  className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-success-text hover:bg-green-800 rounded-btn transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Check className="w-3.5 h-3.5" strokeWidth={2} /> Accept
-                </button>
-                <button
-                  onClick={() => handleDeclineIntake(s)}
-                  disabled={resolvingIntakeId === s.id}
-                  className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-error-text hover:bg-red-700 rounded-btn transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <X className="w-3.5 h-3.5" strokeWidth={2} /> Remove
-                </button>
               </div>
-            </div>
-          ))}
+            ))}
 
-          {/* Patient Rows */}
-          {patients.map((p) => (
-            <div key={`m-${p.id}`} className="group flex flex-col gap-2.5 px-4 py-3.5 bg-surface-subtle rounded-btn border border-slate-100 shadow-sm active:bg-border-light transition-all">
-              <div className="flex items-start justify-between gap-2">
-                <button
-                  onClick={() => navigate(`${baseUrl}/${p.id}`)}
-                  className="flex items-center gap-3 min-w-0 text-left"
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-light text-primary text-xs font-bold">
-                    {getInitials(p.full_name)}
-                  </div>
-                  <span className="font-medium text-content-primary group-hover:text-primary transition-colors truncate">
-                    {p.full_name}
-                  </span>
-                </button>
-                <div className="flex items-center gap-1 shrink-0">
-                  <IconButton
-                    icon={Eye}
-                    label="View profile"
-                    size="sm"
+            {patients.map((p) => (
+              <div key={`m-${p.id}`} className="card card-compact">
+                <div className="p-card-top">
+                  <button
+                    type="button"
+                    className="p-card-id"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
                     onClick={() => navigate(`${baseUrl}/${p.id}`)}
-                  />
-                  <IconButton
-                    icon={Edit}
-                    label="Edit"
-                    size="sm"
-                    onClick={() => navigate(`${baseUrl}/${p.id}/edit`)}
-                  />
-                  {p.status === 'active' ? (
-                    <IconButton
-                      icon={Archive}
-                      label="Archive"
-                      size="sm"
-                      onClick={() => handleArchive(p)}
+                  >
+                    <span className="avatar">{getInitials(p.full_name)}</span>
+                    <span className="t-cell-key truncate">{p.full_name}</span>
+                  </button>
+                  <div className="p-card-right">
+                    <CardMenu
+                      patient={p}
+                      onView={() => navigate(`${baseUrl}/${p.id}`)}
+                      onEdit={() => navigate(`${baseUrl}/${p.id}/edit`)}
+                      onArchive={() => handleArchive(p)}
+                      onRestore={() => handleRestore(p)}
                     />
-                  ) : (
-                    <IconButton
-                      icon={RotateCcw}
-                      label="Restore"
-                      size="sm"
-                      onClick={() => handleRestore(p)}
-                    />
-                  )}
+                  </div>
+                </div>
+                <div className="p-card-meta t-body-s">{p.age} yrs · {p.gender} · {formatCreated(p.created_at)}</div>
+                <div className="p-card-status t-cell-muted">
+                  {p.status === 'active' ? 'Active' : 'Archived'}
+                  {p.status === 'active' && p.clinical_history_status === 'completed' && ' · Intake completed'}
+                  {p.status === 'active' && p.clinical_history_status === 'in_progress' && ' · Intake pending'}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-12 text-secondary text-xs">
-                <span>{p.age} yrs</span>
-                <span>{p.gender}</span>
-                <span className="text-content-muted">{formatDate(p.created_at)}</span>
-              </div>
-              <div className="flex items-center gap-2 justify-end">
-                <StatusChip status={p.status} size="sm" />
-                <IntakeStatusChip status={p.clinical_history_status} size="sm" />
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
         </>
       )}
     </div>

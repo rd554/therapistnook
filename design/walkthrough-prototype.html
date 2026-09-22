@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Therapist Nook — scroll walkthrough prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&display=swap" rel="stylesheet">
+<style>
+/* =========================================================================
+   SELF-CONTAINED. Tokens identical to design/tokens.css.
+   Scroll the page to judge pacing — the desktop section is live, not static.
+   ========================================================================= */
+:root{
+  --canvas:#FFFFFF; --paper:#FAF8F4; --surface:#F7F7F9; --surface-hover:#F2F2F5;
+  --text-primary:#15151B; --text-secondary:#4E4E5A; --text-muted:#8A8A96; --text-inverse:#FFFFFF;
+  --border:#E6E6EB; --hairline:#F1F1F4;
+  --accent:#5A4AD1; --accent-hover:#4A3BBA; --accent-tint:#EFEDFB; --accent-border:#D9D4F5;
+  --selected:#E9E6F9;
+  --error:#A32E43; --warning:#8F6414; --warning-tint:#FBF3E3;
+  --icon:#4E4E5A; --icon-muted:#8A8A96;
+  --font-ui:'Manrope','Inter',-apple-system,sans-serif;
+  --font-serif:'Newsreader',Georgia,serif;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s8:32px;--s9:40px;
+  --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+  --shadow-xs:0 1px 2px rgba(21,21,27,.04);
+  --shadow-md:0 8px 24px -4px rgba(21,21,27,.10),0 2px 6px rgba(21,21,27,.04);
+  --shadow-panel:0 24px 64px -16px rgba(21,21,27,.18),0 4px 12px rgba(21,21,27,.05);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:auto}
+body{margin:0;background:var(--canvas);font-family:var(--font-ui);color:var(--text-primary);
+     -webkit-font-smoothing:antialiased}
+h1,h2,h3,p{margin:0}
+svg{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;
+    flex:none;display:block}
+
+/* ---- prototype chrome ---- */
+.note{position:fixed;top:0;left:0;right:0;z-index:99;background:var(--text-primary);
+      color:var(--text-inverse);font:500 12px/1 var(--font-ui);padding:10px 16px;text-align:center}
+.note span{color:rgba(255,255,255,.62)}
+.pad{height:34px}
+
+/* ---- type ---- */
+.t-h2{font-size:clamp(25px,2.5vw,31px);line-height:1.24;font-weight:700;letter-spacing:-.025em}
+.t-h3{font-size:15px;line-height:22px;font-weight:600;letter-spacing:-.01em}
+.t-lead{font-size:17px;line-height:28px;font-weight:400;color:var(--text-secondary);max-width:46ch}
+.t-body-s{font-size:13px;line-height:20px;font-weight:500;color:var(--text-secondary)}
+.t-caption{font-size:12px;line-height:16px;font-weight:500;color:var(--text-muted)}
+.t-cell{font-size:13px;line-height:19px;font-weight:500;color:var(--text-secondary)}
+.t-cell-key{font-size:13px;line-height:18px;font-weight:700;color:var(--text-primary)}
+.t-narrative{font-family:var(--font-serif);font-size:15px;line-height:26px;color:var(--text-primary)}
+.tnum{font-variant-numeric:tabular-nums}
+.muted{color:var(--text-muted)}
+.warn{color:var(--warning);font-weight:600}
+.alert{color:var(--error);font-weight:600}
+
+/* ==========================================================================
+   Section intro
+   ========================================================================== */
+.intro{max-width:1120px;margin:0 auto;padding:96px 32px 40px;text-align:center}
+.intro .t-lead{margin:12px auto 0}
+
+/* ==========================================================================
+   .wt-*  scroll walkthrough (desktop)
+   ========================================================================== */
+.wt{position:relative;background:var(--surface);border-top:1px solid var(--hairline)}
+.wt-track{height:520vh}                 /* 5 steps + a little lead-out */
+.wt-sticky{position:sticky;top:0;height:100vh;display:flex;align-items:center}
+.wt-inner{max-width:1120px;margin:0 auto;padding:0 32px;width:100%;
+          display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:64px;align-items:center}
+
+/* left: the path */
+.wt-steps{position:relative;padding-left:32px}
+.wt-path{position:absolute;left:7px;top:10px;bottom:10px;width:2px;background:var(--border);
+         border-radius:2px;overflow:hidden}
+.wt-path-fill{position:absolute;left:0;top:0;width:100%;background:var(--accent);border-radius:2px;
+              height:0;transition:height 180ms linear}
+.wt-step{position:relative;padding:14px 0;cursor:default}
+.wt-dot{position:absolute;left:-32px;top:20px;width:16px;height:16px;border-radius:999px;
+        background:var(--surface);border:2px solid var(--border);
+        transition:border-color 220ms ease,background-color 220ms ease}
+.wt-step.is-done .wt-dot{border-color:var(--accent);background:var(--accent)}
+.wt-step.is-active .wt-dot{border-color:var(--accent);background:var(--canvas);
+                           box-shadow:0 0 0 4px var(--accent-tint)}
+.wt-step-label{font:600 13px/18px var(--font-ui);color:var(--text-muted);
+               transition:color 220ms ease}
+.wt-step-title{font:700 19px/26px var(--font-ui);letter-spacing:-.02em;color:var(--text-muted);
+               margin-top:2px;transition:color 220ms ease}
+.wt-step-body{max-height:0;overflow:hidden;opacity:0;
+              transition:max-height 320ms ease,opacity 220ms ease,margin 320ms ease}
+.wt-step.is-active .wt-step-label{color:var(--accent)}
+.wt-step.is-active .wt-step-title{color:var(--text-primary)}
+.wt-step.is-active .wt-step-body{max-height:120px;opacity:1;margin-top:8px}
+.wt-step.is-done .wt-step-title{color:var(--text-secondary)}
+
+/* right: the stage */
+.wt-stage{position:relative;height:460px}
+.wt-panel{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+          opacity:0;transform:translateY(14px);pointer-events:none;
+          transition:opacity 320ms ease,transform 320ms ease}
+.wt-panel.is-active{opacity:1;transform:none;pointer-events:auto}
+
+.frame{width:100%;max-width:520px;background:var(--canvas);border:1px solid var(--border);
+       border-radius:var(--r-xl);box-shadow:var(--shadow-panel);overflow:hidden}
+.frame-bar{height:34px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;
+           gap:6px;padding:0 var(--s4)}
+.frame-bar i{width:8px;height:8px;border-radius:999px;background:var(--hairline);display:block}
+.frame-bar span{margin-left:auto;font:500 11px/1 var(--font-ui);color:var(--text-muted)}
+.frame-body{padding:var(--s5)}
+.frame-head{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s4)}
+
+/* mini components reused from the product */
+.row{display:flex;align-items:center;gap:var(--s3);padding:11px var(--s3);
+     border-bottom:1px solid var(--hairline)}
+.row:last-child{border-bottom:none}
+.row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.rule-accent{box-shadow:inset 2px 0 0 var(--accent)}
+.rule-error{box-shadow:inset 2px 0 0 var(--error)}
+.list{border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.avatar{width:26px;height:26px;border-radius:999px;background:var(--surface);
+        color:var(--text-secondary);font:700 10px/1 var(--font-ui);
+        display:flex;align-items:center;justify-content:center;flex:none}
+.avatar-accent{background:var(--accent-tint);color:var(--accent)}
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:var(--r-sm);
+      font:700 10px/1 var(--font-ui);letter-spacing:.015em;background:var(--accent-tint);color:var(--accent)}
+.badge{width:36px;flex:none;padding:5px 0;text-align:center;background:var(--surface);
+       border-radius:var(--r-md)}
+.badge b{display:block;font:700 14px/18px var(--font-ui);font-variant-numeric:tabular-nums}
+.badge i{display:block;font:600 9px/12px var(--font-ui);color:var(--text-muted);font-style:normal}
+.icon-badge{width:28px;height:28px;border-radius:var(--r-md);background:var(--surface);
+            color:var(--icon);display:flex;align-items:center;justify-content:center;flex:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;
+     border-radius:var(--r-md);border:1px solid transparent;font:600 12px/1 var(--font-ui)}
+.btn-primary{background:var(--accent);color:var(--text-inverse)}
+.btn-secondary{background:var(--canvas);color:var(--text-primary);border-color:var(--border)}
+.card-narrative{background:var(--paper);border:1px solid var(--border);border-radius:var(--r-lg);
+                padding:var(--s5)}
+.checkbox{width:15px;height:15px;border-radius:4px;border:1px solid var(--border);flex:none;
+          background:var(--canvas);position:relative}
+.checkbox.on{background:var(--accent);border-color:var(--accent)}
+.checkbox.on:after{content:'';position:absolute;left:4px;top:1px;width:5px;height:8px;
+                   border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.bulk{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s3);padding:9px 9px 9px var(--s4);
+      background:var(--text-primary);color:var(--text-inverse);border-radius:var(--r-lg)}
+.bulk b{font:700 12px/1 var(--font-ui);font-variant-numeric:tabular-nums}
+.bulk em{font:500 12px/1 var(--font-ui);font-style:normal;color:rgba(255,255,255,.6)}
+.bulk .btn{margin-left:auto;background:var(--canvas);color:var(--text-primary)}
+
+/* assessment scale bars */
+.scale{display:flex;align-items:center;gap:var(--s3);padding:7px 0;
+       border-bottom:1px solid var(--hairline)}
+.scale:last-child{border-bottom:none}
+.scale-name{width:96px;flex:none;font:500 12px/16px var(--font-ui);color:var(--text-secondary)}
+.scale-track{flex:1;height:5px;border-radius:999px;background:var(--hairline);overflow:hidden}
+.scale-fill{height:100%;border-radius:999px;background:var(--text-secondary)}
+.scale-fill.hi{background:var(--warning)}
+.scale-t{width:30px;flex:none;text-align:right;font:700 12px/16px var(--font-ui);
+         font-variant-numeric:tabular-nums;color:var(--text-secondary)}
+.scale-t.hi{color:var(--warning)}
+
+/* ==========================================================================
+   Mobile variant — stacked, no pinning, shown here in a 390 frame
+   ========================================================================== */
+.mob-wrap{background:var(--canvas);padding:80px 32px 96px}
+.mob-head{max-width:1120px;margin:0 auto 32px}
+.mob-frame{width:390px;margin:0 auto;border:1px solid var(--border);border-radius:24px;
+           overflow:hidden;box-shadow:var(--shadow-panel);background:var(--surface)}
+.mob-inner{padding:24px 20px 40px}
+.mob-step{background:var(--canvas);border:1px solid var(--border);border-radius:var(--r-lg);
+          padding:var(--s5);margin-bottom:var(--s4)}
+.mob-step .wt-step-label{color:var(--accent)}
+.mob-step .wt-step-title{color:var(--text-primary);font-size:17px;line-height:24px}
+.mob-step .t-lead{font-size:14px;line-height:22px;margin-top:6px}
+.mob-visual{margin-top:var(--s4);border:1px solid var(--border);border-radius:var(--r-md);
+            overflow:hidden}
+
+@media (max-width:1023px){
+  .wt-track{height:auto}
+  .wt-sticky{position:static;height:auto;padding:40px 0}
+  .wt-inner{grid-template-columns:1fr;gap:32px}
+  .wt-stage{height:360px}
+}
+@media (prefers-reduced-motion: reduce){
+  .wt-panel,.wt-step-body,.wt-dot,.wt-path-fill{transition:none}
+}
+</style>
+</head>
+<body>
+
+<div class="note">Scroll-walkthrough prototype — <span>desktop section below is live; scroll to judge pacing. Mobile variant at the bottom.</span></div>
+<div class="pad"></div>
+
+<div class="intro">
+  <h2 class="t-h2">How Therapist Nook works</h2>
+  <p class="t-lead">From the first intake form to the invoice, in one workspace.</p>
+</div>
+
+<!-- ================= DESKTOP WALKTHROUGH ================= -->
+<section class="wt" id="wt">
+  <div class="wt-track">
+    <div class="wt-sticky">
+      <div class="wt-inner">
+
+        <!-- left: path + steps -->
+        <div class="wt-steps" id="steps">
+          <div class="wt-path"><div class="wt-path-fill" id="pathFill"></div></div>
+
+          <div class="wt-step" data-i="0">
+            <span class="wt-dot"></span>
+            <div class="wt-step-label">Intake</div>
+            <div class="wt-step-title">A patient fills your intake form</div>
+            <div class="wt-step-body"><p class="t-lead">Share one public link. The record creates itself — name, contact and referral source in place before the first session.</p></div>
+          </div>
+
+          <div class="wt-step" data-i="1">
+            <span class="wt-dot"></span>
+            <div class="wt-step-label">Schedule</div>
+            <div class="wt-step-title">Book it once, both calendars agree</div>
+            <div class="wt-step-body"><p class="t-lead">Two-way Google Calendar sync, with the Meet link already in the invite. Nothing double-booked, nothing retyped.</p></div>
+          </div>
+
+          <div class="wt-step" data-i="2">
+            <span class="wt-dot"></span>
+            <div class="wt-step-label">Assess</div>
+            <div class="wt-step-title">Full inventories, scored automatically</div>
+            <div class="wt-step-body"><p class="t-lead">Send a link. Gender-specific norms, T-scores and subscales come back in seconds — no manual lookup tables.</p></div>
+          </div>
+
+          <div class="wt-step" data-i="3">
+            <span class="wt-dot"></span>
+            <div class="wt-step-label">Understand</div>
+            <div class="wt-step-title">The clinical picture, drawn from the record</div>
+            <div class="wt-step-body"><p class="t-lead">Upload the session transcript and get a summary, treatment goals and open questions — sourced only from this patient's approved record.</p></div>
+          </div>
+
+          <div class="wt-step" data-i="4">
+            <span class="wt-dot"></span>
+            <div class="wt-step-label">Get paid</div>
+            <div class="wt-step-title">A month of sessions, one invoice</div>
+            <div class="wt-step-body"><p class="t-lead">Select the sessions, generate a combined invoice, and see what's outstanding without opening a spreadsheet.</p></div>
+          </div>
+        </div>
+
+        <!-- right: stage -->
+        <div class="wt-stage" id="stage">
+
+          <!-- 0 · intake -->
+          <div class="wt-panel" data-i="0">
+            <div class="frame">
+              <div class="frame-bar"><i></i><i></i><i></i><span>Patients</span></div>
+              <div class="frame-body">
+                <div class="list">
+                  <div class="row rule-accent">
+                    <span class="avatar avatar-accent">KN</span>
+                    <div class="row-main"><span class="t-cell-key">Kabir Nair</span><span class="t-caption tnum">29 · Male · added just now</span></div>
+                    <span class="chip">New intake</span>
+                  </div>
+                  <div class="row">
+                    <span class="avatar">PS</span>
+                    <div class="row-main"><span class="t-cell-key">Priya Sharma</span><span class="t-caption tnum">34 · Female · 2 Aug</span></div>
+                    <span class="t-caption">Active</span>
+                  </div>
+                  <div class="row">
+                    <span class="avatar">AM</span>
+                    <div class="row-main"><span class="t-cell-key">Arjun Mehta</span><span class="t-caption tnum">41 · Male · 19 Jul</span></div>
+                    <span class="t-caption">Active</span>
+                  </div>
+                  <div class="row">
+                    <span class="avatar">SK</span>
+                    <div class="row-main"><span class="t-cell-key">Sana Kapoor</span><span class="t-caption tnum">27 · Female · 30 Jun</span></div>
+                    <span class="t-caption">Active</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 1 · schedule -->
+          <div class="wt-panel" data-i="1">
+            <div class="frame">
+              <div class="frame-bar"><i></i><i></i><i></i><span>Today</span></div>
+              <div class="frame-body">
+                <div class="list" style="margin-bottom:10px">
+                  <div class="row rule-accent" style="padding:13px 12px">
+                    <span class="icon-badge"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M15 10.5l6-3.5v10l-6-3.5"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></span>
+                    <div class="row-main"><span class="t-cell-key">Priya Sharma</span><span class="t-caption">Therapy session · Online</span></div>
+                    <span class="t-cell-key tnum" style="margin-right:10px">10:00 AM</span>
+                    <span class="btn btn-primary">Join now</span>
+                  </div>
+                </div>
+                <div class="list">
+                  <div class="row" style="padding:13px 12px">
+                    <span class="icon-badge"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg></span>
+                    <div class="row-main"><span class="t-cell-key">Arjun Mehta</span><span class="t-caption">Follow-up · In person</span></div>
+                    <span class="t-cell-key tnum">11:30 AM</span>
+                  </div>
+                  <div class="row" style="padding:13px 12px">
+                    <span class="icon-badge"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M15 10.5l6-3.5v10l-6-3.5"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></span>
+                    <div class="row-main"><span class="t-cell-key">Sana Kapoor</span><span class="t-caption">Assessment · Online</span></div>
+                    <span class="t-cell-key tnum" style="margin-right:10px">2:00 PM</span>
+                    <span class="btn btn-secondary">Get link</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2 · assess -->
+          <div class="wt-panel" data-i="2">
+            <div class="frame">
+              <div class="frame-bar"><i></i><i></i><i></i><span>Assessment result</span></div>
+              <div class="frame-body">
+                <div class="frame-head">
+                  <span class="icon-badge"><svg width="15" height="15" viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2"/><path d="M9 10.5h6M9 14h6"/></svg></span>
+                  <div><div class="t-h3">MMPI-2</div><div class="t-caption tnum">Female norms · scored in 4 seconds</div></div>
+                </div>
+                <div class="scale"><span class="scale-name">Hypochondriasis</span><span class="scale-track"><span class="scale-fill" style="width:46%"></span></span><span class="scale-t">52</span></div>
+                <div class="scale"><span class="scale-name">Depression</span><span class="scale-track"><span class="scale-fill" style="width:58%"></span></span><span class="scale-t">58</span></div>
+                <div class="scale"><span class="scale-name">Social anxiety</span><span class="scale-track"><span class="scale-fill hi" style="width:78%"></span></span><span class="scale-t hi">74</span></div>
+                <div class="scale"><span class="scale-name">Hysteria</span><span class="scale-track"><span class="scale-fill" style="width:44%"></span></span><span class="scale-t">49</span></div>
+                <div class="scale"><span class="scale-name">Paranoia</span><span class="scale-track"><span class="scale-fill" style="width:40%"></span></span><span class="scale-t">45</span></div>
+                <div class="t-caption" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--hairline)">
+                  One elevated subscale · 566 items scored automatically
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3 · understand -->
+          <div class="wt-panel" data-i="3">
+            <div class="frame">
+              <div class="frame-bar"><i></i><i></i><i></i><span>Clinical intelligence</span></div>
+              <div class="frame-body">
+                <div class="card-narrative">
+                  <div class="frame-head" style="margin-bottom:10px">
+                    <span class="icon-badge"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M4.5 20v-.8c0-3.2 3.4-5.2 7.5-5.2s7.5 2 7.5 5.2v.8"/></svg></span>
+                    <div class="t-h3">Patient summary</div>
+                  </div>
+                  <p class="t-narrative">Reported reduced avoidance across the last three sessions. Grounding exercises are holding. Continue breathing work and review the anxiety subscales at the next assessment.</p>
+                  <div class="t-caption" style="margin-top:14px">2 current diagnoses · 10 active goals · 1 open question</div>
+                </div>
+                <div class="t-caption" style="margin-top:12px">Generated from session notes and assessment results.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4 · get paid -->
+          <div class="wt-panel" data-i="4">
+            <div class="frame">
+              <div class="frame-bar"><i></i><i></i><i></i><span>Payments</span></div>
+              <div class="frame-body">
+                <div style="display:flex;align-items:baseline;margin-bottom:12px">
+                  <span class="t-h3">August 2026</span>
+                  <span class="t-caption tnum" style="margin-left:auto">₹3,000 overdue</span>
+                </div>
+                <div class="list">
+                  <div class="row" style="padding:11px 12px"><span class="checkbox on"></span>
+                    <div class="row-main"><span class="t-cell-key tnum">₹1,500</span><span class="t-caption tnum">23 Aug · Therapy session</span></div>
+                    <span class="t-caption">Pending</span></div>
+                  <div class="row" style="padding:11px 12px"><span class="checkbox on"></span>
+                    <div class="row-main"><span class="t-cell-key tnum">₹2,500</span><span class="t-caption tnum">13 Aug · Therapy session</span></div>
+                    <span class="t-caption">Paid</span></div>
+                  <div class="row rule-error" style="padding:11px 12px"><span class="checkbox on"></span>
+                    <div class="row-main"><span class="t-cell-key tnum">₹3,000</span><span class="t-caption tnum">6 Aug · Therapy session</span></div>
+                    <span class="alert" style="font-size:12px">Overdue</span></div>
+                </div>
+                <div class="bulk"><b>3 selected</b><em>₹7,000</em><span class="btn">Generate combined invoice</span></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MOBILE VARIANT ================= -->
+<div class="mob-wrap">
+  <div class="mob-head">
+    <h2 class="t-h2">Mobile — stacked, no pinning</h2>
+    <p class="t-lead">Same five steps, revealed on enter. No scroll-jacking at 390px.</p>
+  </div>
+  <div class="mob-frame">
+    <div class="mob-inner">
+
+      <div class="mob-step">
+        <div class="wt-step-label">Step 1 · Intake</div>
+        <div class="wt-step-title">A patient fills your intake form</div>
+        <p class="t-lead">Share one public link. The record creates itself before the first session.</p>
+        <div class="mob-visual">
+          <div class="row rule-accent" style="padding:10px 12px"><span class="avatar avatar-accent">KN</span>
+            <div class="row-main"><span class="t-cell-key">Kabir Nair</span><span class="t-caption">29 · Male</span></div>
+            <span class="chip">New intake</span></div>
+          <div class="row" style="padding:10px 12px"><span class="avatar">PS</span>
+            <div class="row-main"><span class="t-cell-key">Priya Sharma</span><span class="t-caption">34 · Female</span></div>
+            <span class="t-caption">Active</span></div>
+        </div>
+      </div>
+
+      <div class="mob-step">
+        <div class="wt-step-label">Step 2 · Schedule</div>
+        <div class="wt-step-title">Book it once, both calendars agree</div>
+        <p class="t-lead">Two-way Google Calendar sync, with the Meet link already in the invite.</p>
+        <div class="mob-visual">
+          <div class="row rule-accent" style="padding:11px 12px">
+            <span class="icon-badge"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M15 10.5l6-3.5v10l-6-3.5"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg></span>
+            <div class="row-main"><span class="t-cell-key">Priya Sharma</span><span class="t-caption">10:00 AM · Online</span></div>
+            <span class="btn btn-primary">Join</span></div>
+          <div class="row" style="padding:11px 12px">
+            <span class="icon-badge"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M12 21s7-6.4 7-11a7 7 0 1 0-14 0c0 4.6 7 11 7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg></span>
+            <div class="row-main"><span class="t-cell-key">Arjun Mehta</span><span class="t-caption">11:30 AM · In person</span></div></div>
+        </div>
+      </div>
+
+      <div class="mob-step">
+        <div class="wt-step-label">Step 3 · Assess</div>
+        <div class="wt-step-title">Full inventories, scored automatically</div>
+        <p class="t-lead">Gender-specific norms, T-scores and subscales in seconds.</p>
+        <div class="mob-visual" style="padding:12px">
+          <div class="scale"><span class="scale-name" style="width:80px">Depression</span><span class="scale-track"><span class="scale-fill" style="width:58%"></span></span><span class="scale-t">58</span></div>
+          <div class="scale"><span class="scale-name" style="width:80px">Social anx.</span><span class="scale-track"><span class="scale-fill hi" style="width:78%"></span></span><span class="scale-t hi">74</span></div>
+          <div class="scale"><span class="scale-name" style="width:80px">Paranoia</span><span class="scale-track"><span class="scale-fill" style="width:40%"></span></span><span class="scale-t">45</span></div>
+        </div>
+      </div>
+
+      <div class="mob-step">
+        <div class="wt-step-label">Step 4 · Understand</div>
+        <div class="wt-step-title">The clinical picture, drawn from the record</div>
+        <p class="t-lead">Upload the transcript and get a summary, goals and open questions.</p>
+        <div class="mob-visual" style="border:none">
+          <div class="card-narrative" style="padding:14px">
+            <p class="t-narrative" style="font-size:14px;line-height:24px">Reported reduced avoidance across the last three sessions. Grounding exercises are holding.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mob-step">
+        <div class="wt-step-label">Step 5 · Get paid</div>
+        <div class="wt-step-title">A month of sessions, one invoice</div>
+        <p class="t-lead">Select the sessions, generate a combined invoice, see what's outstanding.</p>
+        <div class="mob-visual" style="border:none">
+          <div class="list">
+            <div class="row" style="padding:10px 12px"><span class="checkbox on"></span>
+              <div class="row-main"><span class="t-cell-key tnum">₹1,500</span><span class="t-caption">23 Aug</span></div>
+              <span class="t-caption">Pending</span></div>
+            <div class="row rule-error" style="padding:10px 12px"><span class="checkbox on"></span>
+              <div class="row-main"><span class="t-cell-key tnum">₹3,000</span><span class="t-caption">6 Aug</span></div>
+              <span class="alert" style="font-size:12px">Overdue</span></div>
+          </div>
+          <div class="bulk" style="padding:8px 8px 8px 12px"><b>2 selected</b><span class="btn">Invoice</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var section = document.getElementById('wt');
+  var steps = Array.prototype.slice.call(document.querySelectorAll('.wt-step'));
+  var panels = Array.prototype.slice.call(document.querySelectorAll('.wt-panel'));
+  var fill = document.getElementById('pathFill');
+  var N = steps.length, current = -1, ticking = false;
+
+  function render() {
+    ticking = false;
+    var rect = section.getBoundingClientRect();
+    var total = section.offsetHeight - window.innerHeight;
+    var p = total > 0 ? Math.min(Math.max(-rect.top / total, 0), 1) : 0;
+
+    // 5 equal bands across the scrollable length, with a short lead-out
+    var i = Math.min(N - 1, Math.floor(p * N * 1.08));
+    fill.style.height = Math.min(100, (i / (N - 1)) * 100) + '%';
+
+    if (i === current) return;
+    current = i;
+    steps.forEach(function (s, k) {
+      s.classList.toggle('is-active', k === i);
+      s.classList.toggle('is-done', k < i);
+    });
+    panels.forEach(function (pn, k) { pn.classList.toggle('is-active', k === i); });
+  }
+
+  function onScroll() { if (!ticking) { ticking = true; requestAnimationFrame(render); } }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  render();
+})();
+</script>
+</body>
+</html>

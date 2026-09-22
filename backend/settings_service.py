@@ -36,6 +36,7 @@ from models import (
     NotificationTemplate,
     WhatsAppConfig,
     MeetingProviderConfig,
+    MessagingPreferences,
 )
 
 
@@ -1053,6 +1054,79 @@ async def test_whatsapp_config(db: AsyncSession, recipient_phone: str) -> dict:
         config.last_test_error = str(e)
         await db.commit()
         return {"success": False, "message": "Failed to send test message", "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Messaging Preferences Service — what patients receive, on which channel
+# ═══════════════════════════════════════════════════════════════════════════════
+# Global singleton, same scope as EmailConfiguration. Distinct from
+# PractitionerNotificationPreferences (alerts TO the practitioner about their
+# own practice — a separate, pre-existing feature, untouched by this rebuild).
+
+async def get_messaging_preferences(db: AsyncSession) -> MessagingPreferences:
+    """Get messaging preferences, seeding a default row if none exists yet.
+
+    Per spec ("Seed each event from the current channel enable flags"), both
+    email and WhatsApp flags seed from the current channel config, not a
+    hardcoded value. In normal operation this fallback should rarely fire:
+    the startup migration (_run_email_backfill_sqlite/postgres in
+    database.py) proactively creates this row right after resolving
+    EmailConfiguration.is_enabled, and that migration always runs to
+    completion before the app accepts any HTTP request — so by the time this
+    function can be called, is_enabled already reflects reality and there's
+    no seed-before-backfill race. This is just a defensive fallback for an
+    environment that somehow skips the migration path (e.g. a fresh
+    create_all() with no migration history)."""
+    # .limit(1): two concurrent instances racing to seed this singleton could
+    # each insert a row; without the limit, scalar_one_or_none() would raise
+    # MultipleResultsFound on any read after that happens.
+    result = await db.execute(select(MessagingPreferences).limit(1))
+    prefs = result.scalar_one_or_none()
+
+    if not prefs:
+        # Don't go through get_whatsapp_config here — it creates a row with a
+        # NOT NULL practitioner_id if none exists yet, and this function has
+        # no practitioner in scope. Read-only lookup; no WhatsApp row means
+        # WhatsApp isn't enabled, which is exactly the seed value we want.
+        email_config = (await db.execute(select(EmailConfiguration).limit(1))).scalar_one_or_none()
+        email_enabled = email_config.is_enabled if email_config else False
+        whatsapp_config = (await db.execute(select(WhatsAppConfig).limit(1))).scalar_one_or_none()
+        whatsapp_enabled = whatsapp_config.is_enabled if whatsapp_config else False
+        prefs = MessagingPreferences(
+            session_booked_email=email_enabled, session_booked_whatsapp=whatsapp_enabled,
+            reminder_email=email_enabled, reminder_whatsapp=whatsapp_enabled,
+            session_rescheduled_email=email_enabled, session_rescheduled_whatsapp=whatsapp_enabled,
+            session_cancelled_email=email_enabled, session_cancelled_whatsapp=whatsapp_enabled,
+            payment_request_email=email_enabled, payment_request_whatsapp=whatsapp_enabled,
+            payment_received_email=email_enabled, payment_received_whatsapp=whatsapp_enabled,
+        )
+        db.add(prefs)
+        await db.commit()
+        await db.refresh(prefs)
+
+    return prefs
+
+
+async def update_messaging_preferences(db: AsyncSession, data: dict) -> MessagingPreferences:
+    """Update messaging preferences."""
+    prefs = await get_messaging_preferences(db)
+
+    for key, value in data.items():
+        if value is not None and hasattr(prefs, key):
+            setattr(prefs, key, value)
+
+    await db.commit()
+    await db.refresh(prefs)
+    return prefs
+
+
+async def is_message_enabled(db: AsyncSession, event_type: str, channel: str) -> bool:
+    """Gate check used at every patient-facing send site: is this event
+    allowed to go out on this channel at all, per Settings? Replaces whatever
+    ad-hoc enable-flag checks existed at each call site before."""
+    prefs = await get_messaging_preferences(db)
+    column = f"{event_type}_{channel}"
+    return bool(getattr(prefs, column, False))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

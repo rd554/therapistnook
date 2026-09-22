@@ -1,11 +1,14 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import {
-  User, ArrowLeft, Phone, Mail, AlertCircle, Calendar, 
+  User, ArrowLeft, Phone, Mail, AlertCircle, Calendar, ChevronDown, ChevronRight, Copy,
   FileText, Brain, Activity, FolderOpen, Edit, Clock, CheckCircle, Upload,
-  Video, Building, Plus, ExternalLink, CreditCard, IndianRupee, Receipt, Loader2,
+  Video, Building, Plus, ExternalLink, CreditCard, IndianRupee, Receipt, Loader2, Download,
 } from 'lucide-react'
 import { getPatient, getClinicalHistorySummary, getPatientAppointments, createAppointment, getPatientPaymentHistory, getInvoicePdfUrl, getPaymentReceipt, createBulkInvoice } from '../api/client'
+import { formatDate, formatDateBadge, formatSessionTime } from '../utils/date'
+import { formatCurrency, formatAmountParts, formatAmountSpoken, getSessionTypeLabel, derivePaymentStatus, paymentStatusMeta } from '../utils/payments'
+import { MonthCheckbox, BulkInvoiceBar, useBulkInvoiceSelection } from '../components/payments/BulkInvoiceBar'
 import ClinicalHistoryWizard from '../components/ClinicalHistoryWizard'
 import DocumentUpload from '../components/DocumentUpload'
 import DocumentsList from '../components/DocumentsList'
@@ -20,18 +23,12 @@ import ClinicalIntelligenceTab from '../components/ClinicalIntelligenceTab'
 import ScheduleModal from '../components/ScheduleModal'
 import {
   StatusChip,
-  MetricCard,
-  MetricCardGrid,
-  FilterTabs,
-  NoSessions,
-  NoPayments,
   NoDocuments,
   NoSessionRecordings,
   PageLoader,
   Button,
   IconButton,
   SectionDropdown,
-  RowCard,
 } from '../components/ui'
 
 const TABS = [
@@ -61,6 +58,16 @@ export default function PatientProfile() {
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
   const activeTab = TABS.some(tab => tab.value === tabParam) ? tabParam : 'overview'
+
+  // Switching tabs is a searchParams change, not a route navigation, so the
+  // browser has no reason to reset scroll on its own - without this, a tab
+  // switch lands wherever the previous (often taller/shorter) tab had you
+  // scrolled to, which reads as "the page jumped to the middle" rather than
+  // opening at its own top.
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [activeTab])
+
   const setActiveTab = (tab) => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev)
@@ -97,18 +104,9 @@ export default function PatientProfile() {
     setActiveTab('overview')
   }
 
-  const getDropdownOptions = () => {
-    return TABS.map(tab => {
-      if (tab.value === 'clinical-history') {
-        const chStatus = clinicalHistorySummary?.status
-        return {
-          ...tab,
-          badge: chStatus === 'completed' ? '✓' : chStatus === 'in_progress' ? 'In Progress' : null
-        }
-      }
-      return tab
-    })
-  }
+  // Clinical History's completion state is shown by the wizard's own step
+  // rail/progress bar, not repeated here as a switcher badge.
+  const getDropdownOptions = () => TABS
 
   if (loading) {
     return <PageLoader />
@@ -133,7 +131,16 @@ export default function PatientProfile() {
   return (
     <div className="space-y-8 max-w-[1120px]">
       {/* Header: Back + Name | Edit Profile (above the Patient Information card) | Section Dropdown (page's right edge) */}
+      {/* Clinical Intelligence, Overview, Sessions, Payments, Documents and
+          Session Intelligence each render their own Clinical-Ink header (back
+          icon, .t-h1 name, .btn-secondary section switcher) inside the tab
+          itself — both header rows below are skipped for those tabs rather
+          than made to carry .clinical-ink styling, which would leak onto
+          every other tab sharing this same wrapper. See
+          ClinicalIntelligenceTab.jsx, OverviewTab, PatientSessionsTab,
+          PatientPaymentsTab, DocumentsTab and SessionIntelligenceTab below. */}
       {/* Tablet/desktop: original single-row layout, unchanged */}
+      {activeTab !== 'clinical-intelligence' && activeTab !== 'overview' && activeTab !== 'sessions' && activeTab !== 'payments' && activeTab !== 'clinical-history' && activeTab !== 'documents' && activeTab !== 'session-intelligence' && (
       <div className="hidden sm:flex relative z-20 items-center gap-12">
         {/* Left: Back + Name */}
         <div className="flex items-center gap-3">
@@ -152,24 +159,6 @@ export default function PatientProfile() {
           </div>
         </div>
 
-        {/* Edit Profile - Overview tab only. Anchored to the left edge of the row and
-            right-aligned within the Patient Information card's own width (728px) so it
-            sits directly above the card's right edge instead of floating out at the
-            page's far right. `pointer-events-none` on the wrapper (with `-auto` back on
-            the link) keeps the empty 728px-wide box from swallowing clicks on the Back
-            button/name that sit underneath it. */}
-        {activeTab === 'overview' && (
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[728px] flex justify-end pointer-events-none">
-            <Link
-              to={`${baseUrl}/patients/${patientId}/edit`}
-              className="btn-secondary-sm !text-[13px] pointer-events-auto"
-            >
-              <Edit className="h-3.5 w-3.5" />
-              Edit Profile
-            </Link>
-          </div>
-        )}
-
         {/* Section Dropdown - pinned to the page's right edge. Wrapped (rather than
             passing `absolute` into SectionDropdown's own className) because that
             component's root div hardcodes `relative`, which wins the cascade over
@@ -185,10 +174,12 @@ export default function PatientProfile() {
           />
         </div>
       </div>
+      )}
 
       {/* Mobile: name gets its own full row (smaller font, no age/gender line);
-          dropdown + Edit Profile share a row below so the dropdown has room to
-          actually show its label instead of being squeezed unreadable */}
+          dropdown below so it has room to actually show its label instead of
+          being squeezed unreadable */}
+      {activeTab !== 'clinical-intelligence' && activeTab !== 'overview' && activeTab !== 'sessions' && activeTab !== 'payments' && activeTab !== 'clinical-history' && activeTab !== 'documents' && activeTab !== 'session-intelligence' && (
       <div className="flex sm:hidden relative z-20 flex-col gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -212,50 +203,131 @@ export default function PatientProfile() {
             maxWidth="none"
             variant="grey"
           />
-          <Link
-            to={`${baseUrl}/patients/${patientId}/edit`}
-            className={`btn-secondary-sm !text-[13px] shrink-0 ${activeTab !== 'overview' ? 'invisible pointer-events-none' : ''}`}
-          >
-            <Edit className="h-3.5 w-3.5" />
-            Edit Profile
-          </Link>
         </div>
       </div>
+      )}
 
       {/* Tab Content */}
       {activeTab === 'overview' ? (
-        <OverviewTab patient={patient} />
+        <OverviewTab
+          patient={patient}
+          patientId={patientId}
+          activeTab={activeTab}
+          onSectionChange={setActiveTab}
+          sectionOptions={getDropdownOptions()}
+          onBack={() => navigate(`${baseUrl}/patients`)}
+        />
       ) : activeTab === 'sessions' ? (
-        <PatientSessionsTab patientId={patientId} patient={patient} />
+        <PatientSessionsTab
+          patientId={patientId}
+          patient={patient}
+          sectionOptions={getDropdownOptions()}
+          onSectionChange={setActiveTab}
+          onBack={() => navigate(`${baseUrl}/patients`)}
+        />
       ) : activeTab === 'payments' ? (
-        <PatientPaymentsTab patientId={patientId} />
+        <PatientPaymentsTab
+          patientId={patientId}
+          patient={patient}
+          sectionOptions={getDropdownOptions()}
+          onSectionChange={setActiveTab}
+          onBack={() => navigate(`${baseUrl}/patients`)}
+        />
       ) : activeTab === 'clinical-history' ? (
-        <ClinicalHistoryWizard patientId={patientId} patient={patient} onComplete={handleClinicalHistoryComplete} />
+        <ClinicalHistoryWizard
+          patientId={patientId}
+          patient={patient}
+          onComplete={handleClinicalHistoryComplete}
+          sectionOptions={getDropdownOptions()}
+          onSectionChange={setActiveTab}
+          onBack={() => navigate(`${baseUrl}/patients`)}
+        />
       ) : activeTab === 'documents' ? (
-        <DocumentsTab patientId={patientId} />
+        <DocumentsTab
+          patientId={patientId}
+          patient={patient}
+          sectionOptions={getDropdownOptions()}
+          onSectionChange={setActiveTab}
+          onBack={() => navigate(`${baseUrl}/patients`)}
+        />
       ) : activeTab === 'session-intelligence' ? (
-        <SessionIntelligenceTab patientId={patientId} />
+        <SessionIntelligenceTab
+          patientId={patientId}
+          patient={patient}
+          sectionOptions={getDropdownOptions()}
+          onSectionChange={setActiveTab}
+          onBack={() => navigate(`${baseUrl}/patients`)}
+        />
       ) : activeTab === 'clinical-intelligence' ? (
-        <ClinicalIntelligenceTab patientId={patientId} />
+        <ClinicalIntelligenceTab
+          patientId={patientId}
+          patient={patient}
+          activeTab={activeTab}
+          onSectionChange={setActiveTab}
+          sectionOptions={getDropdownOptions()}
+          onBack={() => navigate(`${baseUrl}/patients`)}
+        />
       ) : null}
     </div>
   )
 }
 
-function DocumentsTab({ patientId }) {
+function DocumentsTab({ patientId, patient, sectionOptions, onSectionChange, onBack }) {
   const [showUpload, setShowUpload] = useState(false)
   const [previewDoc, setPreviewDoc] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [toast, setToast] = useState('')
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [mobileSectionOpen, setMobileSectionOpen] = useState(false)
+  const sectionRef = useRef(null)
+  const mobileSectionRef = useRef(null)
+  const uploadBtnDesktopRef = useRef(null)
+  const uploadBtnMobileRef = useRef(null)
   const navigate = useNavigate()
 
-  const handleUploadComplete = () => {
-    setShowUpload(false)
-    setRefreshKey(k => k + 1)
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false)
+    }
+    if (sectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [sectionOpen])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (mobileSectionRef.current && !mobileSectionRef.current.contains(e.target)) setMobileSectionOpen(false)
+    }
+    if (mobileSectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mobileSectionOpen])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  // Only one of these two buttons is ever visible at a given breakpoint —
+  // the other is `display: none` via Tailwind's hidden/flex pair, and a
+  // hidden element can't receive focus, so this always lands on the real one.
+  const focusUploadButton = () => {
+    const btn = uploadBtnDesktopRef.current?.offsetParent ? uploadBtnDesktopRef.current : uploadBtnMobileRef.current
+    btn?.focus()
   }
 
-  const handlePreview = (item) => {
-    setPreviewDoc(item)
+  const closeUpload = () => {
+    setShowUpload(false)
+    requestAnimationFrame(focusUploadButton)
   }
+
+  const handleUploadComplete = (count) => {
+    setShowUpload(false)
+    setRefreshKey((k) => k + 1)
+    setToast(`${count} document${count !== 1 ? 's' : ''} uploaded`)
+    requestAnimationFrame(focusUploadButton)
+  }
+
+  const handlePreview = (item) => setPreviewDoc(item)
 
   const handleViewAssessment = (item) => {
     if (item.assessment_type === 'mmpi2' && item.reference_id) {
@@ -263,40 +335,117 @@ function DocumentsTab({ patientId }) {
     }
   }
 
+  const currentSectionLabel = sentenceCase(
+    sectionOptions?.find((o) => o.value === 'documents')?.label || 'Documents & assessments'
+  )
+
+  const switcher = (ref, open, setOpen, fullWidth) => (
+    <div ref={ref} className={fullWidth ? 'grow' : undefined} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={fullWidth ? { width: '100%', justifyContent: 'space-between' } : undefined}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {currentSectionLabel}
+        <ChevronDown size={16} strokeWidth={1.5} />
+      </button>
+      {open && (
+        <div className={`menu-popover${fullWidth ? '' : ' align-right'}`} style={fullWidth ? { width: '100%' } : undefined}>
+          {(sectionOptions || []).map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className="menu-item"
+              onClick={() => { onSectionChange?.(opt.value); setOpen(false) }}
+            >
+              {sentenceCase(opt.label)}{opt.badge ? ` · ${opt.badge}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
   return (
-    <div className="space-y-6 pt-2">
-      {/* Section Header - Outside Card */}
-      <div className="flex items-center justify-between gap-8">
-        <h2 className="text-section-title text-content-primary">Documents & Assessments</h2>
-        <button 
+    <div className="clinical-ink">
+      {/* Desktop header — same shape as Overview/Sessions/Payments */}
+      <div className="hidden sm:block">
+        <div className="profile-head">
+          <div className="profile-id">
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" title="Back to patients" onClick={onBack}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
+            </button>
+            <div className="profile-name">
+              <h1 className="t-h1">{patient.full_name}</h1>
+              <span className="t-body-s">
+                {patient.age != null ? `${patient.age} yrs` : ''}
+                {patient.age != null && patient.gender ? ' · ' : ''}
+                {patient.gender}
+              </span>
+            </div>
+          </div>
+          <div className="profile-actions">
+            {switcher(sectionRef, sectionOpen, setSectionOpen, false)}
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile header — name only; the switcher already reads "Documents &
+          assessments" directly below, so no separate section title repeats it. */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
+        <div className="profile-id">
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <div className="profile-name">
+            <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{patient.full_name}</h1>
+          </div>
+        </div>
+        {switcher(mobileSectionRef, mobileSectionOpen, setMobileSectionOpen, true)}
+        <button
+          ref={uploadBtnMobileRef}
+          type="button"
+          className="btn btn-primary"
+          style={{ width: '100%', justifyContent: 'center' }}
           onClick={() => setShowUpload(true)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover transition-colors"
         >
-          <Plus className="h-3.5 w-3.5" />
-          Upload Document
+          <Upload size={16} strokeWidth={1.5} />
+          Upload document
         </button>
       </div>
 
-      {/* Upload Panel */}
+      {/* Desktop section head — the tab's one accent object (aside from the
+          switcher). Dropped on mobile: the full-width button above replaces it. */}
+      <div className="hidden sm:block">
+        <div className="section-head" style={{ marginBottom: 'var(--space-5)' }}>
+          <h2 className="t-h2">Documents & assessments</h2>
+          <button ref={uploadBtnDesktopRef} type="button" className="btn btn-primary" onClick={() => setShowUpload(true)}>
+            <Upload size={16} strokeWidth={1.5} />
+            Upload document
+          </button>
+        </div>
+      </div>
+
+      <DocumentsList
+        patientId={patientId}
+        patient={patient}
+        refreshKey={refreshKey}
+        onPreview={handlePreview}
+        onViewAssessment={handleViewAssessment}
+        onUploadClick={() => setShowUpload(true)}
+      />
+
       {showUpload && (
         <DocumentUpload
           patientId={patientId}
           onUploadComplete={handleUploadComplete}
-          onClose={() => setShowUpload(false)}
+          onClose={closeUpload}
         />
       )}
 
-      {/* Documents List */}
-      <div className="card">
-        <DocumentsList
-          key={refreshKey}
-          patientId={patientId}
-          onPreview={handlePreview}
-          onViewAssessment={handleViewAssessment}
-        />
-      </div>
-
-      {/* Document Preview Modal */}
       {previewDoc && (
         <DocumentPreview
           patientId={patientId}
@@ -304,96 +453,344 @@ function DocumentsTab({ patientId }) {
           onClose={() => setPreviewDoc(null)}
         />
       )}
-    </div>
-  )
-}
 
-function OverviewTab({ patient }) {
-  // Grouped into row-pairs (rather than one flat grid) purely for spacing rhythm —
-  // no divider lines, generous whitespace between rows does the separating instead.
-  const rows = [
-    [
-      { label: 'Full Name', value: patient.full_name },
-      { label: 'Date of Birth', value: formatDate(patient.date_of_birth) },
-    ],
-    [
-      { label: 'Age', value: `${patient.age} years` },
-      { label: 'Phone', value: patient.phone },
-    ],
-    [
-      { label: 'Gender', value: patient.gender },
-      { label: 'Email', value: patient.email },
-    ],
-    [
-      { label: 'Emergency Contact', value: patient.emergency_contact },
-      { label: 'Referral Source', value: patient.referral_source },
-    ],
-    [
-      { label: 'Status', value: <StatusChip status={patient.status} />, chip: true },
-      { label: 'Patient Since', value: formatDate(patient.created_at) },
-    ],
-  ]
-
-  return (
-    <div className="card mt-2 max-w-[728px]">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-light">
-          <User className="h-4.5 w-4.5 text-primary" strokeWidth={1.8} />
+      {toast && (
+        <div className="toast toast-wrap" role="status" aria-live="polite">
+          {toast}
         </div>
-        <h2 className="text-card-title">Patient Information</h2>
-      </div>
-      <div className="flex flex-col gap-4">
-        {rows.map((pair) => (
-          <div key={pair[0].label} className="grid gap-8 sm:grid-cols-2">
-            {pair.map((field) => (
-              <InfoField key={field.label} label={field.label} value={field.value} chip={field.chip} />
-            ))}
-          </div>
-        ))}
-        <InfoField
-          label="Billing Address"
-          value={patient.address && <span className="whitespace-pre-line">{patient.address}</span>}
-        />
-      </div>
-    </div>
-  )
-}
-
-function InfoField({ label, value, chip = false }) {
-  return (
-    <div>
-      <p className="label mb-0">{label}</p>
-      {chip ? (
-        // A chip carries its own padding/line-height — wrapping it in the same
-        // <p className="font-medium ..."> as plain text mismatched its height
-        // against sibling rows, which read as "awkward"/misaligned.
-        <div className="mt-1.5">{value}</div>
-      ) : (
-        <p className="mt-1 font-medium text-content-primary">
-          {value || <span className="text-content-muted font-normal">Not provided</span>}
-        </p>
       )}
     </div>
   )
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return null
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
+// Sentence-cases a TABS label for the section switcher, mirroring
+// ClinicalIntelligenceTab's own copy of this — kept local rather than
+// shared since it's a two-line pure function, not worth a utils import.
+function sentenceCase(label) {
+  if (!label) return ''
+  const lower = label.toLowerCase()
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
 }
 
-function SessionIntelligenceTab({ patientId }) {
+function OverviewTab({ patient, patientId, sectionOptions, onSectionChange, onBack }) {
+  const navigate = useNavigate()
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [mobileSectionOpen, setMobileSectionOpen] = useState(false)
+  const sectionRef = useRef(null)
+  const mobileSectionRef = useRef(null)
+  const [toast, setToast] = useState('')
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false)
+    }
+    if (sectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [sectionOpen])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (mobileSectionRef.current && !mobileSectionRef.current.contains(e.target)) setMobileSectionOpen(false)
+    }
+    if (mobileSectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mobileSectionOpen])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const handleCopy = async (text, label) => {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setToast(`${label} copied`)
+    } catch {
+      // Clipboard permission denied/unavailable — no toast reads as "not
+      // copied" without raising an alarming error state for a minor action.
+    }
+  }
+
+  const currentSectionLabel = sentenceCase(
+    sectionOptions?.find(o => o.value === 'overview')?.label || 'Overview'
+  )
+  const editUrl = `/patients/${patientId}/edit`
+  const dobValue = patient.date_of_birth
+    ? `${formatDate(patient.date_of_birth)}${patient.age != null ? ` · ${patient.age} yrs` : ''}`
+    : ''
+  const statusLabel = patient.status === 'archived' ? 'Archived' : patient.status === 'active' ? 'Active' : sentenceCase(patient.status || '')
+  const statusClass = patient.status === 'archived' ? 'status-quiet' : 'status-plain'
+
+  const switcher = (ref, open, setOpen, fullWidth) => (
+    <div ref={ref} className={fullWidth ? 'grow' : undefined} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={fullWidth ? { width: '100%', justifyContent: 'space-between' } : undefined}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+      >
+        {currentSectionLabel}
+        <ChevronDown size={16} strokeWidth={1.5} />
+      </button>
+      {open && (
+        <div className={`menu-popover${fullWidth ? '' : ' align-right'}`} style={fullWidth ? { width: '100%' } : undefined}>
+          {(sectionOptions || []).map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              className="menu-item"
+              onClick={() => { onSectionChange?.(opt.value); setOpen(false) }}
+            >
+              {sentenceCase(opt.label)}{opt.badge ? ` · ${opt.badge}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="clinical-ink">
+      {/* Desktop header — matches ClinicalIntelligenceTab's .ci-patient-head
+          exactly, with a third element (Edit profile) in the right group, so
+          this uses .profile-* rather than reusing .ci-patient-head itself.
+          Wrapped in "hidden sm:block" rather than putting "hidden sm:flex"
+          directly on .profile-head: that class's own display:flex is
+          (0,2,0) once scoped and beats Tailwind's .hidden (0,1,0) regardless
+          of source order (tokens.css is unlayered, so it outranks Tailwind's
+          utilities layer entirely) — see clinical-ink-css-specificity-pitfalls. */}
+      <div className="hidden sm:block">
+        <div className="profile-head">
+          <div className="profile-id">
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" title="Back to patients" onClick={onBack}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
+            </button>
+            <div className="profile-name">
+              <h1 className="t-h1">{patient.full_name}</h1>
+              <span className="t-body-s">
+                {patient.age != null ? `${patient.age} yrs` : ''}
+                {patient.age != null && patient.gender ? ' · ' : ''}
+                {patient.gender}
+              </span>
+            </div>
+          </div>
+          <div className="profile-actions">
+            <Link to={editUrl} className="btn btn-primary">
+              <Edit size={16} strokeWidth={1.5} />
+              Edit profile
+            </Link>
+            {switcher(sectionRef, sectionOpen, setSectionOpen, false)}
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile header */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-7)' }}>
+        <div className="profile-id">
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <div className="profile-name">
+            <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{patient.full_name}</h1>
+            <span className="t-body-s">
+              {patient.age != null ? `${patient.age} yrs` : ''}
+              {patient.age != null && patient.gender ? ' · ' : ''}
+              {patient.gender}
+            </span>
+          </div>
+        </div>
+        <div className="action-row">
+          <Link to={editUrl} className="btn btn-primary">
+            Edit profile
+          </Link>
+          {switcher(mobileSectionRef, mobileSectionOpen, setMobileSectionOpen, true)}
+        </div>
+      </div>
+
+      <div className="card profile-info-card">
+        <div className="ci-card-head">
+          <span className="icon-badge"><User size={16} strokeWidth={1.5} /></span>
+          <h2 className="t-h3">Patient information</h2>
+        </div>
+
+        <div className="field-group">
+          <span className="t-h4 field-group-label">Identity</span>
+          <dl className="field-grid">
+            <div className="field-item">
+              <dt className="field-label">Full name</dt>
+              <dd className="field-value">{patient.full_name}</dd>
+            </div>
+            <div className="field-item">
+              <dt className="field-label">Date of birth</dt>
+              <dd className="field-value field-value-num">{dobValue || <span className="field-empty">Not provided</span>}</dd>
+            </div>
+            <div className="field-item">
+              <dt className="field-label">Gender</dt>
+              <dd className="field-value">{patient.gender || <span className="field-empty">Not provided</span>}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="field-group">
+          <span className="t-h4 field-group-label">Contact</span>
+          <dl className="field-grid">
+            <div className="field-item">
+              <dt className="field-label">Phone</dt>
+              <dd className="field-value">
+                {patient.phone ? (
+                  <>
+                    <a href={`tel:${patient.phone}`} className="field-link">{patient.phone}</a>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon btn-icon-sm field-copy"
+                      aria-label="Copy phone number"
+                      title="Copy phone number"
+                      onClick={() => handleCopy(patient.phone, 'Phone number')}
+                    >
+                      <Copy size={14} strokeWidth={1.5} />
+                    </button>
+                  </>
+                ) : (
+                  <span className="field-empty">Not provided</span>
+                )}
+              </dd>
+            </div>
+            <div className="field-item">
+              <dt className="field-label">Email</dt>
+              <dd className="field-value">
+                {patient.email ? (
+                  <>
+                    <a href={`mailto:${patient.email}`} className="field-link">{patient.email}</a>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon btn-icon-sm field-copy"
+                      aria-label="Copy email address"
+                      title="Copy email address"
+                      onClick={() => handleCopy(patient.email, 'Email address')}
+                    >
+                      <Copy size={14} strokeWidth={1.5} />
+                    </button>
+                  </>
+                ) : (
+                  <div className="field-empty-row">
+                    <span className="field-empty">Not provided</span>
+                    <button type="button" className="field-add" onClick={() => navigate(`${editUrl}?focus=email`)}>Add</button>
+                  </div>
+                )}
+              </dd>
+            </div>
+            <div className="field-item">
+              <dt className="field-label">Emergency contact</dt>
+              <dd className="field-value">
+                {patient.emergency_contact ? (
+                  patient.emergency_contact
+                ) : (
+                  <div className="field-empty-row">
+                    <span className="field-empty">Not provided</span>
+                    <button type="button" className="field-add" onClick={() => navigate(`${editUrl}?focus=emergency_contact`)}>Add</button>
+                  </div>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="field-group">
+          <span className="t-h4 field-group-label">Practice</span>
+          <dl className="field-grid">
+            <div className="field-item">
+              <dt className="field-label">Status</dt>
+              <dd className={statusClass}>{statusLabel}</dd>
+            </div>
+            <div className="field-item">
+              <dt className="field-label">Patient since</dt>
+              <dd className="field-value field-value-num">{formatDate(patient.created_at) || <span className="field-empty">Not provided</span>}</dd>
+            </div>
+            <div className="field-item">
+              <dt className="field-label">Referral source</dt>
+              <dd className="field-value">{patient.referral_source || <span className="field-empty">Not provided</span>}</dd>
+            </div>
+            <div className="field-item">
+              <dt className="field-label">Billing address</dt>
+              <dd className="field-value">
+                {patient.address ? (
+                  <span style={{ whiteSpace: 'pre-line' }}>{patient.address}</span>
+                ) : (
+                  <div className="field-empty-row">
+                    <span className="field-empty">Not provided</span>
+                    <button type="button" className="field-add" onClick={() => navigate(`${editUrl}?focus=address`)}>Add</button>
+                  </div>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      {toast && (
+        <div className="toast toast-wrap" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SessionIntelligenceTab({ patientId, patient, sectionOptions, onSectionChange, onBack }) {
   const [showUpload, setShowUpload] = useState(false)
   const [selectedSession, setSelectedSession] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [toast, setToast] = useState('')
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [mobileSectionOpen, setMobileSectionOpen] = useState(false)
+  const sectionRef = useRef(null)
+  const mobileSectionRef = useRef(null)
+  const uploadBtnDesktopRef = useRef(null)
+  const uploadBtnMobileRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false)
+    }
+    if (sectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [sectionOpen])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (mobileSectionRef.current && !mobileSectionRef.current.contains(e.target)) setMobileSectionOpen(false)
+    }
+    if (mobileSectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mobileSectionOpen])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  // Only one of these two buttons is ever visible at a given breakpoint —
+  // see DocumentsTab's identical comment on the same pattern.
+  const focusUploadButton = () => {
+    const btn = uploadBtnDesktopRef.current?.offsetParent ? uploadBtnDesktopRef.current : uploadBtnMobileRef.current
+    btn?.focus()
+  }
+
+  const closeUpload = () => {
+    setShowUpload(false)
+    requestAnimationFrame(focusUploadButton)
+  }
 
   const handleUploadComplete = () => {
     setShowUpload(false)
     setRefreshKey(k => k + 1)
+    setToast('Transcript uploaded')
+    requestAnimationFrame(focusUploadButton)
   }
 
   const handleViewSession = (session, tab = 'transcript') => {
@@ -416,58 +813,177 @@ function SessionIntelligenceTab({ patientId }) {
     )
   }
 
+  const currentSectionLabel = sentenceCase(
+    sectionOptions?.find((o) => o.value === 'session-intelligence')?.label || 'Session intelligence'
+  )
+
+  const switcher = (ref, open, setOpen, fullWidth) => (
+    <div ref={ref} className={fullWidth ? 'grow' : undefined} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={fullWidth ? { width: '100%', justifyContent: 'space-between' } : undefined}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {currentSectionLabel}
+        <ChevronDown size={16} strokeWidth={1.5} />
+      </button>
+      {open && (
+        <div className={`menu-popover${fullWidth ? '' : ' align-right'}`} style={fullWidth ? { width: '100%' } : undefined}>
+          {(sectionOptions || []).map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className="menu-item"
+              onClick={() => { onSectionChange?.(opt.value); setOpen(false) }}
+            >
+              {sentenceCase(opt.label)}{opt.badge ? ` · ${opt.badge}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
   return (
-    <div className="space-y-6 pt-2">
-      {/* Section Header - Outside Card */}
-      <div className="flex items-center justify-between gap-8">
-        <h2 className="text-section-title text-content-primary">Session Intelligence</h2>
+    <div className="clinical-ink">
+      {/* Desktop header — same shape as Overview/Sessions/Payments/Documents */}
+      <div className="hidden sm:block">
+        <div className="profile-head">
+          <div className="profile-id">
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" title="Back to patients" onClick={onBack}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
+            </button>
+            <div className="profile-name">
+              <h1 className="t-h1">{patient.full_name}</h1>
+              <span className="t-body-s">
+                {patient.age != null ? `${patient.age} yrs` : ''}
+                {patient.age != null && patient.gender ? ' · ' : ''}
+                {patient.gender}
+              </span>
+            </div>
+          </div>
+          <div className="profile-actions">
+            {switcher(sectionRef, sectionOpen, setSectionOpen, false)}
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile header — name only; the switcher already reads "Session
+          intelligence" directly below, so no separate section title repeats it. */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
+        <div className="profile-id">
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <div className="profile-name">
+            <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{patient.full_name}</h1>
+          </div>
+        </div>
+        {switcher(mobileSectionRef, mobileSectionOpen, setMobileSectionOpen, true)}
         <button
+          ref={uploadBtnMobileRef}
+          type="button"
+          className="btn btn-primary"
+          style={{ width: '100%', justifyContent: 'center' }}
           onClick={() => setShowUpload(true)}
-          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-primary-hover transition-colors"
         >
-          <Plus className="h-3.5 w-3.5" />
-          Upload Transcript
+          <Upload size={16} strokeWidth={1.5} />
+          Upload transcript
         </button>
       </div>
 
-      {/* Upload Panel */}
+      {/* Desktop section head — the tab's one accent object (aside from the
+          switcher). Dropped on mobile: the full-width button above replaces it. */}
+      <div className="hidden sm:block">
+        <div className="section-head" style={{ marginBottom: 'var(--space-5)' }}>
+          <h2 className="t-h2">Session intelligence</h2>
+          <button ref={uploadBtnDesktopRef} type="button" className="btn btn-primary" onClick={() => setShowUpload(true)}>
+            <Upload size={16} strokeWidth={1.5} />
+            Upload transcript
+          </button>
+        </div>
+      </div>
+
+      <SessionsList
+        key={refreshKey}
+        patientId={patientId}
+        onViewSession={handleViewSession}
+        onUploadClick={() => setShowUpload(true)}
+      />
+
       {showUpload && (
         <TranscriptUpload
           patientId={patientId}
           onUploadComplete={handleUploadComplete}
-          onClose={() => setShowUpload(false)}
+          onClose={closeUpload}
         />
       )}
 
-      {/* Sessions List */}
-      <div className="card">
-        <SessionsList
-          key={refreshKey}
-          patientId={patientId}
-          onViewSession={handleViewSession}
-        />
-      </div>
+      {toast && (
+        <div className="toast toast-wrap" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
     </div>
   )
 }
 
-function PatientSessionsTab({ patientId, patient }) {
-  const navigate = useNavigate()
+const SESSION_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'upcoming', label: 'Upcoming' },
+  { value: 'past', label: 'Past' },
+]
+
+function sessionStatusMeta(status) {
+  switch (status) {
+    case 'completed':   return { label: 'Completed',   cls: 'status-quiet' }
+    case 'scheduled':   return { label: 'Scheduled',   cls: 'status-plain' }
+    case 'no_show':     return { label: 'No-show',     cls: 'status-warn' }
+    case 'cancelled':   return { label: 'Cancelled',   cls: 'status-quiet' }
+    case 'rescheduled': return { label: 'Rescheduled', cls: 'status-plain' }
+    default:            return { label: sentenceCase(status || ''), cls: 'status-plain' }
+  }
+}
+
+function PatientSessionsTab({ patientId, patient, sectionOptions, onSectionChange, onBack }) {
   const [appointments, setAppointments] = useState([])
   const [loading, setLoading] = useState(true)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [filter, setFilter] = useState('all')
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [mobileSectionOpen, setMobileSectionOpen] = useState(false)
+  const sectionRef = useRef(null)
+  const mobileSectionRef = useRef(null)
 
   useEffect(() => {
     loadAppointments()
   }, [patientId])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false)
+    }
+    if (sectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [sectionOpen])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (mobileSectionRef.current && !mobileSectionRef.current.contains(e.target)) setMobileSectionOpen(false)
+    }
+    if (mobileSectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mobileSectionOpen])
 
   const loadAppointments = async () => {
     try {
       const data = await getPatientAppointments(patientId)
       setAppointments(data)
     } catch (err) {
-      console.error('Failed to load appointments:', err)
+      console.error('Failed to load sessions:', err)
     } finally {
       setLoading(false)
     }
@@ -483,150 +999,239 @@ function PatientSessionsTab({ patientId, patient }) {
     }
   }
 
-  const formatDateTime = (dateStr) => {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-    })
-  }
-
-  const formatTime = (dateStr) => {
-    return new Date(dateStr).toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-  }
-
-  const getSessionTypeLabel = (type) => {
-    const labels = {
-      therapy_session: 'Therapy Session',
-      follow_up: 'Follow-up',
-      assessment_session: 'Assessment',
-      consultation: 'Consultation',
-    }
-    return labels[type] || type
-  }
-
   const now = new Date()
   const upcomingAppointments = appointments.filter(a => new Date(a.start_time) > now && a.status === 'scheduled')
   const pastAppointments = appointments.filter(a => new Date(a.start_time) <= now || a.status !== 'scheduled')
+  const completedCount = appointments.filter(a => a.status === 'completed').length
+  const noShowCount = appointments.filter(a => a.status === 'no_show').length
 
-  const filteredAppointments = filter === 'upcoming' ? upcomingAppointments
-    : filter === 'past' ? pastAppointments
-    : appointments
+  // Upcoming reads soonest-first (what's next); All/Past read most-recent-first,
+  // matching how Payments presents history.
+  const filteredAppointments = filter === 'upcoming'
+    ? [...upcomingAppointments].sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+    : filter === 'past'
+    ? [...pastAppointments].sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+    : [...appointments].sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+
+  // At most one row on the page carries the next-session accent rule —
+  // earliest upcoming appointment, regardless of which filter is active.
+  const nextUpcomingId = [...upcomingAppointments]
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))[0]?.id
+
+  const handleFilterKeyDown = (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    e.preventDefault()
+    const idx = SESSION_FILTERS.findIndex(f => f.value === filter)
+    const dir = e.key === 'ArrowRight' ? 1 : -1
+    const next = SESSION_FILTERS[(idx + dir + SESSION_FILTERS.length) % SESSION_FILTERS.length]
+    setFilter(next.value)
+  }
+
+  const currentSectionLabel = sentenceCase(
+    sectionOptions?.find(o => o.value === 'sessions')?.label || 'Sessions'
+  )
+
+  const switcher = (ref, open, setOpen, fullWidth) => (
+    <div ref={ref} className={fullWidth ? 'grow' : undefined} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={fullWidth ? { width: '100%', justifyContent: 'space-between' } : undefined}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+      >
+        {currentSectionLabel}
+        <ChevronDown size={16} strokeWidth={1.5} />
+      </button>
+      {open && (
+        <div className={`menu-popover${fullWidth ? '' : ' align-right'}`} style={fullWidth ? { width: '100%' } : undefined}>
+          {(sectionOptions || []).map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              className="menu-item"
+              onClick={() => { onSectionChange?.(opt.value); setOpen(false) }}
+            >
+              {sentenceCase(opt.label)}{opt.badge ? ` · ${opt.badge}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  const scheduleButton = (full) => (
+    <button
+      type="button"
+      className="btn btn-primary"
+      style={full ? { width: '100%', justifyContent: 'center' } : undefined}
+      onClick={() => setShowScheduleModal(true)}
+    >
+      <Plus size={16} strokeWidth={1.5} />
+      Schedule session
+    </button>
+  )
 
   return (
-    <div className="space-y-6 pt-2">
-      {/* Side-by-side layout: Metrics on left, Sessions list on right */}
-      <div className="grid grid-cols-2 gap-8">
-        {/* Left Column: Header + Metrics */}
-        <div className="space-y-5 min-w-0 max-w-[460px]">
-          <div className="flex items-center justify-between h-10">
-            <h2 className="text-section-title text-content-primary">Sessions</h2>
-            <button
-              onClick={() => setShowScheduleModal(true)}
-              className="workspace-header__btn workspace-header__btn--soft"
-            >
-              <Plus size={16} strokeWidth={1.5} />
-              <span>Schedule Session</span>
+    <div className="clinical-ink">
+      {/* Desktop header — identical shape to Overview/Clinical Intelligence,
+          minus a header-level primary action: Sessions' one accent button
+          lives in the section head below, not duplicated up here. Wrapped in
+          "hidden sm:block" rather than "hidden sm:flex" directly on
+          .profile-head for the same specificity reason as Overview — see
+          clinical-ink-css-specificity-pitfalls. */}
+      <div className="hidden sm:block">
+        <div className="profile-head">
+          <div className="profile-id">
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" title="Back to patients" onClick={onBack}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
             </button>
+            <div className="profile-name">
+              <h1 className="t-h1">{patient.full_name}</h1>
+              <span className="t-body-s">
+                {patient.age != null ? `${patient.age} yrs` : ''}
+                {patient.age != null && patient.gender ? ' · ' : ''}
+                {patient.gender}
+              </span>
+            </div>
           </div>
-
-          {/* Stats */}
-          <MetricCardGrid cols={3} className="!grid-cols-3 !gap-2">
-            <MetricCard
-              label="Upcoming"
-              value={upcomingAppointments.length}
-              semantic="info"
-              variant="mini"
-              className="summary-card-mini--compact !min-w-0"
-            />
-            <MetricCard
-              label="Completed"
-              value={appointments.filter(a => a.status === 'completed').length}
-              semantic="success"
-              variant="mini"
-              className="summary-card-mini--compact !min-w-0"
-            />
-            <MetricCard
-              label="Total Sessions"
-              value={appointments.length}
-              semantic="default"
-              variant="mini"
-              className="summary-card-mini--compact !min-w-0"
-            />
-          </MetricCardGrid>
-        </div>
-
-        {/* Right Column: Filter + Sessions List */}
-        <div className="space-y-4 min-w-0">
-          {/* Filter */}
-          <FilterTabs
-            value={filter}
-            onChange={setFilter}
-            size="sm"
-            className="!p-[6px] h-10 flex items-center"
-            options={[
-              { value: 'all', label: 'All Sessions' },
-              { value: 'upcoming', label: 'Upcoming' },
-              { value: 'past', label: 'Past' },
-            ]}
-          />
-
-          {/* Sessions List as Row Cards */}
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : filteredAppointments.length === 0 ? (
-            <NoSessions onSchedule={() => setShowScheduleModal(true)} />
-          ) : (
-            <div className="space-y-2.5">
-              {filteredAppointments.map((appt) => (
-                <RowCard
-                  key={appt.id}
-                  className="flex items-center gap-3"
-                >
-                  <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-xl bg-slate-100">
-                    <span className="text-[9px] font-medium text-content-muted uppercase">
-                      {new Date(appt.start_time).toLocaleDateString('en-US', { month: 'short' })}
-                    </span>
-                    <span className="text-sm font-bold text-content-primary leading-none">
-                      {new Date(appt.start_time).getDate()}
-                    </span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-content-primary whitespace-nowrap">{getSessionTypeLabel(appt.session_type)}</p>
-                    <p className="text-xs text-content-muted mt-0.5 whitespace-nowrap">
-                      {formatTime(appt.start_time)} - {formatTime(appt.end_time)} • {appt.duration_minutes} min
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-content-secondary whitespace-nowrap">
-                    {appt.session_mode === 'online' ? (
-                      <><Video className="h-3.5 w-3.5" /> Online</>
-                    ) : (
-                      <><Building className="h-3.5 w-3.5" /> In-Person</>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 ml-auto shrink-0">
-                    <StatusChip status={appt.status} size="sm" />
-                    <button
-                      onClick={() => navigate('/calendar')}
-                      className="text-xs font-medium text-primary hover:text-primary-hover transition-colors"
-                    >
-                      View →
-                    </button>
-                  </div>
-                </RowCard>
-              ))}
-            </div>
-          )}
+          <div className="profile-actions">
+            {switcher(sectionRef, sectionOpen, setSectionOpen, false)}
+          </div>
         </div>
       </div>
 
-      {/* Schedule Modal */}
+      {/* Mobile header */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-7)' }}>
+        <div className="profile-id">
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <div className="profile-name">
+            <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{patient.full_name}</h1>
+            <span className="t-body-s">
+              {patient.age != null ? `${patient.age} yrs` : ''}
+              {patient.age != null && patient.gender ? ' · ' : ''}
+              {patient.gender}
+            </span>
+          </div>
+        </div>
+        {switcher(mobileSectionRef, mobileSectionOpen, setMobileSectionOpen, true)}
+      </div>
+
+      {/* Section head — Sessions' one accent object (nav aside): "Schedule
+          session". Desktop and mobile are separate blocks (not one .section-head
+          reflowed by media query) since .section-head is shared with the
+          Dashboard cards, which must keep their plain row layout untouched. */}
+      <div className="hidden sm:block">
+        <div className="section-head" style={{ marginBottom: 'var(--space-5)' }}>
+          <h2 className="t-h2">Sessions</h2>
+          {scheduleButton(false)}
+        </div>
+      </div>
+      <div className="flex sm:hidden">
+        <div className="session-head-m" style={{ marginBottom: 'var(--space-5)' }}>
+          <h2 className="t-h2">Sessions</h2>
+          {scheduleButton(true)}
+        </div>
+      </div>
+
+      {/* Stat strip — one bordered card, hairline-divided; the no-show count
+          is the only coloured number on the page, and only when it's > 0. */}
+      <div className="stat-row" style={{ marginBottom: 'var(--space-5)' }}>
+        <div className="stat">
+          <span className="stat-label">Upcoming</span>
+          <span className="stat-value">{upcomingAppointments.length}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Completed</span>
+          <span className="stat-value">{completedCount}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">No-shows</span>
+          <span className={`stat-value${noShowCount > 0 ? ' is-warn' : ''}`}>{noShowCount}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Total</span>
+          <span className="stat-value">{appointments.length}</span>
+        </div>
+      </div>
+
+      {/* Filter — graphite fill on the active option, a true tablist rather
+          than three unlabelled buttons */}
+      <div
+        className="seg seg-filter"
+        role="tablist"
+        aria-label="Filter sessions"
+        onKeyDown={handleFilterKeyDown}
+        style={{ marginBottom: 'var(--space-4)' }}
+      >
+        {SESSION_FILTERS.map(f => (
+          <button
+            key={f.value}
+            type="button"
+            role="tab"
+            id={`sessions-filter-${f.value}`}
+            className="seg-option"
+            aria-selected={filter === f.value}
+            tabIndex={filter === f.value ? 0 : -1}
+            onClick={() => setFilter(f.value)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Session list — flush rows, one container, the whole row is the link */}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-8) 0' }}>
+          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
+        </div>
+      ) : filteredAppointments.length === 0 ? (
+        <div className="empty">
+          <Calendar size={20} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} aria-hidden="true" />
+          <h3 className="empty-title">
+            {filter === 'upcoming' ? 'No upcoming sessions' : filter === 'past' ? 'No past sessions' : 'No sessions yet'}
+          </h3>
+          <p className="empty-body">Scheduled sessions for this patient will appear here.</p>
+        </div>
+      ) : (
+        <div className="table-wrap card-flush">
+          {filteredAppointments.map((appt) => {
+            const badge = formatDateBadge(appt.start_time)
+            const timeLabel = formatSessionTime(appt.start_time, appt.end_time, appt.duration_minutes)
+            const statusMeta = sessionStatusMeta(appt.status)
+            const isOnline = appt.session_mode === 'online'
+            const ModalityIcon = isOnline ? Video : Building
+            const modalityLabel = isOnline ? 'Online' : 'In person'
+            const rowLabel = `${formatDate(appt.start_time)}, ${timeLabel}, ${statusMeta.label}`
+            return (
+              <Link
+                to="/calendar"
+                key={appt.id}
+                className={`session-row${appt.id === nextUpcomingId ? ' is-next' : ''}`}
+                aria-label={rowLabel}
+              >
+                <div className="date-badge">
+                  <span className="date-badge-m">{badge.month}</span>
+                  <span className="date-badge-d">{badge.day}</span>
+                </div>
+                <div className="session-main">
+                  <p className="session-time">{timeLabel}</p>
+                  <p className="session-meta">
+                    <ModalityIcon size={14} strokeWidth={1.5} aria-hidden="true" />
+                    {getSessionTypeLabel(appt.session_type)} · {modalityLabel}
+                  </p>
+                </div>
+                <span className={`session-status ${statusMeta.cls}`}>{statusMeta.label}</span>
+                <ChevronRight size={16} strokeWidth={1.5} className="session-chevron" aria-hidden="true" />
+              </Link>
+            )
+          })}
+        </div>
+      )}
+
       {showScheduleModal && (
         <ScheduleModal
           initialDate={new Date()}
@@ -640,16 +1245,45 @@ function PatientSessionsTab({ patientId, patient }) {
   )
 }
 
-function PatientPaymentsTab({ patientId }) {
+// Splits a formatted amount into symbol/digits so the ₹ can render muted
+// while the figure itself carries the row's weight — mirrors the dashboard
+// PaymentsList widget's formatAmountParts.
+function PatientPaymentsTab({ patientId, patient, sectionOptions, onSectionChange, onBack }) {
   const [payments, setPayments] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedMonths, setSelectedMonths] = useState(new Set())
   const [generatingId, setGeneratingId] = useState(null)
   const [bulkGenerating, setBulkGenerating] = useState(false)
+  const [toast, setToast] = useState('')
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [mobileSectionOpen, setMobileSectionOpen] = useState(false)
+  const sectionRef = useRef(null)
+  const mobileSectionRef = useRef(null)
 
   useEffect(() => {
     loadPayments()
   }, [patientId])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false)
+    }
+    if (sectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [sectionOpen])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (mobileSectionRef.current && !mobileSectionRef.current.contains(e.target)) setMobileSectionOpen(false)
+    }
+    if (mobileSectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mobileSectionOpen])
 
   const loadPayments = async () => {
     try {
@@ -667,9 +1301,11 @@ function PatientPaymentsTab({ patientId }) {
   // invoicing works ahead of payment now, not just after.
   const isInvoiceable = (p) => !p.receipt_id && (p.status === 'pending' || p.status === 'paid')
 
-  // Group sessions by calendar month for bulk invoicing. Payments already
-  // come back ordered by appointment date (desc), so insertion order here
-  // keeps the most recent month first.
+  // Group sessions by calendar month for display only — selection itself is
+  // per-row and can span months, since the backend's bulk-invoice endpoint
+  // has no month constraint, only a same-practitioner one (create_bulk_invoice,
+  // main.py). Payments already come back ordered by appointment date (desc),
+  // so insertion order here keeps the most recent month first.
   const monthGroups = useMemo(() => {
     const map = new Map()
     for (const p of payments) {
@@ -690,18 +1326,11 @@ function PatientPaymentsTab({ patientId }) {
     }))
   }, [payments])
 
-  const toggleMonth = (key) => {
-    setSelectedMonths((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const selectedPaymentIds = monthGroups
-    .filter((g) => selectedMonths.has(g.key))
-    .flatMap((g) => g.payments.filter(isInvoiceable).map((p) => p.id))
+  // Once a selection exists it locks to that payment's practitioner — the
+  // backend rejects a bulk invoice spanning more than one.
+  const { selectedIds, selectedItems: selectedPayments, isSelectable, hasBlockedOthers, toggleRow, toggleGroup, clearSelection } =
+    useBulkInvoiceSelection({ items: payments, isInvoiceable, lockKeyOf: (p) => p.practitioner_id })
+  const toggleMonth = (group) => toggleGroup(group.payments)
 
   const handleGenerateSingle = async (paymentId) => {
     if (generatingId) return
@@ -709,208 +1338,274 @@ function PatientPaymentsTab({ patientId }) {
     try {
       await getPaymentReceipt(paymentId) // get-or-create
       await loadPayments()
+      setToast('Invoice generated')
     } catch (err) {
       console.error('Failed to generate invoice:', err)
-      alert(err.userMessage || 'Failed to generate invoice')
+      setToast(err.userMessage || 'Failed to generate invoice')
     } finally {
       setGeneratingId(null)
     }
   }
 
   const handleBulkInvoice = async () => {
-    if (bulkGenerating || selectedPaymentIds.length === 0) return
+    if (bulkGenerating || selectedIds.size === 0) return
     setBulkGenerating(true)
     try {
-      const receipt = await createBulkInvoice(patientId, selectedPaymentIds)
-      setSelectedMonths(new Set())
+      const receipt = await createBulkInvoice(patientId, Array.from(selectedIds))
+      clearSelection()
       await loadPayments()
+      setToast('Invoice generated')
       window.open(getInvoicePdfUrl(receipt.payment_id), '_blank')
     } catch (err) {
       console.error('Failed to create bulk invoice:', err)
-      alert(err.userMessage || 'Failed to create bulk invoice')
+      setToast(err.userMessage || 'Failed to create bulk invoice')
     } finally {
       setBulkGenerating(false)
     }
   }
 
-  const formatCurrency = (amount, currency = 'INR') => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 0,
-    }).format(amount / 100)
-  }
-
-  const formatPaymentDate = (dateStr) => {
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    })
-  }
-
-  const getSessionTypeLabel = (type) => {
-    const labels = {
-      therapy_session: 'Therapy Session',
-      follow_up: 'Follow-up',
-      assessment_session: 'Assessment',
-      consultation: 'Consultation',
-    }
-    return labels[type] || type
-  }
-
   const totalPaid = payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)
   const totalPending = payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0)
+  const totalInvoiced = payments.filter(p => p.receipt_id).length
+  const selectedSum = selectedPayments.reduce((sum, p) => sum + p.amount, 0)
+
+  const currentSectionLabel = sentenceCase(
+    sectionOptions?.find(o => o.value === 'payments')?.label || 'Payments'
+  )
+
+  const switcher = (ref, open, setOpen, fullWidth) => (
+    <div ref={ref} className={fullWidth ? 'grow' : undefined} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={fullWidth ? { width: '100%', justifyContent: 'space-between' } : undefined}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+      >
+        {currentSectionLabel}
+        <ChevronDown size={16} strokeWidth={1.5} />
+      </button>
+      {open && (
+        <div className={`menu-popover${fullWidth ? '' : ' align-right'}`} style={fullWidth ? { width: '100%' } : undefined}>
+          {(sectionOptions || []).map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              className="menu-item"
+              onClick={() => { onSectionChange?.(opt.value); setOpen(false) }}
+            >
+              {sentenceCase(opt.label)}{opt.badge ? ` · ${opt.badge}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
-    <div className="space-y-6 pt-2">
-      {/* Side-by-side layout: Metrics on left, Payments list on right */}
-      <div className="grid grid-cols-2 gap-8">
-        {/* Left Column: Header + Metrics */}
-        <div className="space-y-5 min-w-0 max-w-[460px]">
-          <div className="flex items-center justify-between gap-4 h-10">
-            <h2 className="text-section-title text-content-primary">Payments</h2>
-            <Link
-              to="/payments"
-              className="text-xs font-medium text-primary hover:text-primary-hover transition-colors"
-            >
-              View All →
-            </Link>
-          </div>
-
-          {/* Stats */}
-          <MetricCardGrid cols={3} className="!grid-cols-3 !gap-2">
-            <MetricCard
-              label="Total Paid"
-              value={formatCurrency(totalPaid)}
-              semantic="success"
-              variant="mini"
-              className="summary-card-mini--compact !min-w-0"
-            />
-            <MetricCard
-              label="Pending"
-              value={formatCurrency(totalPending)}
-              semantic="warning"
-              variant="mini"
-              className="summary-card-mini--compact !min-w-0"
-            />
-            <MetricCard
-              label="Transactions"
-              value={payments.length}
-              semantic="default"
-              variant="mini"
-              className="summary-card-mini--compact !min-w-0"
-            />
-          </MetricCardGrid>
-        </div>
-
-        {/* Right Column: Payments List */}
-        <div className="space-y-3 min-w-0">
-          {/* Payments List as Row Cards */}
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    <div className="clinical-ink">
+      {/* Desktop header — same shape as Overview/Sessions */}
+      <div className="hidden sm:block">
+        <div className="profile-head">
+          <div className="profile-id">
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" title="Back to patients" onClick={onBack}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
+            </button>
+            <div className="profile-name">
+              <h1 className="t-h1">{patient.full_name}</h1>
+              <span className="t-body-s">
+                {patient.age != null ? `${patient.age} yrs` : ''}
+                {patient.age != null && patient.gender ? ' · ' : ''}
+                {patient.gender}
+              </span>
             </div>
-          ) : payments.length === 0 ? (
-            <NoPayments />
-          ) : (
-            <>
-              {/* Header Row - Transparent like Recent Patients */}
-              <div className="px-4 h-10 flex items-center gap-3 text-xs font-normal text-content-muted">
-                <span className="w-[76px] shrink-0">Date</span>
-                <span className="w-[150px] shrink-0">Session</span>
-                <span className="w-[90px] shrink-0">Amount</span>
-                <span className="ml-auto shrink-0 flex items-center gap-3">
-                  <span className="w-[84px]">Status</span>
-                  <span className="w-16"></span>
-                </span>
-              </div>
-
-              {monthGroups.map((group) => {
-                const eligible = group.payments.filter(isInvoiceable)
-                const practitionerIds = new Set(eligible.map((p) => p.practitioner_id))
-                const canBulkInvoice = eligible.length > 0 && practitionerIds.size === 1
-                const checked = selectedMonths.has(group.key)
-
-                return (
-                  <div key={group.key} className="space-y-2 pt-1 first:pt-0">
-                    <div className="px-4 h-9 flex items-center gap-3">
-                      {canBulkInvoice ? (
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleMonth(group.key)}
-                          className="w-4 h-4 rounded accent-primary"
-                          title="Select this month for a bulk invoice"
-                        />
-                      ) : (
-                        <span className="w-4 shrink-0" />
-                      )}
-                      <span className="text-xs font-semibold uppercase tracking-wide text-content-muted whitespace-nowrap">
-                        {group.label}
-                      </span>
-                      <span className="h-px flex-1 bg-border-light" />
-                      <span className="text-xs text-content-muted whitespace-nowrap">
-                        {group.payments.length} session{group.payments.length !== 1 ? 's' : ''} · {formatCurrency(group.total)}
-                      </span>
-                    </div>
-
-                    {group.payments.map((payment) => (
-                      <RowCard
-                        key={payment.id}
-                        className="flex items-center gap-3"
-                      >
-                        <span className="text-xs text-content-secondary w-[76px] shrink-0">
-                          {formatPaymentDate(payment.appointment_date)}
-                        </span>
-                        <span className="text-sm text-content-primary w-[150px] shrink-0 whitespace-nowrap">
-                          {getSessionTypeLabel(payment.session_type)}
-                        </span>
-                        <span className="text-sm font-medium text-content-primary w-[90px] shrink-0">
-                          {formatCurrency(payment.amount, payment.currency)}
-                        </span>
-                        <div className="flex items-center gap-3 ml-auto shrink-0">
-                          <StatusChip status={payment.status} size="sm" />
-                          <div className="w-16 text-right">
-                            {payment.receipt_id ? (
-                              <a
-                                href={getInvoicePdfUrl(payment.id)}
-                                className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer"
-                              >
-                                Invoice →
-                              </a>
-                            ) : isInvoiceable(payment) ? (
-                              <span
-                                onClick={() => handleGenerateSingle(payment.id)}
-                                className="text-xs font-medium text-primary hover:text-primary-hover cursor-pointer"
-                              >
-                                {generatingId === payment.id ? '…' : 'Generate →'}
-                              </span>
-                            ) : (
-                              <span className="text-content-muted">—</span>
-                            )}
-                          </div>
-                        </div>
-                      </RowCard>
-                    ))}
-                  </div>
-                )
-              })}
-
-              {selectedPaymentIds.length > 0 && (
-                <div className="sticky bottom-0 flex items-center justify-between gap-4 rounded-xl bg-primary-light px-4 py-3 mt-2">
-                  <span className="text-sm text-content-secondary">
-                    {selectedMonths.size} month{selectedMonths.size !== 1 ? 's' : ''} selected · {selectedPaymentIds.length} session{selectedPaymentIds.length !== 1 ? 's' : ''}
-                  </span>
-                  <Button size="sm" isLoading={bulkGenerating} onClick={handleBulkInvoice}>
-                    Create Bulk Invoice
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
+          </div>
+          <div className="profile-actions">
+            {switcher(sectionRef, sectionOpen, setSectionOpen, false)}
+          </div>
         </div>
       </div>
+
+      {/* Mobile header */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-7)' }}>
+        <div className="profile-id">
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <div className="profile-name">
+            <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{patient.full_name}</h1>
+            <span className="t-body-s">
+              {patient.age != null ? `${patient.age} yrs` : ''}
+              {patient.age != null && patient.gender ? ' · ' : ''}
+              {patient.gender}
+            </span>
+          </div>
+        </div>
+        {switcher(mobileSectionRef, mobileSectionOpen, setMobileSectionOpen, true)}
+      </div>
+
+      {/* Section head — the one link leaves this patient for the practice-
+          wide ledger, so it's labelled explicitly rather than a bare "View
+          all". Desktop/mobile split for the same reason as Sessions'. */}
+      <div className="hidden sm:block">
+        <div className="section-head" style={{ marginBottom: 'var(--space-5)' }}>
+          <h2 className="t-h2">Payments</h2>
+          <Link to="/payments" className="link">All practice payments</Link>
+        </div>
+      </div>
+      <div className="flex sm:hidden">
+        <div className="session-head-m" style={{ marginBottom: 'var(--space-5)' }}>
+          <h2 className="t-h2">Payments</h2>
+          <Link to="/payments" className="link">All practice payments</Link>
+        </div>
+      </div>
+
+      {/* Stat strip — Pending is the only coloured number, and only when > 0,
+          same rule as Sessions' no-show count. */}
+      <div className="stat-row" style={{ marginBottom: 'var(--space-5)' }}>
+        <div className="stat">
+          <span className="stat-label">Total paid</span>
+          <span className="stat-value">{formatCurrency(totalPaid)}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Pending</span>
+          <span className={`stat-value${totalPending > 0 ? ' is-warn' : ''}`}>{formatCurrency(totalPending)}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Invoiced</span>
+          <span className="stat-value">{totalInvoiced}</span>
+        </div>
+      </div>
+
+      {/* Payment list — grouped by month for display. Every row and every
+          month header carries its own checkbox, always visible: bulk
+          invoicing is core here, not a hover/mode-gated affordance. */}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-8) 0' }}>
+          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
+        </div>
+      ) : payments.length === 0 ? (
+        <div className="empty">
+          <Receipt size={20} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} aria-hidden="true" />
+          <h3 className="empty-title">No payments yet</h3>
+          <p className="empty-body">Payments from this patient's sessions will appear here.</p>
+        </div>
+      ) : (
+        <div className="table-wrap card-flush">
+          {monthGroups.map((group) => {
+            const eligible = group.payments.filter(isSelectable)
+            const allSelected = eligible.length > 0 && eligible.every((p) => selectedIds.has(p.id))
+            const someSelected = eligible.some((p) => selectedIds.has(p.id))
+
+            return (
+              <div key={group.key} className="month-group">
+                <div className="month-head">
+                  <MonthCheckbox
+                    checked={allSelected}
+                    indeterminate={someSelected && !allSelected}
+                    disabled={eligible.length === 0}
+                    onChange={() => toggleMonth(group)}
+                    label={`Select all in ${group.label}`}
+                  />
+                  <span className="month-head-label">{group.label}</span>
+                  <span className="month-head-meta">
+                    {group.payments.length} session{group.payments.length !== 1 ? 's' : ''} · {formatCurrency(group.total)}
+                  </span>
+                </div>
+
+                {group.payments.map((payment) => {
+                  const badge = formatDateBadge(payment.appointment_date)
+                  const derivedStatus = derivePaymentStatus(payment)
+                  const statusMeta = paymentStatusMeta(derivedStatus)
+                  const flagged = derivedStatus === 'overdue' || derivedStatus === 'failed'
+                  const selected = selectedIds.has(payment.id)
+                  const selectable = isSelectable(payment)
+                  const amountParts = formatAmountParts(payment.amount, payment.currency)
+                  const checkboxLabel = `Select payment, ${badge.day} ${sentenceCase(badge.month)}, ${formatCurrency(payment.amount, payment.currency)}`
+                  const checkboxTitle = !isInvoiceable(payment)
+                    ? 'Already invoiced'
+                    : !selectable
+                      ? 'Different practitioner — clear the current selection to include this session'
+                      : undefined
+
+                  return (
+                    <div key={payment.id} className={`pay-row${selected ? ' is-selected' : ''}${flagged ? ' is-overdue' : ''}`}>
+                      <input
+                        type="checkbox"
+                        className="checkbox"
+                        checked={selected}
+                        disabled={!selectable}
+                        title={checkboxTitle}
+                        onChange={() => toggleRow(payment)}
+                        aria-label={checkboxLabel}
+                      />
+                      <div className="date-badge">
+                        <span className="date-badge-m">{badge.month}</span>
+                        <span className="date-badge-d">{badge.day}</span>
+                      </div>
+                      <div className="pay-main">
+                        <span className="t-body-s">{getSessionTypeLabel(payment.session_type)}</span>
+                      </div>
+                      <div className="pay-foot">
+                        <span className="pay-amount" aria-label={formatAmountSpoken(payment.amount, payment.currency)} style={!flagged ? { fontWeight: 500 } : undefined}>
+                          <span className="cur">{amountParts.symbol}</span>{amountParts.digits}
+                        </span>
+                        <span className="pay-status"><span className={statusMeta.cls}>{statusMeta.label}</span></span>
+                        {payment.receipt_id ? (
+                          <a
+                            href={getInvoicePdfUrl(payment.id)}
+                            className="btn btn-ghost btn-icon btn-icon-sm pay-action"
+                            aria-label="Download invoice"
+                            title="Download invoice"
+                          >
+                            <Download size={16} strokeWidth={1.5} />
+                          </a>
+                        ) : isInvoiceable(payment) ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm pay-action"
+                            disabled={generatingId === payment.id}
+                            onClick={() => handleGenerateSingle(payment.id)}
+                          >
+                            {generatingId === payment.id ? 'Generating…' : 'Invoice'}
+                          </button>
+                        ) : (
+                          <span className="status-quiet pay-action">—</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Persistent (never unmounted) live region for the selection count —
+          the bulk bar itself mounts/unmounts with the selection, so an
+          aria-live region on it would announce nothing on the first
+          checkbox and re-announce every button label on every later one. */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {selectedIds.size > 0 ? `${selectedIds.size} session${selectedIds.size !== 1 ? 's' : ''} selected` : ''}
+      </span>
+
+      <BulkInvoiceBar
+        count={selectedIds.size}
+        sumLabel={formatCurrency(selectedSum)}
+        note={hasBlockedOthers ? 'Only sessions with the same practitioner can be combined' : null}
+        generating={bulkGenerating}
+        generateLabel={`Generate invoice for ${selectedIds.size} session${selectedIds.size !== 1 ? 's' : ''}`}
+        onClear={clearSelection}
+        onGenerate={handleBulkInvoice}
+      />
+
+      {toast && (
+        <div className="toast toast-wrap" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

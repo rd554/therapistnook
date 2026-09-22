@@ -169,6 +169,9 @@ class ResultResponse(BaseModel):
     patient_dob: date
     patient_age: int
     patient_gender: str
+    assessed_at: Optional[datetime] = None
+    validity_status: str
+    validity_cautions: list[str] = []
     raw_scores: dict[str, float]
     k_corrected_scores: dict[str, float]
     t_scores: dict[str, float]
@@ -939,6 +942,11 @@ class AvailabilityCreate(BaseModel):
     default_session_duration: int = 50
     buffer_minutes: int = 10
     timezone: str = "Asia/Kolkata"
+    # Booking window — see settings-phase1-plan.md. This table is now the one
+    # scheduling record; these two fields used to live only on the (global)
+    # AppointmentConfiguration singleton.
+    min_booking_notice_hours: int = 24
+    max_advance_booking_days: int = 30
 
 
 class AvailabilityUpdate(BaseModel):
@@ -950,6 +958,8 @@ class AvailabilityUpdate(BaseModel):
     default_session_duration: Optional[int] = None
     buffer_minutes: Optional[int] = None
     timezone: Optional[str] = None
+    min_booking_notice_hours: Optional[int] = None
+    max_advance_booking_days: Optional[int] = None
 
 
 class AvailabilityResponse(BaseModel):
@@ -963,6 +973,8 @@ class AvailabilityResponse(BaseModel):
     default_session_duration: int
     buffer_minutes: int
     timezone: str
+    min_booking_notice_hours: int
+    max_advance_booking_days: int
     created_at: datetime
     updated_at: datetime
 
@@ -1158,6 +1170,8 @@ class PaymentDashboard(BaseModel):
     monthly_revenue: int
     today_revenue: int
     outstanding_amount: int
+    overdue_count: int
+    overdue_amount: int
     currency: str
 
 
@@ -1409,27 +1423,29 @@ class PractitionerProfileUpdate(BaseModel):
     title: Optional[str] = None
     tagline: Optional[str] = None
     bio: Optional[str] = None
-    
+    profession: Optional[str] = None
+    location_short: Optional[str] = None
+
     # Qualifications
     qualifications: Optional[list[QualificationItem]] = None
     certifications: Optional[list[CertificationItem]] = None
     license_number: Optional[str] = None
     professional_memberships: Optional[list[MembershipItem]] = None
-    
+
     # Experience
     years_of_experience: Optional[int] = None
     areas_of_expertise: Optional[list[str]] = None
     specializations: Optional[list[str]] = None
     therapy_approaches: Optional[list[str]] = None
-    
+
     # Languages
     languages: Optional[list[LanguageItem]] = None
-    
+
     # Fee
     consultation_fee: Optional[int] = None
     consultation_fee_currency: Optional[str] = None
     fee_notes: Optional[str] = None
-    
+
     # Contact
     public_email: Optional[str] = None
     public_phone: Optional[str] = None
@@ -1460,13 +1476,15 @@ class PractitionerProfileResponse(BaseModel):
     slug: str
     is_public: bool
     is_admin_approved: bool
-    
+
     # Basic Info
     display_name: Optional[str] = None
     title: Optional[str] = None
     tagline: Optional[str] = None
     bio: Optional[str] = None
-    
+    profession: Optional[str] = None
+    location_short: Optional[str] = None
+
     # Qualifications
     qualifications: Optional[list[QualificationItem]] = None
     certifications: Optional[list[CertificationItem]] = None
@@ -1525,13 +1543,15 @@ class PractitionerProfileResponse(BaseModel):
 class PublicProfileResponse(BaseModel):
     """Public-facing profile response (no sensitive data)"""
     slug: str
-    
+
     # Basic Info
     display_name: Optional[str] = None
     title: Optional[str] = None
     tagline: Optional[str] = None
     bio: Optional[str] = None
-    
+    profession: Optional[str] = None
+    location_short: Optional[str] = None
+
     # Qualifications
     qualifications: Optional[list[QualificationItem]] = None
     certifications: Optional[list[CertificationItem]] = None
@@ -1859,6 +1879,7 @@ class BookingListItem(BaseModel):
     session_type: str
     session_mode: str
     status: str
+    patient_notes: Optional[str] = None
     payment_status: Optional[str] = None
     created_at: datetime
 
@@ -2042,6 +2063,46 @@ class TestWhatsAppResponse(BaseModel):
     success: bool
     message: str
     error: Optional[str] = None
+
+
+# ─── Messaging Preferences (what patients receive) ────────────────────────────
+# Settings rebuild: event × channel booleans, distinct from WhatsAppConfigUpdate
+# above (channel setup/credentials) and from NotificationPreferencesResponse
+# below (alerts TO the practitioner, a separate pre-existing feature).
+
+class MessagingPreferencesResponse(BaseModel):
+    id: str
+    session_booked_email: bool
+    session_booked_whatsapp: bool
+    reminder_email: bool
+    reminder_whatsapp: bool
+    reminder_offset_minutes: int
+    session_rescheduled_email: bool
+    session_rescheduled_whatsapp: bool
+    session_cancelled_email: bool
+    session_cancelled_whatsapp: bool
+    payment_request_email: bool
+    payment_request_whatsapp: bool
+    payment_received_email: bool
+    payment_received_whatsapp: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class MessagingPreferencesUpdate(BaseModel):
+    session_booked_email: Optional[bool] = None
+    session_booked_whatsapp: Optional[bool] = None
+    reminder_email: Optional[bool] = None
+    reminder_whatsapp: Optional[bool] = None
+    reminder_offset_minutes: Optional[int] = None
+    session_rescheduled_email: Optional[bool] = None
+    session_rescheduled_whatsapp: Optional[bool] = None
+    session_cancelled_email: Optional[bool] = None
+    session_cancelled_whatsapp: Optional[bool] = None
+    payment_request_email: Optional[bool] = None
+    payment_request_whatsapp: Optional[bool] = None
+    payment_received_email: Optional[bool] = None
+    payment_received_whatsapp: Optional[bool] = None
 
 
 # ─── Extended Inbox Notifications ─────────────────────────────────────────────
@@ -2314,6 +2375,84 @@ class AnalyticsExportRequest(BaseModel):
     format: str = "csv"  # csv, excel, pdf
 
 
+# ── Practice Analytics Summary (Clinical Ink redesign) ──────────────────────
+# These models deliberately use camelCase field names, matching
+# PracticeAnalytics.jsx's own `SAMPLE` export verbatim, rather than this
+# file's usual snake_case. This endpoint feeds one specific frontend
+# component directly and any renaming here would need a mirrored reshape on
+# the client for no benefit — see analytics_service.get_practice_analytics_summary().
+
+class AnalyticsSessionsSummary(BaseModel):
+    completed: int
+    upcoming: int
+
+
+class AnalyticsRevenueSummary(BaseModel):
+    collectedInPeriod: int
+    collectedTrailing12: int
+    billedTrailing12: int
+    outstanding: int
+    unpaidInvoices: int
+
+
+class AnalyticsPatientsSummary(BaseModel):
+    total: int
+    active: int
+    inactive: int
+    unclassified: int
+    newInPeriod: int
+    addedTrailing12: int
+    sessionsPerPatient: float
+    returnRate: float
+
+
+class AnalyticsAssessmentsSummary(BaseModel):
+    sent: int
+    notStarted: int
+    inProgress: int
+    completed: int
+
+
+class AnalyticsMonthRevenue(BaseModel):
+    collected: int
+    outstanding: int
+
+
+class AnalyticsMonthPatientCount(BaseModel):
+    count: int
+
+
+class AnalyticsExportCounts(BaseModel):
+    invoices: str
+    sessions: str
+    patients: str
+    assessments: str
+
+
+class AnalyticsAttentionItem(BaseModel):
+    id: str
+    urgent: bool
+    title: str
+    detail: str
+    action: str
+
+
+class PracticeAnalyticsSummaryResponse(BaseModel):
+    """Shape for GET /api/analytics/summary — see the module-level note above."""
+    sessions: AnalyticsSessionsSummary
+    revenue: AnalyticsRevenueSummary
+    patients: AnalyticsPatientsSummary
+    assessments: AnalyticsAssessmentsSummary
+    revenueByMonth: dict[str, AnalyticsMonthRevenue]
+    newPatientsByMonth: dict[str, AnalyticsMonthPatientCount]
+    exportCounts: Optional[AnalyticsExportCounts] = None
+    attention: list[AnalyticsAttentionItem]
+    # Not part of PracticeAnalytics.jsx's SAMPLE shape — added so the page can
+    # tell "no data ever" apart from "no data this month" and show one empty
+    # state instead of twelve zero bars.
+    emptyAllTime: bool
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PHASE 7 — Settings, Configuration & Platform Integrations
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2435,6 +2574,7 @@ class EmailConfigResponse(BaseModel):
     smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None
     smtp_use_tls: bool
+    has_smtp_password: bool = False
     has_api_key: bool = False
     last_test_at: Optional[datetime] = None
     last_test_status: Optional[str] = None

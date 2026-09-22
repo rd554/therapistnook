@@ -27,6 +27,31 @@ export default {
         'caption': ['13px', { lineHeight: '1.4', fontWeight: '400' }],
       },
       colors: {
+        // ---- Clinical Ink (in-progress migration, see design/therapist-nook-design-system.md §13) ----
+        // Only the color keys that don't collide with an existing key or
+        // Tailwind default are added here. §13 also specifies `surface`,
+        // `borderRadius.{sm,md,lg,xl}`, and `boxShadow.{sm,md}` — all three
+        // were skipped: `surface` duplicates the existing `surface` key
+        // below (silently drops it, JS object literals keep the last
+        // duplicate key), and the radius/shadow keys collide with either
+        // Tailwind's own defaults or this file's existing custom values,
+        // at real usage volumes confirmed by grep (338 `rounded-lg/xl/md/sm`,
+        // 48 `shadow-sm/md`, 14 `bg-surface` call sites across src/). Revisit
+        // those three under prefixed names (e.g. `ci-sm`) once needed.
+        // `ok` (#1F7A5C, green) is included per the literal spec, but
+        // contradicts the design system's own "no green anywhere" rule —
+        // flagged back to the user rather than resolved here.
+        canvas: '#FFFFFF',
+        paper: '#FAF8F4',
+        ink: { DEFAULT: '#15151B', secondary: '#4E4E5A', muted: '#8A8A96' },
+        line: { DEFAULT: '#E6E6EB', hair: '#F1F1F4' },
+        accent: {
+          DEFAULT: '#5A4AD1', hover: '#4A3BBA', active: '#3E3099',
+          tint: '#EFEDFB', border: '#D9D4F5', selected: '#E9E6F9',
+        },
+        danger: { DEFAULT: '#A32E43', tint: '#FBEDEF', border: '#F0D3D8' },
+        warn: { DEFAULT: '#8F6414', tint: '#FBF3E3' },
+        ok: '#1F7A5C',
         primary: {
           DEFAULT: '#7C72E8',
           50:  '#F5F3FF',

@@ -1,0 +1,847 @@
+/* ==========================================================================
+   Clinical Ink — layout scaffolding
+   --------------------------------------------------------------------------
+   tokens.css ports the design system's token/component vocabulary (.card,
+   .btn-primary, .icon-badge, ...) — pure design-system surface, kept a
+   byte-faithful scoped copy of design/tokens.css so the two never drift.
+
+   Some prototype markup needs plain structural glue around those tokens
+   (flex direction/gap with no color or type opinion of its own) that isn't
+   part of the design system's vocabulary — e.g. design/prototype/prototype.css
+   defines `.sched-card`/`.sched-left`/`.sched-right` as pure layout, the same
+   way this file relates to tokens.css. This file is the live app's equivalent:
+   component-composition classes, ported 1:1 from prototype.css as each
+   component is converted, scoped under `.clinical-ink` like everything else.
+
+   Colored/typed restyles of the app's OLD bespoke BEM classes still live in
+   clinical-ink-overrides.css until their component is fully converted; once
+   converted, the old class is deleted from JSX and its override entry is
+   deleted from that file. This file only ever grows with genuinely new,
+   colorless structure — nothing here should ever need deleting.
+   ========================================================================== */
+
+/* ==========================================================================
+   Today's Schedule (components/dashboard/TodaySchedule.jsx)
+   1:1 port of prototype.css's .sched-card/.sched-left/.sched-text/.sched-right
+   ========================================================================== */
+
+.clinical-ink .sched-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4); cursor: pointer;
+}
+.clinical-ink .sched-left {
+  display: flex; align-items: center; gap: var(--space-3); min-width: 0;
+}
+.clinical-ink .sched-text {
+  min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.clinical-ink .sched-right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none;
+}
+
+/* ==========================================================================
+   Recent Patients (components/dashboard/RecentPatients.jsx)
+   1:1 port of prototype.css's .rp-row/.rp-id/.rp-datetime, plus a media-
+   query version of its .rp-row--stacked narrow-width variant. The prototype
+   has two frozen artboards (desktop and mobile) each with their own static
+   markup; the live app is one fluid component, so the same visual result
+   — name+date side by side above a fixed-width column on wide screens,
+   name-left/date-right above a full-width segmented control below the
+   lg breakpoint — comes from one render path plus this breakpoint, instead
+   of a second JSX branch. Same reasoning as TodaySchedule's four-state
+   rebuild: one component, no duplicate markup for what's really one row.
+   ========================================================================== */
+
+.clinical-ink .rp-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4);
+}
+.clinical-ink .rp-id {
+  display: flex; align-items: center; gap: var(--space-4); min-width: 0;
+}
+.clinical-ink .rp-datetime { width: 150px; flex: none; }
+
+/* .truncate (ellipsis) only shrinks a flex item that can itself shrink below
+   its content width; .rp-id has min-width:0 but that doesn't inherit to its
+   children, so the name span needs its own. */
+.clinical-ink .rp-id > .truncate { min-width: 0; }
+
+/* Numeral tabular-nums utility (prototype.css's own "gap-fill" section:
+   .t-num carries its own size/weight/color opinion, so it can't be reused
+   for a 12px caption date that needs tabular figures at a different size). */
+.clinical-ink .tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
+
+@media (max-width: 1023px) {
+  .clinical-ink .rp-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .clinical-ink .rp-id { justify-content: space-between; }
+  .clinical-ink .rp-datetime { width: auto; order: 1; }
+  .clinical-ink .rp-row .seg { align-self: flex-start; }
+}
+
+/* ==========================================================================
+   Payments (components/dashboard/PaymentsList.jsx)
+   1:1 port of prototype.css's .pay-row/.pay-right, plus .pay-name-received
+   from its own "gap-fill" section (design system §8 wants the *received*
+   row name at 14/500/primary — between .t-cell's 400 and .t-cell-key's
+   600 — a weight tokens.css doesn't otherwise expose). Unlike Recent
+   Patients, the prototype's desktop and mobile artboards use identical
+   .pay-row markup, so no narrow-width media query is needed here.
+   ========================================================================== */
+
+.clinical-ink .pay-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+}
+.clinical-ink .pay-right {
+  text-align: right; display: flex; flex-direction: column; gap: 2px; flex: none;
+}
+.clinical-ink .pay-name-received {
+  font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--text-primary);
+}
+
+/* ==========================================================================
+   Sidebar (layouts/Sidebar.jsx)
+   1:1 port of prototype.css's .sidebar-nav/.logo-row/.logo-tile/
+   .sidebar-footer/.sidebar-footer-text. .logo-tile carries color
+   (var(--accent)/var(--text-inverse)) straight from prototype.css itself,
+   same as .pay-name-received above — a real component prototype.css defines
+   outside tokens.css's own vocabulary (B8), not a restyle of an old bespoke
+   class, so it belongs here rather than in clinical-ink-overrides.css.
+   Further additions the static prototype's footer doesn't need since it
+   isn't clickable there: cursor/border-radius on .sidebar-footer (the live
+   footer navigates to Profile settings on click); .sidebar-footer__avatar-
+   img, a bespoke sizing rule for the photo-avatar case — tokens.css's own
+   .avatar only styles the text-initials treatment; and min-width:0 on
+   .sidebar-footer-text so a long name/role can actually ellipsis (.truncate,
+   Tailwind) instead of overflowing the sidebar — same flex-shrink issue as
+   .rp-id > .truncate above, this time in a row rather than the row's child.
+   ========================================================================== */
+
+/* Sidebar.jsx puts both classes on the same <aside> (`clinical-ink sidebar
+   sidebar--desktop`/`--mobile`) — a bare descendant selector wouldn't match
+   that element, so both compound forms are needed, same as tokens.css's own
+   .sidebar rule (tokens.css:363-364) does for its own declarations. */
+/* display intentionally NOT set here: .sidebar--desktop/.sidebar--mobile
+   (index.css) each need their own responsive display toggle (hidden below
+   lg / flex at lg for desktop, always-flex + transform-slide for mobile) —
+   an unconditional `display: flex` here has the same (0,2,0) same-element
+   specificity as `.clinical-ink.sidebar` itself and would permanently beat
+   `.sidebar--desktop`'s `hidden` utility (0,1,0), showing the desktop
+   sidebar on mobile regardless of the hamburger/drawer state. Each variant
+   sets its own display instead. */
+.clinical-ink.sidebar, .clinical-ink .sidebar { flex-direction: column; }
+
+.clinical-ink .sidebar-nav { flex: 1; display: flex; flex-direction: column; }
+
+.clinical-ink .logo-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 var(--space-3); margin-bottom: var(--space-6);
+}
+.clinical-ink .logo-tile {
+  width: 32px; height: 32px; border-radius: var(--radius-md);
+  object-fit: contain; flex: none;
+}
+
+.clinical-ink .sidebar-footer {
+  margin-top: auto; padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--hairline);
+  display: flex; align-items: center; gap: var(--space-3);
+  cursor: pointer; border-radius: var(--radius-md);
+}
+.clinical-ink .sidebar-footer-text { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.clinical-ink .sidebar-footer__avatar-img {
+  width: 32px; height: 32px; border-radius: var(--radius-full);
+  object-fit: cover; flex: none;
+}
+
+/* ==========================================================================
+   Patients (pages/PractitionerPatients.jsx)
+   1:1 port of prototype.css's .patients-header/.patients-actions/.btn-filter/
+   .actions-col/.p-card-.../.mobile-actions-row (Patients screen layout).
+
+   .icon-btn is new to clinical-ink.css: a colorless reset (no background/
+   border, 4px padding) for icon-only buttons inside .row-actions and mobile
+   cards. This is NOT the same component as .dash-session-card__icon-btn in
+   clinical-ink-overrides.css — that one is a bordered, always-visible icon
+   button restyled from an old bespoke BEM class. .icon-btn is real
+   tokens.css-adjacent vocabulary from prototype.css itself, meant to sit
+   inside .row-actions (which supplies the hover-reveal + icon coloring) —
+   same "gap-fill" status as .logo-tile/.pay-name-received above.
+   ========================================================================== */
+
+.clinical-ink .icon-btn {
+  background: none; border: none; padding: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+
+.clinical-ink .patients-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--space-6); flex-wrap: wrap; gap: var(--space-3);
+}
+.clinical-ink .patients-actions { display: flex; align-items: center; gap: var(--space-3); }
+
+/* ghost filter needs a border tokens.css doesn't give the ghost variant */
+.clinical-ink .btn-filter { border: var(--border-width) solid var(--border); }
+
+.clinical-ink .actions-col { display: flex; align-items: center; gap: var(--space-3); }
+
+/* mobile patient card */
+.clinical-ink .p-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.clinical-ink .p-card-id { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.clinical-ink .p-card-right { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+.clinical-ink .p-card-meta { margin-top: var(--space-2); }
+.clinical-ink .p-card-status { margin-top: 4px; }
+.clinical-ink .mobile-actions-row { display: flex; align-items: center; gap: var(--space-3); }
+
+/* .p-card-id > name needs the same shrink-to-ellipsis fix as .rp-id/.sidebar-
+   footer-text above — min-width:0 doesn't inherit to children on its own. */
+.clinical-ink .p-card-id > .truncate { min-width: 0; }
+
+/* tokens.css has .t-cell (14/400/secondary) and .t-cell-key (14/600/primary)
+   but no muted variant — needed for the Intake column's "Completed"/"—" text
+   and the mobile card's status line, both of which sit inside a 14px table
+   row rather than dropping to 12px caption size. 1:1 port of prototype.css's
+   own gap-fill class; longhand for the same reason as .pay-name-received
+   above (the `font` shorthand would reset font-variant-numeric to `normal`,
+   silently stripping tabular-nums when this is combined with .cell-num). */
+.clinical-ink .t-cell-muted { font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 400; color: var(--text-muted); }
+
+/* Kebab menu (mobile row-action disclosure, §C3) and status filter dropdown
+   (§B6/prototype's .btn-filter) — new to clinical-ink.css. The static
+   prototype has no open-state markup for either disclosure (both render as
+   closed buttons on a frozen artboard), so this composes tokens.css's own
+   card/row vocabulary (border, radius, canvas, --ci-shadow-sm) rather than
+   inventing new color or elevation language, the same way TherapistNote's
+   date-picker popover did before this file existed. */
+.clinical-ink .menu-popover {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  min-width: 180px; padding: 4px;
+  background: var(--canvas);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--ci-shadow-sm);
+}
+.clinical-ink .menu-popover.align-right { left: auto; right: 0; }
+.clinical-ink .menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border: none; background: none; cursor: pointer;
+  border-radius: var(--radius-sm); text-align: left;
+  font: 500 13px/18px var(--font-ui); color: var(--text-primary);
+}
+.clinical-ink .menu-item svg { color: var(--icon-muted); flex: none; }
+.clinical-ink .menu-item:hover { background: var(--surface-hover); }
+.clinical-ink .menu-item:hover svg { color: var(--icon); }
+.clinical-ink .menu-item.is-destructive:hover { color: var(--error); }
+.clinical-ink .menu-item.is-destructive:hover svg { color: var(--error); }
+
+/* ==========================================================================
+   Clinical Intelligence (components/ClinicalIntelligenceTab.jsx)
+   1:1 port of design/clinical-intelligence.html's `.ci-*` and `.nook-*`
+   blocks — colour, size and spacing untouched, every value already a
+   token. Two purely mechanical substitutions were needed since the
+   prototype is self-contained with its own inlined token names: its
+   --s1 through --s9 and --r-sm/--r-md/--r-lg/--r-xl become this file's
+   --space-N and --radius-sm/md/lg/xl (identical values, matched by name
+   here) — --shadow-panel keeps its name unchanged either way.
+   Also, its bare `1px` border literals (from the prototype's own global
+   `button{cursor:pointer}`/box-sizing reset, which this app doesn't
+   have) become var(--border-width) + explicit cursor:pointer, the same
+   translation .menu-popover above already makes. Not present in the
+   prototype's own .ci-* and .nook-* rules: any hex, any restyle.
+
+   Excluded on purpose: the prototype's own comparison-only classes
+   (.nook-head-white, .nook-panel-surface, .nook-compare, .nook-caption,
+   .ref/.ref-row) — those exist solely to justify the graphite header
+   decision inside the prototype file itself and were never meant to
+   ship. .icon-badge, .card/.card-compact/.card-narrative, .status-*,
+   .t-narrative, .action-row, .grow, .topbar-actions, .btn-icon are
+   already real tokens.css vocabulary and are reused as-is, not re-added
+   here.
+   ========================================================================== */
+
+/* Deviation from the prototype: design/clinical-intelligence.html's own
+   `.page` rule caps content at 920px, but that mock had no sidebar/workspace
+   chrome around it. Rendered for real inside PatientProfile.jsx's own
+   1120px-capped wrapper, 920px left a dead ~200px column on the right vs.
+   the Patients list and Dashboard screens (both already ported, both
+   effectively 1120px). Matching that convention here instead. */
+.clinical-ink.ci-page,
+.clinical-ink .ci-page { max-width: 1120px; }
+
+/* Second-order effect of the 920→1120 width change above: tokens.css's
+   .t-narrative carries its own documented max-width: 62ch (design system's
+   "maximum line length for narrative text" rule, sized against the 920px
+   mock). At 1120px that 62ch column leaves an oversized, unbalanced gutter
+   next to the Patient summary card's other content - reported as the
+   paragraph looking "left tilted" versus the full-width Treatment goals
+   text below it. Overridden here, scoped to this card only, rather than
+   touching the shared token (session notes/MMPI report prose elsewhere in
+   the app still want the narrower reading column). */
+.clinical-ink .card-narrative .t-narrative { max-width: none; }
+
+.clinical-ink .ci-patient-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-4); margin-bottom: var(--space-8);
+}
+.clinical-ink .ci-patient-id { display: flex; align-items: center; gap: var(--space-4); }
+.clinical-ink .ci-patient-name { display: flex; flex-direction: column; gap: 2px; }
+
+.clinical-ink .ci-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4); margin-bottom: var(--space-5);
+}
+.clinical-ink .ci-toolbar-actions { display: flex; align-items: center; gap: var(--space-2); }
+
+.clinical-ink .ci-card-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.clinical-ink .ci-count { margin-left: auto; }
+
+.clinical-ink .ci-sub {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: var(--space-5) 0 var(--space-1);
+}
+
+.clinical-ink .ci-line {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--space-6); padding: 12px 0;
+  border-bottom: var(--border-width) solid var(--hairline);
+}
+.clinical-ink .ci-line:last-of-type { border-bottom: none; }
+.clinical-ink .ci-line-meta { flex: none; text-align: right; }
+
+.clinical-ink .ci-row { display: flex; gap: var(--space-3); padding: 14px 0; border-bottom: var(--border-width) solid var(--hairline); }
+.clinical-ink .ci-row:last-of-type { border-bottom: none; }
+.clinical-ink .ci-row-caret { color: var(--icon-muted); margin-top: 3px; }
+.clinical-ink .ci-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+/* CSS clamp, never a server-truncated string (colour rule §10's sibling
+   rule for text: format at render time, don't pre-cut the data). */
+.clinical-ink .ci-row-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clinical-ink .ci-row-meta { flex: none; text-align: right; }
+
+.clinical-ink .ci-disclose {
+  display: flex; align-items: center; gap: 6px; margin-top: var(--space-4);
+  padding: var(--space-4) 0 0; border: 0; border-top: var(--border-width) solid var(--hairline);
+  background: none; width: 100%; cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 500;
+}
+.clinical-ink .ci-disclose:hover { color: var(--text-secondary); }
+/* chevron-rotate open state — this task's own addition, not in the
+   prototype (its artboard only shows the closed state). */
+.clinical-ink .ci-disclose[aria-expanded="true"] svg { transform: rotate(90deg); }
+
+.clinical-ink .ci-more { border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--canvas); }
+.clinical-ink .ci-more-head {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface); border-bottom: var(--border-width) solid var(--border);
+}
+.clinical-ink .ci-more-body { padding: var(--space-5); }
+
+.clinical-ink .ci-entry { border: var(--border-width) solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); }
+.clinical-ink .ci-entry-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: 6px; }
+
+.clinical-ink .ci-timeline { position: relative; padding-left: var(--space-6); }
+.clinical-ink .ci-timeline:before {
+  content: ''; position: absolute; left: 5px; top: 8px; bottom: 8px;
+  width: 1px; background: var(--border);
+}
+/* Deviation from the prototype: the mockup only ever shows one timeline
+   entry, so its .ci-timeline-dot positioned absolutely against the whole
+   .ci-timeline rail worked by coincidence. With multiple entries each
+   .ci-timeline-entry is its own positioned ancestor, so every dot anchors
+   to its own entry instead of stacking at the top of the rail. */
+.clinical-ink .ci-timeline-entry { position: relative; }
+.clinical-ink .ci-timeline-entry + .ci-timeline-entry { margin-top: var(--space-4); }
+.clinical-ink .ci-timeline-dot {
+  position: absolute; left: 0; top: 18px; width: 11px; height: 11px;
+  border-radius: 50%; background: var(--canvas); border: 2px solid var(--accent);
+}
+
+.clinical-ink .stack-lg > * + * { margin-top: var(--space-5); }
+
+/* ---- Ask Nook panel -------------------------------------------------------
+   Chrome is neutral; the only accent object in the panel is the send
+   button. Header is graphite (--text-primary as a surface) per the new
+   design-system rule this task also adds to therapist-nook-design-
+   system.md — see that file's colour table.
+
+   Live-app deviation from the prototype (documented, not silent): the
+   prototype anchors .nook-panel with position:absolute against its own
+   .artboard. The real page has no positioned ancestor and is a long
+   scrolling record, so absolute would let the panel scroll away with the
+   content. This uses position:fixed with the same offsets instead —
+   same visual result as the artboard, but anchored to the viewport, the
+   same pattern the pre-existing ClinicalChatPanel already used
+   (fixed bottom-6 right-6). z-index added for the same reason: nothing
+   in the prototype needed one, but PatientProfile's own header chrome
+   uses z-20 and this must sit above it. */
+.clinical-ink .nook-panel {
+  position: fixed; right: var(--space-6); bottom: var(--space-6); z-index: 31;
+  width: 392px; height: 588px;
+  background: var(--canvas); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-xl); box-shadow: var(--shadow-panel);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+/* Mobile sheet — the prototype's "Ask Nook — mobile sheet" artboard is the
+   same .nook-panel/.nook-head/.nook-body/.nook-composer markup, just full-
+   screen with a scrim behind it, so this is a media-query variant of the
+   one panel rather than a second component/JSX branch. */
+@media (max-width: 640px) {
+  .clinical-ink .nook-panel {
+    /* Bug fix: `inset: 0` followed by `right: auto; bottom: auto` in the
+       same rule cancelled inset's right/bottom back to auto (last
+       declaration for a given property wins, shorthand or not) — with no
+       bottom constraint and height: auto, the panel shrank to its content's
+       height instead of filling the screen, leaving the record page visible
+       (dimmed by .nook-scrim) below the composer. Written as explicit
+       longhands instead of inset to avoid the footgun a second time: a
+       small top reveal (peek of the record page/scrim behind, bottom-sheet
+       style) instead of a flush top, full-bleed on the other three sides so
+       it actually covers to the bottom. */
+    top: var(--space-6); right: 0; bottom: 0; left: 0;
+    width: auto; height: auto;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border: 0; box-shadow: var(--shadow-panel);
+  }
+}
+.clinical-ink .nook-scrim { display: none; }
+@media (max-width: 640px) {
+  .clinical-ink .nook-scrim {
+    display: block; position: fixed; inset: 0; z-index: 30;
+    background: rgba(21, 21, 27, 0.32);
+  }
+}
+.clinical-ink .nook-head {
+  display: flex; align-items: center; gap: var(--space-3); height: 52px;
+  padding: 0 var(--space-3) 0 var(--space-5);
+  background: var(--text-primary); flex: none;
+}
+.clinical-ink .nook-head .t-h3 { color: var(--text-inverse); }
+.clinical-ink .nook-head .t-caption { color: rgba(255, 255, 255, 0.62); }
+.clinical-ink .nook-head .nook-mark { background: rgba(255, 255, 255, 0.14); color: var(--text-inverse); }
+.clinical-ink .nook-head .btn-ghost { color: rgba(255, 255, 255, 0.72); }
+.clinical-ink .nook-head .btn-ghost:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+.clinical-ink .nook-mark {
+  width: 26px; height: 26px; border-radius: var(--radius-sm);
+  background: var(--accent-tint); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.clinical-ink .nook-note {
+  padding: 10px var(--space-5); background: var(--surface);
+  border-bottom: var(--border-width) solid var(--hairline); flex: none;
+  font-family: var(--font-ui); font-size: 12px; line-height: 17px; font-weight: 500;
+  color: var(--text-muted);
+}
+.clinical-ink .nook-body { flex: 1; overflow-y: auto; padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+.clinical-ink .nook-turn { display: flex; gap: 10px; }
+.clinical-ink .nook-turn-user { justify-content: flex-end; }
+.clinical-ink .nook-bubble {
+  background: var(--surface); border-radius: var(--radius-lg);
+  padding: 10px var(--space-4); max-width: 84%;
+  font-family: var(--font-ui); font-size: 14px; line-height: 21px; font-weight: 500;
+  color: var(--text-primary);
+}
+.clinical-ink .nook-answer {
+  flex: 1; min-width: 0; border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--space-4); background: var(--canvas);
+}
+.clinical-ink .nook-answer p {
+  margin: 0;
+  font-family: var(--font-ui); font-size: 14px; line-height: 22px; font-weight: 500;
+  color: var(--text-secondary);
+}
+.clinical-ink .nook-avatar {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  background: var(--accent-tint); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; flex: none; margin-top: 2px;
+}
+.clinical-ink .nook-sources {
+  display: flex; align-items: center; gap: 6px; margin-top: var(--space-3);
+  padding-top: var(--space-3); border: 0; border-top: var(--border-width) solid var(--hairline);
+  background: none; width: 100%; cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--font-ui); font-size: 12px; line-height: 16px; font-weight: 500;
+}
+/* Same disclosure-chevron behaviour as .ci-disclose, for consistency
+   between the record cards' source list and the chat's citation list. */
+.clinical-ink .nook-sources[aria-expanded="true"] svg { transform: rotate(90deg); }
+.clinical-ink .nook-composer {
+  flex: none; border-top: var(--border-width) solid var(--hairline);
+  padding: var(--space-3) var(--space-4); display: flex; align-items: flex-end; gap: var(--space-2);
+}
+.clinical-ink .nook-input {
+  flex: 1; min-height: 40px; max-height: 96px; padding: 10px 12px;
+  border: var(--border-width) solid var(--border); border-radius: var(--radius-md);
+  font-family: var(--font-ui); font-size: 14px; line-height: 20px; font-weight: 500;
+  color: var(--text-primary);
+  resize: none; background: var(--canvas);
+}
+.clinical-ink .nook-input::placeholder { color: var(--text-muted); }
+.clinical-ink .nook-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+/* iOS Safari auto-zooms the whole page (and doesn't zoom back out on blur
+   or keyboard dismiss) on focus of any text input/textarea under 16px
+   computed font-size — this is what made the page look "stuck enlarged"
+   after closing the keyboard. Must be written AFTER the base .nook-input
+   rule above: same specificity (0,2,0 — the media query adds none), so
+   whichever comes later in source wins; a first attempt at this fix
+   placed the override earlier in the file and the 14px base rule silently
+   won at every width. Mobile-only so desktop's 14px composer scale is
+   untouched. */
+@media (max-width: 640px) {
+  .clinical-ink .nook-input { font-size: 16px; }
+}
+.clinical-ink .nook-suggest { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.clinical-ink .nook-suggest button {
+  height: 30px; padding: 0 10px; border-radius: var(--radius-md);
+  border: var(--border-width) solid var(--border); background: var(--canvas);
+  color: var(--text-secondary);
+  font-family: var(--font-ui); font-size: 12px; line-height: 1; font-weight: 600;
+  cursor: pointer;
+}
+.clinical-ink .nook-suggest button:hover { background: var(--surface); color: var(--text-primary); }
+
+/* Pending-updates queue restyle (this task's own addition — no prototype
+   equivalent; see the header comment above for why the workflow is kept
+   rather than dropped). Reuses .card/.ci-card-head/.t-caption/.status-*
+   throughout; these two are the only genuinely new pieces: a neutral
+   icon-button pair (approve/reject) that never colours green, and a
+   nested proposal box one step quieter than .card so a stack of them
+   inside one source group doesn't read as a stack of full cards. */
+.clinical-ink .ci-pending-group {
+  border: var(--border-width) solid var(--border); border-radius: var(--radius-lg);
+  padding: var(--space-4); background: var(--surface);
+}
+.clinical-ink .ci-pending-group + .ci-pending-group { margin-top: var(--space-3); }
+.clinical-ink .ci-pending-actions { display: inline-flex; gap: var(--space-2); }
+/* .btn-ghost already provides the neutral idle/hover pair; reject only
+   needs its hover pushed to --error instead, same convention as
+   .row-actions .is-destructive above. */
+.clinical-ink .ci-pending-actions .is-destructive:hover { background: var(--error-tint); color: var(--error); }
+.clinical-ink .ci-proposal {
+  border: var(--border-width) solid var(--border); border-radius: var(--radius-md);
+  padding: var(--space-4); background: var(--canvas);
+}
+.clinical-ink .ci-proposal + .ci-proposal { margin-top: var(--space-3); }
+
+/* ==========================================================================
+   Patient profile · Overview screen deviations
+   ========================================================================== */
+
+/* .card-compact on mobile, .card padding above 640px — spec calls for both
+   paddings on one card element rather than duplicating the DOM per
+   breakpoint (there's nothing else that differs between the two sizes). */
+@media (max-width: 640px) {
+  .clinical-ink .profile-info-card { padding: var(--card-pad-compact); }
+}
+
+/* Desktop-only copy affordance on phone/email fields, revealed on
+   hover/focus like .row-actions above. Plain @media rather than a
+   Tailwind hidden/sm:inline-flex pair on the button itself: .field-copy
+   would carry .btn-icon's own display rule at (0,2,0) once scoped, which
+   — being unlayered CSS — beats Tailwind's utilities regardless of
+   specificity or source order (see clinical-ink-css-specificity-pitfalls). */
+.clinical-ink .field-copy { display: none; }
+@media (min-width: 641px) {
+  .clinical-ink .field-copy {
+    display: inline-flex; opacity: 0; margin-left: 4px;
+    transition: opacity 120ms ease;
+  }
+  .clinical-ink .field-item:hover .field-copy,
+  .clinical-ink .field-item:focus-within .field-copy { opacity: 1; }
+}
+
+/* .toast (tokens.css) styles the surface only, not its position — no other
+   screen mounts one yet, so there's no shared placement class to reuse. */
+.clinical-ink .toast-wrap {
+  position: fixed; bottom: var(--space-6); left: 50%;
+  transform: translateX(-50%); z-index: 50;
+}
+
+/* ---- Documents & assessments page composition ----------------------------
+   Neither of these is design-system vocabulary (tokens.css) — they're this
+   page's own layout, built out of that vocabulary. */
+
+/* inner header row of a .card.card-flush section, above its .table-toolbar */
+.clinical-ink .doc-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+
+/* Upload modal → full-screen sheet on mobile. Scoped to this one modifier
+   class (not the shared .modal/.modal-backdrop) so PatientEdit's discard-
+   changes dialog is untouched — same reasoning as .nook-panel's mobile
+   variant above: explicit longhands, not `inset`, per the same
+   right/bottom-cancelled-back-to-auto footgun documented there. */
+@media (max-width: 640px) {
+  .clinical-ink .doc-upload-modal {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    width: auto; height: auto; max-width: none;
+    border-radius: 0; box-shadow: none;
+    overflow-y: auto;
+  }
+}
+
+/* ==========================================================================
+   Calendar (pages/Calendar.jsx) — structural glue around tokens.css's
+   .cal-* vocabulary
+   ========================================================================== */
+
+/* Each day's 24 hour cells stack in normal document flow inside this; the
+   event blocks and the now-line are positioned absolutely against it, since
+   an event can span several stacked .cal-cell rows and a plain <div> has no
+   positioning context of its own for that. Pure layout — no color, no type. */
+.clinical-ink .cal-daycol { position: relative; }
+
+/* Month view's inline event chips reuse .cal-event's status-colored left
+   rule (via .is-noshow / .is-done / .is-cancelled) but sit in normal flow
+   inside a day cell instead of being absolutely positioned against a 24h
+   grid, and are small enough that only the name fits. */
+.clinical-ink .cal-event.cal-event-mini {
+  position: static;
+  height: auto;
+  padding: 3px var(--space-2) 3px 7px;
+  margin-bottom: 2px;
+}
+.clinical-ink .cal-event.cal-event-mini .cal-event-name {
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* ==========================================================================
+   Modal sheet — desktop-only gap-fill.
+   tokens.css only styles `.modal.as-sheet` / `.sheet-head` / `.sheet-body` /
+   `.sheet-foot` inside `@media (max-width: 640px)` (the full-screen phone
+   sheet) — above that breakpoint they're unstyled divs. This fills in the
+   desktop reading: still a centered dialog, but with a sticky head/foot
+   around a scrolling body, for Schedule session / Edit appointment /
+   Appointment details.
+
+   Deliberately scoped to `min-width: 641px` — clinical-ink.css is @import'd
+   after tokens.css, so an unconditional (non-media) rule here would win the
+   cascade over tokens.css's `max-width: 640px` block at narrow widths too
+   (same specificity, later source wins) and silently break the mobile sheet.
+   See clinical-ink-css-specificity-pitfalls. Keeping this under its own
+   min-width query keeps the two breakpoints from ever fighting.
+   ========================================================================== */
+@media (min-width: 641px) {
+  .clinical-ink .modal.as-sheet {
+    padding: 0; display: flex; flex-direction: column;
+    max-height: 88vh; overflow: hidden;
+  }
+  .clinical-ink .modal.as-sheet .sheet-head {
+    flex: none; padding: var(--space-6) var(--space-6) var(--space-5);
+    border-bottom: var(--border-width) solid var(--hairline);
+  }
+  .clinical-ink .modal.as-sheet .sheet-body {
+    flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-5) var(--space-6);
+  }
+  .clinical-ink .modal.as-sheet .sheet-foot {
+    flex: none; display: flex; justify-content: flex-end; gap: var(--space-2);
+    padding: var(--space-5) var(--space-6);
+    border-top: var(--border-width) solid var(--hairline);
+  }
+
+  /* Schedule session's two-column form wants more than the default 520px */
+  .clinical-ink .modal.is-wide { max-width: 800px; width: 100%; }
+}
+
+/* AppointmentDetail's footer wraps its "Close"/"Edit" pair in a div so
+   "Delete" can sit apart from them (bottom-left, per the design system's
+   destructive-action placement) — but tokens.css's mobile sheet-foot rule
+   (@max-width:640px) sets `flex:1` on any direct .btn descendant, which
+   would only inflate Delete unevenly since the wrapper div itself isn't a
+   .btn and gets no flex-grow. Mirror the same flex:1 onto the wrapper so
+   Delete and the Close/Edit group split the row evenly instead of Delete
+   ballooning to fill all the leftover space.
+   See clinical-ink-css-specificity-pitfalls — selector is new (doesn't
+   collide with anything in tokens.css), so load order doesn't matter here. */
+@media (max-width: 640px) {
+  .clinical-ink .modal.as-sheet .sheet-foot .sheet-foot-group {
+    display: flex; flex: 1; gap: var(--space-2);
+  }
+}
+
+/* ==========================================================================
+   Practice Analytics
+   Page-specific layout only — every color/type/radius value below still
+   comes from tokens.css's custom properties. `.analytics-page` uses the
+   same 1120px cap as `.ci-page` (see clinical-ink-content-width memory —
+   migrated screens normalize to 1120, they don't keep a prototype's own
+   width). The two-up panel row still fits comfortably at 1120: the fixed
+   380px side card plus its gap leaves ~650px for the flex chart column.
+   ========================================================================== */
+
+.clinical-ink .analytics-page {
+  max-width: 1120px; margin: 0 auto;
+  padding: var(--space-5) var(--page-pad) var(--space-9);
+  display: flex; flex-direction: column; gap: var(--space-5);
+}
+@media (min-width: 1024px) {
+  .clinical-ink .analytics-page { gap: var(--space-6); padding-top: var(--space-7); }
+}
+
+.clinical-ink .analytics-header {
+  display: flex; flex-direction: column; gap: 10px;
+}
+@media (min-width: 1024px) {
+  .clinical-ink .analytics-header {
+    flex-direction: row; align-items: flex-start; justify-content: space-between; gap: var(--space-6);
+  }
+}
+.clinical-ink .analytics-header-controls { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+
+/* KPI strip — 2 up on mobile, 4 up on desktop. Kept as four bordered tiles
+   (not tokens.css's single-card .stat-row) because the prototype's layout
+   is four independently-emphasized figures, one of which (outstanding) gets
+   its own --error-tinted border — a single divided row can't carry that. */
+.clinical-ink .analytics-kpis {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3);
+}
+@media (min-width: 1024px) {
+  .clinical-ink .analytics-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); }
+}
+.clinical-ink .analytics-kpi {
+  display: flex; flex-direction: column; justify-content: center; gap: 4px;
+  min-height: 106px; padding: 14px var(--space-4);
+  background: var(--canvas); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
+}
+.clinical-ink .analytics-kpi.is-alert { border-color: var(--error-border); }
+@media (min-width: 1024px) { .clinical-ink .analytics-kpi { min-height: 120px; padding: var(--space-4) var(--space-5); } }
+.clinical-ink .analytics-kpi-value {
+  font: 800 26px/32px var(--font-ui); letter-spacing: -0.02em; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.clinical-ink .analytics-kpi.is-alert .analytics-kpi-value { color: var(--error); }
+@media (min-width: 1024px) { .clinical-ink .analytics-kpi-value { font-size: 32px; line-height: 40px; } }
+
+.clinical-ink .analytics-panels { display: flex; flex-direction: column; gap: var(--space-4); }
+@media (min-width: 1024px) {
+  .clinical-ink .analytics-panels { flex-direction: row; gap: var(--space-6); }
+  .clinical-ink .analytics-panels > .card { flex: 1 1 0; min-width: 0; }
+  .clinical-ink .analytics-panels > .analytics-side { width: 380px; flex: none; }
+}
+
+.clinical-ink .analytics-panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+}
+.clinical-ink .analytics-legend { display: none; align-items: center; gap: var(--space-4); }
+@media (min-width: 1024px) { .clinical-ink .analytics-legend { display: flex; } }
+.clinical-ink .analytics-legend-mobile { display: flex; align-items: center; gap: 14px; }
+@media (min-width: 1024px) { .clinical-ink .analytics-legend-mobile { display: none; } }
+.clinical-ink .analytics-swatch { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px/16px var(--font-ui); color: var(--text-secondary); }
+.clinical-ink .analytics-swatch-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+.clinical-ink .analytics-chart { width: 100%; }
+.clinical-ink .analytics-chart-svg { display: block; }
+
+.clinical-ink .analytics-segment-bar { display: flex; height: 10px; gap: 3px; }
+.clinical-ink .analytics-segment { box-sizing: border-box; }
+
+.clinical-ink .analytics-legend-list { margin-top: 4px; }
+.clinical-ink .analytics-legend-row {
+  display: flex; height: 34px; align-items: center; justify-content: space-between;
+  border-top: var(--border-width) solid var(--hairline);
+}
+.clinical-ink .analytics-legend-row.is-last { border-bottom: var(--border-width) solid var(--hairline); }
+.clinical-ink .analytics-legend-key { display: inline-flex; align-items: center; gap: 10px; font: 500 13.5px/20px var(--font-ui); color: var(--text-secondary); }
+.clinical-ink .analytics-legend-swatch { width: 10px; height: 10px; border-radius: 2px; box-sizing: border-box; flex: none; }
+.clinical-ink .analytics-legend-value { font: 700 14px/20px var(--font-ui); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+.clinical-ink .analytics-mix-note { display: flex; align-items: baseline; gap: var(--space-2); font: 500 13.5px/20px var(--font-ui); color: var(--text-secondary); }
+
+.clinical-ink .analytics-side-stats {
+  display: flex; gap: var(--space-3); margin-top: var(--space-1);
+  padding-top: var(--space-4); border-top: var(--border-width) solid var(--hairline);
+}
+.clinical-ink .analytics-side-stat { flex: 1; }
+
+/* Needs attention */
+.clinical-ink .analytics-attention-row { display: flex; flex-direction: column; gap: var(--space-2); padding: 12px 0; }
+.clinical-ink .analytics-attention-row + .analytics-attention-row { border-top: var(--border-width) solid var(--hairline); }
+@media (min-width: 1024px) {
+  .clinical-ink .analytics-attention-row {
+    flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-4);
+    padding: 0; height: 52px;
+  }
+  .clinical-ink .analytics-attention-row + .analytics-attention-row { border-top: var(--border-width) solid var(--hairline); }
+}
+.clinical-ink .analytics-attention-main { display: flex; flex-direction: column; gap: 4px; }
+@media (min-width: 1024px) { .clinical-ink .analytics-attention-main { flex-direction: row; align-items: center; gap: var(--space-3); } }
+.clinical-ink .analytics-attention-title { font: 700 14px/20px var(--font-ui); color: var(--text-primary); }
+.clinical-ink .analytics-attention-detail { font: 400 12.5px/17px var(--font-ui); color: var(--text-muted); }
+.clinical-ink .analytics-attention-row .btn { width: 100%; }
+@media (min-width: 1024px) { .clinical-ink .analytics-attention-row .btn { width: auto; } }
+
+/* Period picker — a native <select> so mobile gets the OS date wheel, styled
+   to match .btn-secondary's surface rather than tokens.css's taller .input
+   -style .select. */
+.clinical-ink .analytics-period {
+  position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0;
+}
+.clinical-ink .analytics-period-icon {
+  position: absolute; left: 12px; width: 15px; height: 15px; color: var(--icon-muted); pointer-events: none;
+}
+.clinical-ink .analytics-period-select {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; height: 36px; padding: 0 32px 0 34px;
+  background: var(--canvas); color: var(--text-primary);
+  border: var(--border-width) solid var(--border); border-radius: var(--radius-md);
+  font: 600 13px/18px var(--font-ui);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238A8A96' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 14px;
+  cursor: pointer;
+}
+.clinical-ink .analytics-period-select:hover { background-color: var(--surface); }
+.clinical-ink .analytics-period-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+@media (min-width: 1024px) { .clinical-ink .analytics-period { flex: none; } }
+
+/* Export menu */
+.clinical-ink .analytics-export { position: relative; flex: none; }
+.clinical-ink .analytics-export-panel {
+  position: absolute; right: 0; z-index: 20; margin-top: 8px; width: 360px; max-width: calc(100vw - 32px);
+  background: var(--canvas); border: var(--border-width) solid var(--border); border-radius: var(--radius-xl);
+  box-shadow: var(--ci-shadow-md); padding: var(--space-2);
+}
+.clinical-ink .analytics-export-meta { padding: 10px 12px 8px; font: 600 11.5px/16px var(--font-ui); color: var(--text-muted); }
+.clinical-ink .analytics-export-pdf {
+  display: block; width: 100%; text-align: left; padding: 14px;
+  background: var(--accent-tint); border: var(--border-width) solid var(--accent-border); border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+.clinical-ink .analytics-export-pdf:hover:not(:disabled) { background: var(--selected); }
+.clinical-ink .analytics-export-pdf:disabled { cursor: not-allowed; opacity: 0.6; }
+.clinical-ink .analytics-export-pdf-title { display: block; font: 700 14.5px/20px var(--font-ui); color: var(--text-primary); }
+.clinical-ink .analytics-export-pdf-note { display: block; margin-top: 2px; font: 400 12.5px/18px var(--font-ui); color: var(--text-secondary); }
+.clinical-ink .analytics-export-label { padding: 14px 4px 6px 8px; font: 600 11.5px/16px var(--font-ui); color: var(--text-muted); }
+.clinical-ink .analytics-export-row {
+  display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: 0 8px; border-top: var(--border-width) solid var(--hairline);
+  font: 600 13.5px/18px var(--font-ui); color: var(--text-primary); cursor: pointer;
+}
+.clinical-ink .analytics-export-row:last-of-type { border-bottom: var(--border-width) solid var(--hairline); }
+.clinical-ink .analytics-export-row:hover { background: var(--surface); }
+.clinical-ink .analytics-export-row-note { font: 500 12.5px/18px var(--font-ui); color: var(--text-muted); }
+.clinical-ink .analytics-export-lock { display: flex; align-items: flex-start; gap: 8px; padding: 14px 8px 6px; font: 400 11.5px/16px var(--font-ui); color: var(--text-muted); }
+.clinical-ink .analytics-export-lock svg { flex: none; margin-top: 1px; }
+
+/* mobile sheet */
+.clinical-ink .analytics-export-sheet-backdrop {
+  position: fixed; inset: 0; z-index: 30; background: rgba(21, 21, 27, 0.32);
+  display: flex; flex-direction: column; justify-content: flex-end;
+}
+.clinical-ink .analytics-export-sheet {
+  background: var(--canvas); border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: 10px var(--space-4) var(--space-6);
+}
+.clinical-ink .analytics-export-sheet-handle { width: 40px; height: 4px; border-radius: var(--radius-full); background: var(--border); margin: 0 auto; }
+.clinical-ink .analytics-export-sheet-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin: var(--space-4) 0 14px; }
+.clinical-ink .analytics-export-sheet .btn-secondary { width: 100%; margin-top: var(--space-4); }
+
+/* empty state (all-time) */
+.clinical-ink .analytics-empty-block { grid-column: 1 / -1; }
+
+/* skeleton */
+.clinical-ink .analytics-skel { background: var(--surface); border-radius: var(--radius-sm); animation: analytics-pulse 1.5s ease-in-out infinite; }
+@keyframes analytics-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }

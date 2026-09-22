@@ -1,26 +1,26 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Menu, Bell, LogOut, User, Settings, Calendar, Clock, Plus, CalendarPlus } from 'lucide-react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { Menu, Bell, LogOut, User, Settings, Clock, Plus, CalendarPlus } from 'lucide-react'
 import { listNotifications } from '../api/client'
 
 function getInitials(name = '') {
   return name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'
 }
 
-function formatHeaderDate(date) {
-  return date.toLocaleDateString('en-US', {
+// One string, weekday + no year: "Thursday, Sep 11 · 10:42 AM" — collapsed
+// from separate date/time chips per the Clinical Ink spec.
+function formatHeaderDateTime(date) {
+  const datePart = date.toLocaleDateString('en-US', {
+    weekday: 'long',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
   })
-}
-
-function formatHeaderTime(date) {
-  return date.toLocaleTimeString('en-US', {
+  const timePart = date.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
   })
+  return `${datePart} · ${timePart}`
 }
 
 export default function WorkspaceHeader({
@@ -29,6 +29,8 @@ export default function WorkspaceHeader({
   onMobileMenuToggle,
 }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const onPatientsPage = location.pathname === '/patients'
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [now, setNow] = useState(() => new Date())
@@ -62,7 +64,7 @@ export default function WorkspaceHeader({
   }, [])
 
   return (
-    <header className="workspace-header">
+    <header className="clinical-ink workspace-header">
       {/* Left: mobile menu + date/time */}
       <div className="workspace-header__left">
         <button
@@ -75,37 +77,66 @@ export default function WorkspaceHeader({
 
         <div className="workspace-header__datetime hidden sm:flex">
           <div className="workspace-header__datetime-item">
-            <Calendar size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span>{formatHeaderDate(now)}</span>
-          </div>
-          <div className="workspace-header__datetime-item">
             <Clock size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span>{formatHeaderTime(now)}</span>
+            <span>{formatHeaderDateTime(now)}</span>
           </div>
         </div>
       </div>
 
       {/* Center-right actions + right cluster */}
       <div className="workspace-header__center-right">
+        {/* Desktop: Add patient + solid Schedule session. Mobile gets its own
+            single ghost icon below instead — Tailwind's "hidden" is (0,1,0)
+            and .workspace-header__actions's own @apply-compiled display:flex
+            is also (0,1,0), so hiding it directly on that element is a
+            source-order coin flip (see clinical-ink-css-specificity-pitfalls);
+            the wrapper div sidesteps that the same way ClinicalIntelligenceTab
+            does for .ci-patient-head/.ci-toolbar. */}
+        <div className="hidden sm:flex">
         <div className="workspace-header__actions">
+          {/* Patients page owns its own page-level "Add patient" (§B6) — showing
+              this one too would duplicate the action on the one screen where
+              it's most likely to be clicked. */}
+          {!onPatientsPage && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigate('/patients', { state: { openCreate: true } })}
+              aria-label="Add patient"
+            >
+              <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
+              <span className="hidden md:inline">Add patient</span>
+            </button>
+          )}
           <button
             type="button"
-            className="workspace-header__btn workspace-header__btn--nav"
-            onClick={() => navigate('/patients', { state: { openCreate: true } })}
-            aria-label="Add Patient"
-          >
-            <Plus size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span className="hidden md:inline">Add Patient</span>
-          </button>
-          <button
-            type="button"
-            className="workspace-header__btn workspace-header__btn--nav"
+            className="btn btn-primary"
             onClick={() => navigate('/calendar')}
-            aria-label="Schedule Session"
+            aria-label="Schedule session"
           >
             <CalendarPlus size={16} strokeWidth={1.5} aria-hidden="true" />
-            <span className="hidden md:inline">Schedule Session</span>
+            <span className="hidden md:inline">Schedule session</span>
           </button>
+        </div>
+        </div>
+
+        {/* Mobile: app-bar icons are ghost, never solid fill — the +/calendar
+            pair collapses to this one action; "Add patient" lives on the
+            Patients screen only. Same bare-wrapper trick as above: .topbar-
+            actions's own display:flex is (0,2,0) once scoped and would beat
+            Tailwind's sm:hidden if put on the same element. */}
+        <div className="flex sm:hidden">
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon"
+              onClick={() => navigate('/calendar')}
+              aria-label="Schedule session"
+              title="Schedule session"
+            >
+              <CalendarPlus size={20} strokeWidth={1.5} aria-hidden="true" />
+            </button>
+          </div>
         </div>
 
         <div className="workspace-header__right">
@@ -163,7 +194,7 @@ export default function WorkspaceHeader({
                   className="workspace-header__dropdown-link workspace-header__dropdown-link--danger"
                 >
                   <LogOut size={16} strokeWidth={1.5} />
-                  Sign Out
+                  Sign out
                 </button>
               </div>
             )}

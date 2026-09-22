@@ -24,6 +24,17 @@ export default function TodaySchedule({ schedule }) {
   const totalCount = schedule?.total_count ?? appointments.length
   const hasAppointments = appointments.length > 0
 
+  // The "next / current" card (design system §6): the first still-scheduled
+  // appointment that hasn't ended yet. Appointments arrive sorted ascending
+  // by start_time, so the first match is earliest. Everything else on the
+  // list is either later today, already over, or cancelled — none of those
+  // get the accent rule, per the one-accented-card rule.
+  const now = Date.now()
+  const nextAppt = appointments.find(
+    (a) => a.status === 'scheduled' && new Date(a.end_time).getTime() > now
+  )
+  const nextId = nextAppt?.id
+
   // Appointments created before Google Calendar was connected (or before
   // this feature existed) don't have a meeting_link yet. Track links we
   // generate on demand, and which appointment is currently generating one.
@@ -79,36 +90,37 @@ export default function TodaySchedule({ schedule }) {
   }
 
   return (
-    <section className="dash-section">
-      <div className="dash-section__heading">
-        <div className="dash-section__heading-left">
-          <h2 className="dash-section__title">Today&apos;s Schedule</h2>
-          {hasAppointments && (
-            <span className="dash-section__badge">
-              {totalCount} session{totalCount !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
+    <section>
+      <div className="section-head">
+        <h2 className="t-h2">Today&apos;s schedule</h2>
+        {hasAppointments && (
+          <span className="t-caption">
+            {totalCount} session{totalCount !== 1 ? 's' : ''}
+          </span>
+        )}
       </div>
 
       {!hasAppointments ? (
-        <div className="dash-empty">
-          <div className="empty-state-icon mx-auto mb-3">
-            <Calendar size={28} strokeWidth={1.5} />
-          </div>
-          <h3 className="text-card-title mb-1">No appointments today</h3>
-          <p className="text-secondary mb-5" style={{ fontSize: '14px' }}>
-            Your schedule is clear for today
-          </p>
-          <Link to="/calendar" className="btn-primary-sm inline-flex items-center gap-2">
+        <div className="empty">
+          <Calendar size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} />
+          <h3 className="empty-title">No appointments today</h3>
+          <p className="empty-body">Your schedule is clear for today</p>
+          <Link to="/calendar" className="btn btn-primary btn-sm inline-flex items-center gap-2">
             <CalendarPlus size={16} strokeWidth={1.5} />
-            Schedule Appointment
+            Schedule appointment
           </Link>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="stack-cards">
           {appointments.map((appt) => {
             const isOnline = appt.session_mode === 'online'
+            const isNext = appt.id === nextId
+            const isCancelled = appt.status === 'cancelled'
+            // Everything that isn't still-scheduled or cancelled (completed,
+            // no-show, rescheduled) reads as "already happened" here — a
+            // quiet, muted row with no action. Attendance detail for those
+            // lives in Recent Patients, not here.
+            const isPast = !isCancelled && appt.status !== 'scheduled'
             // Only a still-scheduled session should offer a join/generate action —
             // a cancelled or completed online session shouldn't create a fresh
             // calendar invite.
@@ -116,10 +128,11 @@ export default function TodaySchedule({ schedule }) {
             const typeLabel = SESSION_TYPE_LABELS[appt.session_type] || appt.session_type?.replace(/_/g, ' ')
             const meetingLink = appt.meeting_link || generatedLinks[appt.id]
             const isGenerating = generatingId === appt.id
+
             return (
               <div
                 key={appt.id}
-                className={`dash-session-card ${isOnline ? 'dash-session-card--online' : 'dash-session-card--offline'}`}
+                className={`card sched-card ${isNext ? 'rule-accent' : ''}`}
                 onClick={() => navigate('/calendar')}
                 role="button"
                 tabIndex={0}
@@ -130,82 +143,111 @@ export default function TodaySchedule({ schedule }) {
                   }
                 }}
               >
-                <div className="dash-session-card__chip">
-                  {isOnline ? (
-                    <Video size={18} strokeWidth={1.5} />
-                  ) : (
-                    <MapPin size={18} strokeWidth={1.5} />
-                  )}
+                <div className="sched-left">
+                  <span className="icon-badge">
+                    {isOnline ? (
+                      <Video size={16} strokeWidth={1.5} />
+                    ) : (
+                      <MapPin size={16} strokeWidth={1.5} />
+                    )}
+                  </span>
+                  <div className="sched-text">
+                    <span
+                      className="t-h3 truncate"
+                      style={
+                        isCancelled || isPast
+                          ? { fontWeight: 400, color: 'var(--text-muted)' }
+                          : isNext
+                          ? undefined
+                          : { fontWeight: 500 }
+                      }
+                    >
+                      {appt.patient_name}
+                    </span>
+                    {isCancelled ? (
+                      <span className="t-body-s">
+                        <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>
+                          {formatTime(appt.start_time)}
+                        </span>
+                        {' · '}
+                        <span style={{ fontWeight: 500, color: 'var(--warning)' }}>Cancelled</span>
+                      </span>
+                    ) : (
+                      <span className="t-body-s" style={isPast ? { color: 'var(--text-muted)' } : undefined}>
+                        {typeLabel} · {isOnline ? 'Online' : 'In person'}
+                        {isPast && (
+                          <>
+                            {' '}
+                            <Check size={14} strokeWidth={2} style={{ display: 'inline', verticalAlign: '-2px' }} />
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {errorId === appt.id && (
+                      <span className="t-caption" style={{ color: 'var(--error)' }}>
+                        Couldn&apos;t create a link. Connect Google Calendar in Settings.
+                      </span>
+                    )}
+                    {emailErrorId === appt.id && (
+                      <span className="t-caption" style={{ color: 'var(--error)' }}>{emailErrorMsg}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="dash-session-card__name truncate">{appt.patient_name}</p>
-                  <p className="dash-session-card__meta">
-                    {formatTime(appt.start_time)}
-                    <span style={{ margin: '0 8px', color: '#94A3B8' }}>·</span>
-                    {typeLabel}
-                    <span style={{ margin: '0 8px', color: '#94A3B8' }}>·</span>
-                    {isOnline ? 'Online' : 'In-person'}
-                  </p>
-                  {errorId === appt.id && (
-                    <p className="dash-session-card__error">
-                      Couldn&apos;t create a link. Connect Google Calendar in Settings.
-                    </p>
-                  )}
-                  {emailErrorId === appt.id && (
-                    <p className="dash-session-card__error">{emailErrorMsg}</p>
-                  )}
-                </div>
-                {canJoin && (
-                  meetingLink ? (
-                    <div className="flex items-center gap-2 shrink-0">
-                      <a
-                        href={meetingLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="dash-session-card__join"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Video size={14} strokeWidth={2} />
-                        Join Now
-                      </a>
+
+                <div className="sched-right">
+                  <span className={isNext ? 't-num-key' : 't-num'}>{formatTime(appt.start_time)}</span>
+                  {canJoin && (
+                    meetingLink ? (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={meetingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`btn btn-sm ${isNext ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Video size={14} strokeWidth={2} />
+                          Join now
+                        </a>
+                        <button
+                          type="button"
+                          title={emailedId === appt.id ? 'Link emailed to patient' : 'Email link to patient'}
+                          className="dash-session-card__icon-btn"
+                          disabled={emailingId === appt.id}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleEmailLink(appt)
+                          }}
+                        >
+                          {emailingId === appt.id ? (
+                            <Loader2 size={14} strokeWidth={2} className="animate-spin" />
+                          ) : emailedId === appt.id ? (
+                            <Check size={14} strokeWidth={2} />
+                          ) : (
+                            <Mail size={14} strokeWidth={2} />
+                          )}
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        title={emailedId === appt.id ? 'Link emailed to patient' : 'Email link to patient'}
-                        className="dash-session-card__icon-btn"
-                        disabled={emailingId === appt.id}
+                        className={`btn btn-sm ${isNext ? 'btn-primary' : 'btn-secondary'}`}
+                        disabled={isGenerating}
                         onClick={(e) => {
                           e.stopPropagation()
-                          handleEmailLink(appt)
+                          handleGenerateLink(appt)
                         }}
                       >
-                        {emailingId === appt.id ? (
+                        {isGenerating ? (
                           <Loader2 size={14} strokeWidth={2} className="animate-spin" />
-                        ) : emailedId === appt.id ? (
-                          <Check size={14} strokeWidth={2} />
                         ) : (
-                          <Mail size={14} strokeWidth={2} />
+                          <Video size={14} strokeWidth={2} />
                         )}
+                        {isGenerating ? 'Getting link…' : 'Get link'}
                       </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="dash-session-card__join"
-                      disabled={isGenerating}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleGenerateLink(appt)
-                      }}
-                    >
-                      {isGenerating ? (
-                        <Loader2 size={14} strokeWidth={2} className="animate-spin" />
-                      ) : (
-                        <Video size={14} strokeWidth={2} />
-                      )}
-                      {isGenerating ? 'Getting link…' : 'Get Meet Link'}
-                    </button>
-                  )
-                )}
+                    )
+                  )}
+                </div>
               </div>
             )
           })}

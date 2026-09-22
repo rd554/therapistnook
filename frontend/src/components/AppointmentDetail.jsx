@@ -1,24 +1,32 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import {
-  X, Calendar, Clock, User, Video, Building, FileText, Loader2,
-  Edit, Trash2, XCircle, CheckCircle, RefreshCw, ExternalLink,
-  AlertCircle, MoreVertical, CreditCard, IndianRupee, Receipt, Send, Banknote, Mail,
+  X, Loader2, Edit, Trash2, MoreVertical, Send, Mail, Copy,
 } from 'lucide-react'
-import { getAppointment, updateAppointment, getAppointmentPayment, markPaymentPaid, sendPaymentReminder, generateMeetingLink } from '../api/client'
+import { getAppointment, getAppointmentPayment, markPaymentPaid, sendPaymentReminder, generateMeetingLink } from '../api/client'
+import { formatCurrency, getSessionTypeLabel, derivePaymentStatus } from '../utils/payments'
 
-const STATUS_OPTIONS = [
-  { value: 'scheduled', label: 'Scheduled', color: 'bg-blue-100 text-blue-700' },
-  { value: 'completed', label: 'Completed', color: 'bg-green-100 text-green-700' },
-  { value: 'cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-700' },
-  { value: 'no_show', label: 'No Show', color: 'bg-orange-100 text-orange-700' },
-]
+// Mirrors Calendar.jsx's STATUS_META (plain text, no chips, no dots).
+const STATUS_META = {
+  scheduled: { label: 'Scheduled', cls: 'status-plain' },
+  completed: { label: 'Completed', cls: 'status-quiet' },
+  cancelled: { label: 'Cancelled', cls: 'status-quiet' },
+  no_show: { label: 'No show', cls: 'status-warn' },
+}
 
-const SESSION_TYPE_LABELS = {
-  therapy_session: 'Therapy Session',
-  follow_up: 'Follow-up Session',
-  assessment_session: 'Assessment Session',
-  consultation: 'Consultation',
+const STATUS_OPTIONS = ['scheduled', 'completed', 'no_show', 'cancelled']
+
+// Payment status here intentionally diverges from utils/payments.js's
+// paymentStatusMeta (which renders "pending" as status-plain in list
+// contexts) — a pending payment sitting next to Mark Paid/Remind actions
+// in this modal is worth flagging, so it gets status-warn instead.
+const PAYMENT_STATUS_META = {
+  pending: { label: 'Payment pending', cls: 'status-warn' },
+  overdue: { label: 'Overdue', cls: 'status-alert' },
+  paid: { label: 'Paid', cls: 'status-quiet' },
+  failed: { label: 'Payment failed', cls: 'status-alert' },
+  refunded: { label: 'Refunded', cls: 'status-quiet' },
+  cancelled: { label: 'Cancelled', cls: 'status-quiet' },
 }
 
 function formatDateTime(dateStr) {
@@ -40,22 +48,6 @@ function formatTime(dateStr) {
   })
 }
 
-const PAYMENT_STATUS_CONFIG = {
-  pending: { label: 'Payment Pending', color: 'bg-amber-100 text-amber-700', icon: Clock },
-  paid: { label: 'Paid', color: 'bg-green-100 text-green-700', icon: CheckCircle },
-  failed: { label: 'Payment Failed', color: 'bg-red-100 text-red-700', icon: XCircle },
-  refunded: { label: 'Refunded', color: 'bg-purple-100 text-purple-700', icon: RefreshCw },
-  cancelled: { label: 'Cancelled', color: 'bg-gray-100 text-gray-700', icon: XCircle },
-}
-
-function formatCurrency(amount, currency = 'INR') {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-  }).format(amount / 100)
-}
-
 export default function AppointmentDetail({
   appointmentId,
   onUpdate,
@@ -72,6 +64,7 @@ export default function AppointmentDetail({
   const [updating, setUpdating] = useState(false)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [paymentLoading, setPaymentLoading] = useState(false)
   const [sendingInvite, setSendingInvite] = useState(false)
@@ -98,7 +91,7 @@ export default function AppointmentDetail({
     try {
       const data = await getAppointment(appointmentId)
       setAppointment(data)
-      
+
       // Try to load payment info
       try {
         const paymentData = await getAppointmentPayment(appointmentId)
@@ -113,7 +106,7 @@ export default function AppointmentDetail({
       setLoading(false)
     }
   }
-  
+
   const handleMarkPaid = async () => {
     if (!payment) return
     setPaymentLoading(true)
@@ -126,7 +119,7 @@ export default function AppointmentDetail({
       setPaymentLoading(false)
     }
   }
-  
+
   const handleSendReminder = async () => {
     if (!payment) return
     setPaymentLoading(true)
@@ -197,19 +190,15 @@ export default function AppointmentDetail({
       alert(err.userMessage || err.response?.data?.detail || 'Failed to delete appointment')
     } finally {
       setDeleting(false)
+      setShowDeleteDialog(false)
     }
-  }
-
-  const getStatusColor = (status) => {
-    const option = STATUS_OPTIONS.find(s => s.value === status)
-    return option?.color || 'bg-gray-100 text-gray-700'
   }
 
   if (loading) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm">
-        <div className="rounded-xl bg-white p-8 shadow-xl">
-          <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
+      <div className="clinical-ink">
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center">
+          <Loader2 size={28} strokeWidth={1.5} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
         </div>
       </div>
     )
@@ -219,68 +208,70 @@ export default function AppointmentDetail({
     return null
   }
 
+  const statusMeta = STATUS_META[appointment.status] || { label: appointment.status, cls: 'status-plain' }
+  const derivedPaymentStatus = payment ? derivePaymentStatus(payment) : null
+  const paymentMeta = payment ? (PAYMENT_STATUS_META[derivedPaymentStatus] || { label: derivedPaymentStatus, cls: 'status-plain' }) : null
+
   return (
-    <>
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4"
-        onClick={onClose}
-      >
-        <div
-          className="flex w-full max-w-lg max-h-[90vh] flex-col rounded-xl bg-white shadow-xl"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-6 py-4">
+    <div className="clinical-ink">
+      <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center" style={{ padding: 'var(--space-4)' }} onClick={onClose}>
+        <div className="modal as-sheet" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <h2 className="text-lg font-bold text-gray-900">Appointment Details</h2>
-              <p className="text-sm text-gray-500">{formatDateTime(appointment.start_time)}</p>
+              <h2 className="t-h3">Appointment details</h2>
+              <p className="t-caption" style={{ marginTop: '2px' }}>{formatDateTime(appointment.start_time)}</p>
             </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <X className="h-5 w-5" />
+            <button type="button" className="btn btn-ghost btn-icon" aria-label="Close" onClick={onClose}>
+              <X size={18} strokeWidth={1.5} />
             </button>
           </div>
 
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          <div className="sheet-body space-y-5">
             {/* Patient */}
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-100 text-lg font-semibold text-primary-700">
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-4)' }}>
+              <div style={{
+                display: 'flex', height: '44px', width: '44px', flex: 'none', alignItems: 'center', justifyContent: 'center',
+                borderRadius: '50%', background: 'var(--selected)', color: 'var(--accent)',
+                font: '600 16px/1 var(--font-ui)',
+              }}>
                 {appointment.patient_name.charAt(0)}
               </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-gray-900">{appointment.patient_name}</h3>
-                <button
-                  onClick={() => navigate(`/patients/${appointment.patient_id}`)}
-                  className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
-                >
-                  View Patient Profile
-                  <ExternalLink className="h-3 w-3" />
+              <div>
+                <h3 className="t-h3">{appointment.patient_name}</h3>
+                <button type="button" className="link" onClick={() => navigate(`/patients/${appointment.patient_id}`)}>
+                  View patient profile
                 </button>
               </div>
             </div>
 
             {/* Status */}
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-500">Status</span>
-              <div className="relative" ref={statusMenuRef}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className="field-label">Status</span>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }} ref={statusMenuRef}>
+                <span className={statusMeta.cls}>{statusMeta.label}</span>
                 <button
+                  type="button"
+                  className="btn btn-ghost btn-icon btn-icon-sm"
+                  aria-label="Change status"
                   onClick={() => setShowStatusMenu(!showStatusMenu)}
-                  className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-semibold ${getStatusColor(appointment.status)}`}
                 >
-                  {STATUS_OPTIONS.find(s => s.value === appointment.status)?.label || appointment.status}
-                  <MoreVertical className="h-3 w-3" />
+                  <MoreVertical size={14} strokeWidth={1.5} />
                 </button>
                 {showStatusMenu && (
-                  <div className="absolute right-0 z-10 mt-1 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-                    {STATUS_OPTIONS.filter(s => s.value !== appointment.status).map((status) => (
+                  <div className="card" style={{
+                    position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 10,
+                    minWidth: '170px', padding: 'var(--space-2)',
+                  }}>
+                    {STATUS_OPTIONS.filter((s) => s !== appointment.status).map((status) => (
                       <button
-                        key={status.value}
-                        onClick={() => handleStatusChange(status.value)}
+                        key={status}
+                        type="button"
+                        className="btn btn-ghost btn-block"
+                        style={{ justifyContent: 'flex-start' }}
+                        onClick={() => handleStatusChange(status)}
                         disabled={updating}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                       >
-                        <span className={`h-2 w-2 rounded-full ${status.color.replace('text-', 'bg-').split(' ')[0]}`} />
-                        Mark as {status.label}
+                        Mark as {(STATUS_META[status]?.label || status).toLowerCase()}
                       </button>
                     ))}
                   </div>
@@ -288,236 +279,154 @@ export default function AppointmentDetail({
               </div>
             </div>
 
-            {/* Time */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-lg bg-gray-50 p-3">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Clock className="h-4 w-4" />
-                  Start Time
-                </div>
-                <p className="mt-1 font-semibold text-gray-900">{formatTime(appointment.start_time)}</p>
+            {/* Core fields — date is already in the sheet-head subtitle, so
+                it isn't repeated here. */}
+            <dl className="field-grid">
+              <div className="field-item">
+                <dt className="field-label">Start time</dt>
+                <dd className="field-value">{formatTime(appointment.start_time)}</dd>
               </div>
-              <div className="rounded-lg bg-gray-50 p-3">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Clock className="h-4 w-4" />
-                  End Time
-                </div>
-                <p className="mt-1 font-semibold text-gray-900">{formatTime(appointment.end_time)}</p>
+              <div className="field-item">
+                <dt className="field-label">End time</dt>
+                <dd className="field-value">{formatTime(appointment.end_time)}</dd>
               </div>
-            </div>
+              <div className="field-item">
+                <dt className="field-label">Duration</dt>
+                <dd className="field-value">{appointment.duration_minutes} minutes</dd>
+              </div>
+              <div className="field-item">
+                <dt className="field-label">Mode</dt>
+                <dd className="field-value">{appointment.session_mode === 'online' ? 'Online' : 'In person'}</dd>
+              </div>
+              <div className="field-item">
+                <dt className="field-label">Session type</dt>
+                <dd className="field-value">{getSessionTypeLabel(appointment.session_type) || appointment.session_type}</dd>
+              </div>
+            </dl>
 
-            {/* Duration & Mode */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <span className="text-sm text-gray-500">Duration</span>
-                <p className="font-medium text-gray-900">{appointment.duration_minutes} minutes</p>
-              </div>
-              <div>
-                <span className="text-sm text-gray-500">Mode</span>
-                <p className="flex items-center gap-1 font-medium text-gray-900">
-                  {appointment.session_mode === 'online' ? (
-                    <><Video className="h-4 w-4" /> Online</>
-                  ) : (
-                    <><Building className="h-4 w-4" /> In-Person</>
-                  )}
-                </p>
-              </div>
-            </div>
-
-            {/* Meeting Link (for online sessions) */}
+            {/* Meeting link (for online sessions) */}
             {appointment.session_mode === 'online' && appointment.meeting_link && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-sm font-medium text-blue-700 flex items-center gap-1">
-                      <Video className="h-4 w-4" />
-                      Meeting Link
-                    </span>
-                    <p className="mt-1 text-sm text-blue-600 break-all">
-                      {appointment.meeting_link}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 ml-4">
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(appointment.meeting_link)
-                      }}
-                      className="px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 rounded-lg transition"
-                    >
-                      Copy
-                    </button>
-                    <button
-                      onClick={handleSendMeetingInvite}
-                      disabled={sendingInvite}
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 rounded-lg transition disabled:opacity-50"
-                    >
-                      {sendingInvite ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Mail className="h-3.5 w-3.5" />
-                      )}
-                      Email
-                    </button>
-                    <a
-                      href={appointment.meeting_link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-1"
-                    >
-                      Join
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
+              <div className="card card-compact" style={{ background: 'var(--surface)' }}>
+                <div className="field-label" style={{ marginBottom: 'var(--space-2)' }}>Meeting link</div>
+                <p className="field-value" style={{ wordBreak: 'break-all', marginBottom: 'var(--space-3)' }}>
+                  {appointment.meeting_link}
+                </p>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => navigator.clipboard.writeText(appointment.meeting_link)}
+                  >
+                    <Copy size={14} strokeWidth={1.5} />
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleSendMeetingInvite}
+                    disabled={sendingInvite}
+                  >
+                    {sendingInvite ? <Loader2 size={14} strokeWidth={1.5} className="animate-spin" /> : <Mail size={14} strokeWidth={1.5} />}
+                    Email
+                  </button>
+                  <a href={appointment.meeting_link} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
+                    Join
+                  </a>
                 </div>
               </div>
             )}
 
-            {/* Session Type */}
-            <div>
-              <span className="text-sm text-gray-500">Session Type</span>
-              <p className="font-medium text-gray-900">
-                {SESSION_TYPE_LABELS[appointment.session_type] || appointment.session_type}
-              </p>
-            </div>
-
             {/* Practitioner */}
-            <div>
-              <span className="text-sm text-gray-500">Practitioner</span>
-              <p className="font-medium text-gray-900">{appointment.practitioner_name}</p>
-            </div>
+            <p className="t-caption">{appointment.practitioner_name}</p>
 
             {/* Notes */}
             {appointment.notes && (
               <div>
-                <span className="text-sm text-gray-500">Notes</span>
-                <p className="mt-1 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{appointment.notes}</p>
+                <p className="field-label" style={{ marginBottom: 'var(--space-2)' }}>Notes</p>
+                <p className="field-value" style={{ background: 'var(--surface)', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)' }}>
+                  {appointment.notes}
+                </p>
               </div>
             )}
 
-            {/* Cancellation Reason */}
+            {/* Cancellation reason */}
             {appointment.status === 'cancelled' && appointment.cancellation_reason && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-                <span className="text-sm font-medium text-red-700">Cancellation Reason</span>
-                <p className="mt-1 text-sm text-red-600">{appointment.cancellation_reason}</p>
+              <div>
+                <p className="field-label" style={{ marginBottom: 'var(--space-2)' }}>Cancellation reason</p>
+                <p className="field-value" style={{ background: 'var(--surface)', padding: 'var(--space-3)', borderRadius: 'var(--radius-md)' }}>
+                  {appointment.cancellation_reason}
+                </p>
               </div>
             )}
 
-            {/* Rescheduled Info */}
+            {/* Rescheduled info */}
             {appointment.rescheduled_from_id && (
-              <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
-                <span className="text-sm font-medium text-purple-700">
-                  <RefreshCw className="mr-1 inline h-4 w-4" />
-                  This appointment was rescheduled from a previous date
-                </span>
-              </div>
+              <p className="t-caption">This appointment was rescheduled from a previous date.</p>
             )}
 
-            {/* Payment Section */}
+            {/* Payment */}
             {payment && (
-              <div className="border-t border-gray-100 pt-4">
-                <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
-                  <CreditCard className="h-4 w-4 text-gray-400" />
-                  Payment
-                </h4>
-                
-                {/* Payment Status */}
-                <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-500">Status</span>
-                    {(() => {
-                      const config = PAYMENT_STATUS_CONFIG[payment.status] || PAYMENT_STATUS_CONFIG.pending
-                      const Icon = config.icon
-                      return (
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${config.color}`}>
-                          <Icon className="h-3 w-3" />
-                          {config.label}
-                        </span>
-                      )
-                    })()}
+              <div style={{ borderTop: 'var(--border-width) solid var(--hairline)', paddingTop: 'var(--space-4)' }}>
+                <p className="t-caption" style={{ marginBottom: 'var(--space-3)' }}>Payment</p>
+                <div className="card card-compact space-y-3">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="field-label">Status</span>
+                    <span className={paymentMeta.cls}>{paymentMeta.label}</span>
                   </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-500">Amount</span>
-                    <span className="font-semibold text-gray-900">
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span className="field-label">Amount</span>
+                    <span className="field-value field-value-num">
                       {formatCurrency(payment.final_amount, payment.currency)}
                     </span>
                   </div>
-                  
+
                   {payment.receipt_number && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-500">Invoice</span>
-                      <span className="flex items-center gap-1 text-sm">
-                        <Receipt className="h-4 w-4 text-gray-400" />
-                        <span className="font-mono text-xs">{payment.receipt_number}</span>
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span className="field-label">Invoice</span>
+                      <span className="field-value" style={{ fontFamily: 'monospace', fontSize: '12px' }}>{payment.receipt_number}</span>
                     </div>
                   )}
-                  
-                  {/* Payment Actions */}
+
                   {payment.status === 'pending' && (
-                    <div className="flex gap-2 pt-2 border-t border-gray-100">
-                      <button
-                        onClick={handleMarkPaid}
-                        disabled={paymentLoading}
-                        className="flex-1 flex items-center justify-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
-                      >
-                        <Banknote className="h-3 w-3" />
-                        Mark Paid
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', paddingTop: 'var(--space-2)', borderTop: 'var(--border-width) solid var(--hairline)' }}>
+                      <button type="button" className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={handleMarkPaid} disabled={paymentLoading}>
+                        Mark paid
                       </button>
-                      <button
-                        onClick={handleSendReminder}
-                        disabled={paymentLoading}
-                        className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        <Send className="h-3 w-3" />
+                      <button type="button" className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={handleSendReminder} disabled={paymentLoading}>
                         Remind
                       </button>
                     </div>
                   )}
-                  
-                  <Link
-                    to="/payments"
-                    className="block text-center text-xs text-primary-600 hover:text-primary-700"
-                  >
-                    View in Payments
+
+                  <Link to="/payments" className="link" style={{ display: 'block', textAlign: 'center' }}>
+                    View in payments
                   </Link>
                 </div>
               </div>
             )}
 
-            {/* Future Placeholders */}
-            <div className="space-y-2 border-t border-gray-100 pt-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Coming Soon</p>
-              <div className="grid grid-cols-2 gap-2">
-                {['Recording', 'Transcript', 'SOAP Notes', 'Intelligence'].map((item) => (
-                  <div key={item} className="rounded-lg bg-gray-50 p-2 text-center text-xs text-gray-400">
-                    {item}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <p className="t-caption">Recording, transcripts, and session intelligence for this appointment are on the roadmap.</p>
           </div>
 
-          {/* Actions */}
-          <div className="flex shrink-0 items-center justify-between border-t border-gray-200 px-6 py-4">
+          <div className="sheet-foot" style={{ justifyContent: 'space-between' }}>
             <button
-              onClick={handleDelete}
+              type="button"
+              className="btn btn-ghost"
+              style={{ color: 'var(--error)' }}
+              onClick={() => setShowDeleteDialog(true)}
               disabled={deleting}
-              className="flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
             >
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              <Trash2 size={16} strokeWidth={1.5} />
               Delete
             </button>
-            <div className="flex gap-2">
-              <button onClick={onClose} className="btn-secondary">
+            <div className="sheet-foot-group" style={{ display: 'flex', gap: 'var(--space-2)' }}>
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
                 Close
               </button>
               {onEdit && (
-                <button
-                  onClick={() => onEdit(appointmentId)}
-                  className="btn-primary flex items-center gap-1.5"
-                >
-                  <Edit className="h-4 w-4" />
+                <button type="button" className="btn btn-primary" onClick={() => onEdit(appointmentId)}>
+                  <Edit size={16} strokeWidth={1.5} />
                   Edit
                 </button>
               )}
@@ -526,53 +435,70 @@ export default function AppointmentDetail({
         </div>
       </div>
 
-      {/* Cancel Dialog */}
+      {/* Cancel dialog */}
       {showCancelDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
-                <XCircle className="h-5 w-5 text-red-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Cancel Appointment</h3>
-                <p className="text-sm text-gray-500">This action cannot be undone</p>
-              </div>
-            </div>
-            <div className="mb-4">
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Reason (optional)
-              </label>
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center" style={{ padding: 'var(--space-4)' }}>
+          <div
+            className="modal"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="cancel-appt-title"
+            onKeyDown={(e) => { if (e.key === 'Escape') setShowCancelDialog(false) }}
+          >
+            <h3 id="cancel-appt-title" className="modal-title">Cancel appointment</h3>
+            <p className="modal-body">This action cannot be undone.</p>
+            <div style={{ margin: '0 0 var(--space-4)' }}>
+              <div className="field-head"><label htmlFor="cancel_reason">Reason (optional)</label></div>
               <textarea
-                className="input-field"
+                id="cancel_reason"
+                className="textarea"
                 rows={2}
-                placeholder="Enter cancellation reason..."
+                placeholder="Enter cancellation reason…"
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
               />
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="modal-actions">
               <button
-                onClick={() => {
-                  setShowCancelDialog(false)
-                  setCancelReason('')
-                }}
-                className="btn-secondary"
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setShowCancelDialog(false); setCancelReason('') }}
               >
-                Keep Appointment
+                Keep appointment
               </button>
-              <button
-                onClick={handleCancel}
-                disabled={updating}
-                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
-              >
-                {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-                Cancel Appointment
+              <button type="button" className="btn btn-danger" onClick={handleCancel} disabled={updating}>
+                {updating && <Loader2 size={14} strokeWidth={1.5} className="animate-spin" />}
+                Cancel appointment
               </button>
             </div>
           </div>
         </div>
       )}
-    </>
+
+      {/* Delete confirm dialog */}
+      {showDeleteDialog && (
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center" style={{ padding: 'var(--space-4)' }}>
+          <div
+            className="modal"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-appt-title"
+            onKeyDown={(e) => { if (e.key === 'Escape') setShowDeleteDialog(false) }}
+          >
+            <h3 id="delete-appt-title" className="modal-title">Delete appointment</h3>
+            <p className="modal-body">This will permanently delete this appointment. This action cannot be undone.</p>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowDeleteDialog(false)}>
+                Keep appointment
+              </button>
+              <button type="button" className="btn btn-danger" onClick={handleDelete} disabled={deleting}>
+                {deleting && <Loader2 size={14} strokeWidth={1.5} className="animate-spin" />}
+                Delete appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

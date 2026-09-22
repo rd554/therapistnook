@@ -7,8 +7,7 @@
 // way if this list is ever extended — one row per distinct `code`.
 //
 // Used by PhoneInput (components/ui/PhoneInput.jsx) for the country-code
-// picker on patient phone fields, and by PatientOnboarding's public intake
-// form.
+// picker on patient phone fields.
 //
 // The three entries a therapist with international clients will pick most
 // often — US/Canada, UK, UAE — are deliberately abbreviated rather than

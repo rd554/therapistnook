@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import {
-  Brain, Loader2, AlertCircle, RefreshCw, CheckCircle, XCircle, Clock,
-  User, AlertTriangle, Target, Users, Calendar, HelpCircle,
-  FileText, Activity, ChevronDown, ChevronRight, History,
-  ThumbsUp, ThumbsDown, Sparkles, Shield, TrendingUp,
-  Send, ShieldAlert, Sparkle,
+  ArrowLeft, ChevronDown, ChevronRight, History, RefreshCw, Sparkle,
+  User, FileText, Target, HelpCircle, Calendar, Activity, TrendingUp,
+  Users, AlertTriangle, Clock, CheckCircle, XCircle, Loader2, AlertCircle,
+  X, Send, ShieldAlert, Brain,
 } from 'lucide-react'
 import {
   getClinicalIntelligence,
@@ -17,39 +16,95 @@ import {
   getClinicalIntelligenceChat,
   askClinicalIntelligenceChat,
 } from '../api/client'
-import {
-  NoClinicalIntelligence,
-  Alert,
-  Button,
-  IconButton,
-  PageLoader,
-} from './ui'
+import { NoClinicalIntelligence } from './ui'
+import { formatDate } from '../utils/date'
 
-const CONFIDENCE_COLORS = {
-  high: 'bg-success-bg text-success-text',
-  medium: 'bg-warning-bg text-warning-text',
-  low: 'bg-error-bg text-error-text',
+// ---- formatting layer (colour rule §10: format raw data before render,
+// this is not a CSS fix) ------------------------------------------------
+// "job_change" -> "Job change" - sentence case, not title case, matching
+// §B7's sentence-case rule for every label on this screen.
+function formatEnum(value) {
+  if (!value) return ''
+  const words = value.replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-const STATUS_COLORS = {
-  active: 'bg-error-bg text-error-text',
-  remission: 'bg-warning-bg text-warning-text',
-  resolved: 'bg-success-bg text-success-text',
-  current: 'bg-info-bg text-info-text',
-  historical: 'bg-slate-100 text-slate-600',
-  provisional: 'bg-purple-100 text-purple-700',
-  completed: 'bg-success-bg text-success-text',
-  ongoing: 'bg-info-bg text-info-text',
-  discontinued: 'bg-slate-100 text-slate-600',
+// ISO timestamp -> "Aug 20", used in the tighter ci-row-meta/tnum slots
+// (treatment goals, pending-source group headers) matching the prototype.
+function formatDateShort(value) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-const SEVERITY_COLORS = {
-  low: 'bg-success-bg text-success-text',
-  moderate: 'bg-warning-bg text-warning-text',
-  high: 'bg-orange-100 text-orange-700',
-  critical: 'bg-error-bg text-error-text',
-  mild: 'bg-success-bg text-success-text',
-  severe: 'bg-error-bg text-error-text',
+// Sentence-cases a TABS label ("Documents & Assessments" -> "Documents &
+// assessments") for the section switcher, without touching the shared TABS
+// array in PatientProfile.jsx (other tabs still render it title-case).
+function sentenceCase(label) {
+  if (!label) return ''
+  const lower = label.toLowerCase()
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
+}
+
+// Ordered-scale colour rule (§ colour table): high confidence is never
+// shown - "(not shown)" in the reference block - only ever flagged when
+// something is genuinely uncommon (low). Confidence lives on each item
+// (symptom/diagnosis/etc), not on the source citation, so this takes the
+// section's *items*, not its sources.
+function confidenceNote(items) {
+  const withConfidence = (items || []).filter(i => i?.confidence)
+  if (withConfidence.length === 0) return null
+  const lowCount = withConfidence.filter(i => i.confidence === 'low').length
+  if (lowCount > 0) return { text: `${lowCount} low confidence`, warn: true }
+  if (withConfidence.every(i => i.confidence === 'high')) return { text: 'all high confidence', warn: false }
+  return null
+}
+
+// Diagnoses: ordered scale is History/Current/Provisional, not a colour
+// per status - "current" (DiagnosisItem.status, schemas.py) is never red
+// (see closed-palette rule, and the old STATUS_COLORS.active = red bug
+// this replaces). Real values are current/historical/provisional/ruled_out.
+function diagnosisStatusMeta(status) {
+  switch (status) {
+    case 'current':
+      return { label: 'Current', cls: 'status-plain' }
+    case 'historical':
+      return { label: 'History', cls: 'status-quiet' }
+    case 'ruled_out':
+      return { label: 'Ruled out', cls: 'status-quiet' }
+    case 'provisional':
+      return { label: 'Provisional', cls: 'status-plain' }
+    default:
+      return { label: formatEnum(status) || 'Current', cls: 'status-plain' }
+  }
+}
+
+// Shared ordered-scale mapping for symptom severity AND risk severity -
+// both use the same low/moderate(mild)/high(severe)/critical vocabulary,
+// coloured only at the top of the scale (§ colour table).
+function severityMeta(severity) {
+  switch (severity) {
+    case 'low':
+    case 'mild':
+      return { label: formatEnum(severity), cls: 'status-plain' }
+    case 'moderate':
+      return { label: 'Moderate', cls: 'status-plain' }
+    case 'high':
+    case 'severe':
+      return { label: formatEnum(severity), cls: 'status-warn' }
+    case 'critical':
+      return { label: 'Critical', cls: 'status-alert' }
+    default:
+      return { label: formatEnum(severity) || 'Unknown', cls: 'status-plain' }
+  }
+}
+
+// Outstanding-question priority: Low/Medium are quiet, High is the only
+// one that earns colour.
+function priorityMeta(priority) {
+  if (priority === 'high') return { label: 'High priority', cls: 'status-warn' }
+  return { label: `${formatEnum(priority) || 'Low'} priority`, cls: 'status-quiet' }
 }
 
 const SOURCE_TYPE_META = {
@@ -62,19 +117,38 @@ const SOURCE_TYPE_META = {
 
 function sourceGroupMeta(sourceType) {
   return SOURCE_TYPE_META[sourceType] || {
-    label: sourceType
-      ? sourceType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-      : 'Unknown Source',
-    icon: Sparkles,
+    label: sourceType ? formatEnum(sourceType) : 'Unknown source',
+    icon: Sparkle,
   }
+}
+
+// Multiple extracted facts often cite the same session, producing several
+// identical (type, date) source entries - collapsed here to one entry with
+// a ×N count instead of repeating the same label.
+function groupSources(sources) {
+  const grouped = []
+  const byKey = new Map()
+  for (const source of sources || []) {
+    const label = sourceGroupMeta(source.source_type).label
+    const date = source.date ? formatDateShort(source.date) : null
+    const key = `${label}|${date || ''}`
+    const existing = byKey.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      const entry = { label, date, count: 1, excerpt: source.excerpt }
+      byKey.set(key, entry)
+      grouped.push(entry)
+    }
+  }
+  return grouped
 }
 
 // Groups pending updates by the source event that produced them (e.g. one
 // clinical-history save, one therapy session) rather than showing a flat
 // list, so a practitioner can review "everything from Tuesday's session" as
-// a unit. `pendingUpdates` arrives newest-first (see list_pending_updates'
-// created_at desc ordering), so the first time a group's key is seen is
-// always its most recent item - no separate sort needed.
+// a unit. `pendingUpdates` arrives newest-first, so the first time a
+// group's key is seen is always its most recent item - no separate sort.
 function groupPendingUpdates(updates) {
   const groups = []
   const indexByKey = new Map()
@@ -91,7 +165,30 @@ function groupPendingUpdates(updates) {
 
 const CONFIDENCE_FILTERS = ['all', 'high', 'medium', 'low']
 
-export default function ClinicalIntelligenceTab({ patientId }) {
+const TIMELINE_ICONS = {
+  clinical_history: FileText, assessment: TrendingUp, session: Activity,
+  therapy_session: Activity, report: FileText, life_event: Calendar,
+  risk_event: AlertTriangle, diagnosis: FileText, treatment: Target,
+}
+
+// Narrow-viewport check backing the Ask Nook panel's aria-modal: desktop is
+// a non-modal floating panel (record stays readable behind it, no scrim),
+// mobile is a modal sheet over a scrim (same breakpoint as .nook-panel's
+// CSS media query in clinical-ink.css).
+function useIsNarrow(breakpointPx = 640) {
+  const [isNarrow, setIsNarrow] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth <= breakpointPx
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpointPx}px)`)
+    const handler = (e) => setIsNarrow(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [breakpointPx])
+  return isNarrow
+}
+
+export default function ClinicalIntelligenceTab({ patientId, patient, sectionOptions, onSectionChange, onBack }) {
   const [intelligence, setIntelligence] = useState(null)
   const [stats, setStats] = useState(null)
   const [pendingUpdates, setPendingUpdates] = useState([])
@@ -99,10 +196,13 @@ export default function ClinicalIntelligenceTab({ patientId }) {
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState('')
-  const [activeSection, setActiveSection] = useState('overview')
   const [showVersions, setShowVersions] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [confidenceFilter, setConfidenceFilter] = useState('all')
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [mobileSectionOpen, setMobileSectionOpen] = useState(false)
+  const sectionRef = useRef(null)
+  const mobileSectionRef = useRef(null)
 
   const loadData = async () => {
     try {
@@ -124,7 +224,24 @@ export default function ClinicalIntelligenceTab({ patientId }) {
 
   useEffect(() => {
     loadData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false)
+    }
+    if (sectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [sectionOpen])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (mobileSectionRef.current && !mobileSectionRef.current.contains(e.target)) setMobileSectionOpen(false)
+    }
+    if (mobileSectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mobileSectionOpen])
 
   const handleProcess = async () => {
     try {
@@ -177,8 +294,7 @@ export default function ClinicalIntelligenceTab({ patientId }) {
 
   // These must run on every render regardless of loading/error state - the
   // early returns below would otherwise change the hook count between
-  // renders (violates Rules of Hooks: "Rendered more hooks than during the
-  // previous render").
+  // renders (Rules of Hooks).
   const confidenceCounts = useMemo(() => {
     const counts = { all: pendingUpdates.length, high: 0, medium: 0, low: 0 }
     for (const u of pendingUpdates) {
@@ -199,306 +315,261 @@ export default function ClinicalIntelligenceTab({ patientId }) {
     [filteredPendingUpdates]
   )
 
-  if (loading) {
-    return <PageLoader />
-  }
-
-  if (error) {
-    return (
-      <div className="card">
-        <div className="py-8 text-center">
-          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-error-text" />
-          <p className="text-secondary">{error}</p>
-          <Button onClick={loadData} className="mt-4">
-            Try Again
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   const hasPendingUpdates = pendingUpdates.length > 0
 
   const isEmpty = !intelligence?.patient_summary &&
-    !(intelligence?.symptoms?.length) && 
+    !(intelligence?.symptoms?.length) &&
     !(intelligence?.diagnoses?.length) &&
     !(intelligence?.treatment_goals?.length)
 
+  const currentSectionLabel = sentenceCase(
+    sectionOptions?.find(o => o.value === 'clinical-intelligence')?.label || 'Clinical intelligence'
+  )
+
   return (
-    <div className="space-y-6 pt-2">
-      {/* Section Header - Outside Card, matching the other patient tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="text-section-title text-content-primary">Clinical Intelligence</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <IconButton icon={History} label="Version History" onClick={loadVersions} />
-          <Button variant="tint" size="sm" onClick={() => setShowChat(true)} leftIcon={Sparkle}>
-            Ask Nook
-          </Button>
-          <Button variant="tint" size="sm" onClick={handleProcess} isLoading={processing} leftIcon={RefreshCw}>
-            {processing ? 'Processing...' : 'Reprocess All Sources'}
-          </Button>
+    <div className="clinical-ink ci-page">
+      {/* Desktop patient header + section switcher.
+          Wrapped in a plain "hidden sm:block" div rather than putting
+          "hidden sm:flex" directly on .ci-patient-head: Tailwind's .hidden
+          is (0,1,0) specificity, .clinical-ink .ci-patient-head's own
+          `display: flex` is (0,2,0) and would win, showing this row on
+          mobile alongside the mobile block below. A wrapper's display
+          doesn't compete with its child's. */}
+      <div className="hidden sm:block">
+        <div className="ci-patient-head">
+          <div className="ci-patient-id">
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
+            </button>
+            <div className="ci-patient-name">
+              <h1 className="t-h1">{patient?.full_name}</h1>
+              <span className="t-body-s">
+                {patient?.age != null ? `${patient.age} yrs` : ''}
+                {patient?.age != null && patient?.gender ? ' · ' : ''}
+                {patient?.gender}
+              </span>
+            </div>
+          </div>
+          <div ref={sectionRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              aria-haspopup="true"
+              aria-expanded={sectionOpen}
+              onClick={() => setSectionOpen(v => !v)}
+            >
+              {currentSectionLabel}
+              <ChevronDown size={16} strokeWidth={1.5} />
+            </button>
+            {sectionOpen && (
+              <div className="menu-popover align-right">
+                {(sectionOptions || []).map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className="menu-item"
+                    onClick={() => { onSectionChange?.(opt.value); setSectionOpen(false) }}
+                  >
+                    {sentenceCase(opt.label)}{opt.badge ? ` · ${opt.badge}` : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Pending Updates */}
-      {hasPendingUpdates && (
-        <Alert variant="warning" className="!p-5">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h3 className="flex items-center gap-2 font-medium">
-                <Sparkles className="h-5 w-5" />
-                {pendingUpdates.length} Pending Updates
-              </h3>
-              <p className="text-sm opacity-90">
-                Review AI-generated updates before they are added to the patient's record
-              </p>
+      {/* Desktop toolbar - same "hidden sm:block" wrapper reasoning as the
+          patient header above (.ci-toolbar also sets its own display:flex). */}
+      <div className="hidden sm:block">
+        <div className="ci-toolbar">
+          <h2 className="t-h2">Clinical intelligence</h2>
+          <div className="ci-toolbar-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon btn-icon-sm"
+              aria-label="Version history"
+              title="Version history"
+              onClick={loadVersions}
+            >
+              <History size={16} strokeWidth={1.5} />
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleProcess} disabled={processing}>
+              {processing && <Loader2 size={14} className="animate-spin" />}
+              {processing ? 'Processing…' : 'Reprocess sources'}
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${showChat ? 'btn-active' : 'btn-primary'}`}
+              onClick={() => setShowChat(v => !v)}
+            >
+              <Sparkle size={16} strokeWidth={1.5} />
+              Ask Nook
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile patient header, section switcher and actions */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
+        <div className="ci-patient-id">
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <div className="ci-patient-name">
+            <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{patient?.full_name}</h1>
+            <span className="t-body-s">
+              {patient?.age != null ? `${patient.age} yrs` : ''}
+              {patient?.age != null && patient?.gender ? ' · ' : ''}
+              {patient?.gender}
+            </span>
+          </div>
+        </div>
+
+        <div ref={mobileSectionRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ width: '100%', justifyContent: 'space-between' }}
+            aria-haspopup="true"
+            aria-expanded={mobileSectionOpen}
+            onClick={() => setMobileSectionOpen(v => !v)}
+          >
+            {currentSectionLabel}
+            <ChevronDown size={16} strokeWidth={1.5} />
+          </button>
+          {mobileSectionOpen && (
+            <div className="menu-popover" style={{ width: '100%' }}>
+              {(sectionOptions || []).map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className="menu-item"
+                  onClick={() => { onSectionChange?.(opt.value); setMobileSectionOpen(false) }}
+                >
+                  {sentenceCase(opt.label)}{opt.badge ? ` · ${opt.badge}` : ''}
+                </button>
+              ))}
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => handleBulkReject(confidenceFilter === 'all' ? null : filteredPendingUpdates.map(u => u.id))}
-                leftIcon={ThumbsDown}
-                disabled={filteredPendingUpdates.length === 0}
-              >
-                {confidenceFilter === 'all' ? 'Reject All' : `Reject Filtered (${filteredPendingUpdates.length})`}
-              </Button>
-              <Button
-                onClick={() => handleBulkApprove(confidenceFilter === 'all' ? null : filteredPendingUpdates.map(u => u.id))}
-                leftIcon={ThumbsUp}
-                disabled={filteredPendingUpdates.length === 0}
-              >
-                {confidenceFilter === 'all' ? 'Approve All' : `Approve Filtered (${filteredPendingUpdates.length})`}
-              </Button>
+          )}
+        </div>
+
+        <div className="action-row">
+          <button
+            type="button"
+            className={`btn grow ${showChat ? 'btn-active' : 'btn-primary'}`}
+            onClick={() => setShowChat(v => !v)}
+          >
+            <Sparkle size={16} strokeWidth={1.5} />
+            Ask Nook
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-icon"
+            aria-label="Reprocess sources"
+            title="Reprocess sources"
+            onClick={handleProcess}
+            disabled={processing}
+          >
+            {processing ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} strokeWidth={1.5} />}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-icon"
+            aria-label="Version history"
+            title="Version history"
+            onClick={loadVersions}
+          >
+            <History size={18} strokeWidth={1.5} />
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-8) 0' }}>
+          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
+        </div>
+      ) : error ? (
+        <div className="card" style={{ textAlign: 'center', padding: 'var(--space-8) var(--space-5)' }}>
+          <AlertCircle size={32} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto var(--space-3)' }} />
+          <p className="t-body-s">{error}</p>
+          <button type="button" className="btn btn-primary" style={{ marginTop: 'var(--space-4)' }} onClick={loadData}>
+            Try again
+          </button>
+        </div>
+      ) : (
+        <div className="stack-lg">
+          {hasPendingUpdates && (
+            <PendingUpdatesCard
+              pendingUpdates={pendingUpdates}
+              filteredPendingUpdates={filteredPendingUpdates}
+              pendingGroups={pendingGroups}
+              confidenceFilter={confidenceFilter}
+              setConfidenceFilter={setConfidenceFilter}
+              confidenceCounts={confidenceCounts}
+              onApprove={(id) => handleReviewUpdate(id, 'approve')}
+              onReject={(id) => handleReviewUpdate(id, 'reject')}
+              onBulkApprove={handleBulkApprove}
+              onBulkReject={handleBulkReject}
+            />
+          )}
+
+          {isEmpty && !hasPendingUpdates && (
+            <div className="card">
+              <NoClinicalIntelligence onProcess={handleProcess} />
             </div>
-          </div>
+          )}
 
-          {/* Confidence filter */}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide opacity-70">Confidence</span>
-            {CONFIDENCE_FILTERS.map(level => (
-              <button
-                key={level}
-                onClick={() => setConfidenceFilter(level)}
-                className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition-colors ${
-                  confidenceFilter === level
-                    ? 'bg-white text-warning-text shadow-sm'
-                    : 'bg-white/40 text-warning-text/80 hover:bg-white/70'
-                }`}
-              >
-                {level} ({confidenceCounts[level]})
-              </button>
-            ))}
-          </div>
+          {!isEmpty && (
+            <>
+              <PatientSummaryCard summary={intelligence?.patient_summary} stats={stats} />
 
-          {/* Grouped by source event */}
-          <div className="mt-4 max-h-[32rem] space-y-4 overflow-y-auto">
-            {pendingGroups.length === 0 ? (
-              <p className="py-6 text-center text-sm opacity-80">No pending updates match this filter.</p>
-            ) : (
-              pendingGroups.map(group => (
-                <PendingSourceGroup
-                  key={group.key}
-                  group={group}
-                  onApprove={(updateId) => handleReviewUpdate(updateId, 'approve')}
-                  onReject={(updateId) => handleReviewUpdate(updateId, 'reject')}
-                  onApproveGroup={() => handleBulkApprove(group.updates.map(u => u.id))}
-                  onRejectGroup={() => handleBulkReject(group.updates.map(u => u.id))}
-                />
-              ))
-            )}
-          </div>
-        </Alert>
-      )}
+              <ClinicalPictureCard
+                diagnoses={intelligence?.diagnoses}
+                symptoms={intelligence?.symptoms}
+                riskFactors={intelligence?.risk_factors}
+              />
 
-      {/* Empty State */}
-      {isEmpty && !hasPendingUpdates && (
-        <div className="card">
-          <NoClinicalIntelligence onProcess={handleProcess} />
+              <TreatmentGoalsCard goals={intelligence?.treatment_goals} />
+
+              <OutstandingQuestionsCard questions={intelligence?.outstanding_questions} />
+
+              <MoreDetailSection
+                relationships={intelligence?.relationships}
+                lifeEvents={intelligence?.life_events}
+                timeline={intelligence?.timeline}
+              />
+
+              {intelligence?.updated_at && (
+                <div className="t-caption" style={{ textAlign: 'center', padding: 'var(--space-6) 0 var(--space-8)' }}>
+                  Updated {formatDate(intelligence.updated_at)}
+                  {intelligence.last_source_type && ` · Source: ${formatEnum(intelligence.last_source_type)}`}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
-      {/* Intelligence Content - one prioritized column: the things a
-          practitioner needs to act on or orient by first (risk, what
-          changed, the summary) come before reference detail, instead of
-          nine identical-looking accordion rows in source order. */}
-      {!isEmpty && (
-        <div className="space-y-5">
-          <RiskBanner riskFactors={intelligence?.risk_factors} />
-
-          <WhatsChangedCard recentChanges={intelligence?.recent_changes} />
-
-          <SnapshotCard summary={intelligence?.patient_summary} stats={stats} />
-
-          <ClinicalPictureCard
-            diagnoses={intelligence?.diagnoses}
-            symptoms={intelligence?.symptoms}
-          />
-
-          <TreatmentGoalsCard goals={intelligence?.treatment_goals} />
-
-          <OutstandingQuestionsCard questions={intelligence?.outstanding_questions} />
-
-          <MoreDetailSection
-            relationships={intelligence?.relationships}
-            lifeEvents={intelligence?.life_events}
-            timeline={intelligence?.timeline}
-          />
-        </div>
-      )}
-
-      {/* Version History Modal */}
       {showVersions && (
         <VersionHistoryModal
           versions={versions}
+          recentChanges={intelligence?.recent_changes}
           onClose={() => setShowVersions(false)}
         />
       )}
 
-      {/* Ask-about-this-patient chat panel */}
       {showChat && (
-        <ClinicalChatPanel
-          patientId={patientId}
-          onClose={() => setShowChat(false)}
-        />
-      )}
-
-      {/* Last Updated */}
-      {intelligence?.updated_at && (
-        <div className="text-center text-xs text-gray-400">
-          Last updated: {new Date(intelligence.updated_at).toLocaleString()}
-          {intelligence.last_source_type && (
-            <span> • Source: {intelligence.last_source_type.replace('_', ' ')}</span>
-          )}
-        </div>
+        <>
+          <div className="nook-scrim" onClick={() => setShowChat(false)} />
+          <NookPanel patientId={patientId} patientName={patient?.full_name} onClose={() => setShowChat(false)} />
+        </>
       )}
     </div>
   )
 }
 
-// A small header used by every card in the new layout: a muted icon tile
-// plus a title (optionally a subtitle), matching the approved mockup.
-function CardHeader({ icon: Icon, iconClassName = 'bg-slate-50 text-content-muted', title, subtitle, action }) {
-  return (
-    <div className="mb-3.5 flex items-center justify-between gap-3">
-      <div className="flex items-center gap-3.5">
-        <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${iconClassName}`}>
-          <Icon className="h-5 w-5" strokeWidth={1.8} />
-        </div>
-        <div>
-          <h3 className="text-card-title">{title}</h3>
-          {subtitle && <p className="mt-0.5 text-caption">{subtitle}</p>}
-        </div>
-      </div>
-      {action}
-    </div>
-  )
-}
-
-// Only rendered when there's something to act on - not even a placeholder
-// shows when the patient has no active risk factors.
-function RiskBanner({ riskFactors }) {
-  const active = (riskFactors || []).filter(r => r.status !== 'resolved')
-  if (active.length === 0) return null
-
-  return (
-    <Alert
-      variant="error"
-      title={`${active.length} active risk factor${active.length === 1 ? '' : 's'}`}
-    >
-      <div className="mt-2 space-y-1.5">
-        {active.map((risk, idx) => (
-          <div key={risk.id || idx} className="flex items-center justify-between gap-3">
-            <span className="font-medium">
-              {(risk.risk_type || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-            </span>
-            <span className="text-xs uppercase tracking-wide opacity-80">
-              {risk.severity}{risk.status ? ` · ${risk.status}` : ''}
-            </span>
-          </div>
-        ))}
-      </div>
-    </Alert>
-  )
-}
-
-// Shows the most recent applied changes across all sources, newest first -
-// NOT grouped down to a single source event. A "reprocess all sources" run
-// walks clinical history, sessions, documents and assessments in one pass
-// and prepends every change it applies, so picking "the first group" would
-// surface whichever source that loop happened to touch last, not what's
-// actually most recent - and would hide changes from other sources applied
-// moments earlier in the same run. A flat top-N list sidesteps that. Reads
-// `recent_changes`, a rolling audit log the backend appends to on every
-// applied change (auto-applied or reviewed) - see append_change_entry() in
-// clinical_intelligence.py. Renders nothing for patients with no changes
-// logged yet (existing records predate this field).
-//
-// Titled "Recent changes", not "since last visit" - nothing here is scoped
-// to a visit boundary (no per-visit grouping, no reliable event date), so
-// claiming otherwise would overstate what the log actually tracks. Also
-// note a "Reprocess all sources" run can emit more entries than fit here in
-// one pass, so right after a bulk reprocess this reflects processing
-// activity, not only new clinical findings.
-//
-// The date tag is deliberately omitted. `applied_at` is when the backend
-// processed the change, not when the underlying clinical event happened -
-// reprocessing older history would otherwise show today's date on a
-// months-old session.
-function WhatsChangedCard({ recentChanges }) {
-  const [showAll, setShowAll] = useState(false)
-  if (!recentChanges || recentChanges.length === 0) return null
-
-  const visible = showAll ? recentChanges : recentChanges.slice(0, 6)
-  const remaining = recentChanges.length - visible.length
-
-  return (
-    <div className="card">
-      <CardHeader
-        icon={Clock}
-        iconClassName="bg-info-bg text-info-text"
-        title="Recent changes"
-        action={<span className="text-caption">{recentChanges.length} total</span>}
-      />
-      <div className="divide-y divide-border-light">
-        {visible.map(change => (
-          <div key={change.id} className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
-            <div className="flex items-start gap-3">
-              <span className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full bg-info-text/40" />
-              <span className="text-sm text-content-primary">{change.label}</span>
-            </div>
-            <span className="flex-shrink-0 rounded-full border border-border-light bg-slate-50 px-2.5 py-0.5 text-xs text-content-secondary">
-              {sourceGroupMeta(change.source_type).label}
-            </span>
-          </div>
-        ))}
-      </div>
-      {remaining > 0 && (
-        <button
-          onClick={() => setShowAll(true)}
-          className="mt-3.5 flex items-center gap-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
-        >
-          Show {remaining} more change{remaining === 1 ? '' : 's'}
-          <ChevronDown className="h-3.5 w-3.5" />
-        </button>
-      )}
-    </div>
-  )
-}
-
-function SnapshotTag({ children }) {
-  return (
-    <span className="rounded-full border border-border-light bg-slate-50 px-2.5 py-1 text-xs font-medium text-content-secondary">
-      {children}
-    </span>
-  )
-}
-
-// The orientation card: the AI-written narrative plus a handful of counts
-// pulled from /clinical-intelligence/stats, so this is the one place that
-// says "2 current diagnoses" - not a header count elsewhere computed from
-// a differently-filtered list. That was the source of the diagnoses-count
-// mismatch in the old layout.
-function SnapshotCard({ summary, stats }) {
+function PatientSummaryCard({ summary, stats }) {
   if (!summary?.text) return null
 
   const tags = [
@@ -508,150 +579,147 @@ function SnapshotCard({ summary, stats }) {
   ].filter(Boolean)
 
   return (
-    <div className="card">
-      <CardHeader icon={User} iconClassName="bg-teal-50 text-teal-600" title="Patient Summary" />
-      <p className="text-body text-content-secondary">{summary.text}</p>
+    <div className="card-narrative">
+      <div className="ci-card-head">
+        <span className="icon-badge"><User size={16} strokeWidth={1.5} /></span>
+        <span className="t-h3">Patient summary</span>
+      </div>
+      <p className="t-narrative">{summary.text}</p>
       {tags.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {tags.map(tag => <SnapshotTag key={tag}>{tag}</SnapshotTag>)}
-        </div>
+        <div className="t-caption" style={{ marginTop: 'var(--space-5)' }}>{tags.join(' · ')}</div>
       )}
-      {summary.sources?.length > 0 && <SourceCitations sources={summary.sources} />}
+      {/* No confidence note here - patient_summary has no per-item
+          confidence, only the sections below (diagnoses/symptoms/etc) do. */}
+      <SourcesDisclose sources={summary.sources} />
     </div>
   )
 }
 
-function DiagnosisRow({ diagnosis }) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
-      <div>
-        <div className="text-sm text-content-primary">{diagnosis.name}</div>
-        {diagnosis.icd_code ? (
-          <div className="mt-0.5 text-xs text-content-muted">ICD-10 · {diagnosis.icd_code}</div>
-        ) : diagnosis.status === 'provisional' ? (
-          <div className="mt-0.5 text-xs text-content-muted">Pending diagnostic confirmation</div>
-        ) : null}
-      </div>
-      <div className="flex flex-shrink-0 gap-1.5">
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[diagnosis.status] || 'bg-gray-100 text-gray-600'}`}>
-          {diagnosis.status}
-        </span>
-        {diagnosis.confidence && (
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${CONFIDENCE_COLORS[diagnosis.confidence] || 'bg-gray-100 text-gray-600'}`}>
-            {diagnosis.confidence} confidence
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function SymptomRow({ symptom }) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
-      <div className="text-sm text-content-primary">{symptom.name}</div>
-      <div className="flex flex-shrink-0 gap-1.5">
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[symptom.current_status] || 'bg-gray-100 text-gray-600'}`}>
-          {symptom.current_status}
-        </span>
-        {symptom.severity && (
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${SEVERITY_COLORS[symptom.severity] || 'bg-gray-100 text-gray-600'}`}>
-            {symptom.severity}
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// Diagnoses and symptoms grouped visually under one card - they're the two
-// things a practitioner reads together to answer "what's going on with this
-// patient" - but kept as two separate sub-lists rather than merged into one
-// data structure, since they're different clinical concepts.
-//
-// Each sub-header carries its own "N total" so the count next to it never
-// disagrees with the rows underneath - this list shows every diagnosis
-// including historical/resolved ones, while the Patient Summary badge above
-// only counts current ones, and the two are labeled differently on purpose
-// instead of silently showing two different numbers for "diagnoses".
-function ClinicalPictureCard({ diagnoses, symptoms }) {
+// Diagnoses, symptoms and active risk factors, grouped under one card -
+// the three things that answer "what's going on with this patient". Risk
+// factors have no card slot in the approved mockup (Elena, the mock
+// patient, has none active) but backend/clinical_intelligence.py extracts
+// them as a first-class section, so they're folded in here as a third
+// sub-group using the same .ci-line/ordered-scale vocabulary as diagnoses
+// and symptoms rather than left with nowhere to render.
+function ClinicalPictureCard({ diagnoses, symptoms, riskFactors }) {
   const hasDiagnoses = diagnoses?.length > 0
   const hasSymptoms = symptoms?.length > 0
-  if (!hasDiagnoses && !hasSymptoms) return null
+  const activeRisks = (riskFactors || []).filter(r => r.status !== 'resolved')
+  const hasRisks = activeRisks.length > 0
+  if (!hasDiagnoses && !hasSymptoms && !hasRisks) return null
+
+  const allSources = [
+    ...(hasDiagnoses ? diagnoses.flatMap(d => d.sources || []) : []),
+    ...(hasSymptoms ? symptoms.flatMap(s => s.sources || []) : []),
+    ...(hasRisks ? activeRisks.flatMap(r => r.sources || []) : []),
+  ]
+  const allItems = [...(diagnoses || []), ...(symptoms || []), ...activeRisks]
 
   return (
     <div className="card">
-      <CardHeader icon={FileText} iconClassName="bg-primary-light text-primary-600" title="Clinical Picture" />
+      <div className="ci-card-head">
+        <span className="icon-badge"><FileText size={16} strokeWidth={1.5} /></span>
+        <span className="t-h3">Clinical picture</span>
+      </div>
 
       {hasDiagnoses && (
         <>
-          <div className="mb-1 flex items-baseline justify-between">
-            <p className="text-xs font-bold uppercase tracking-wide text-content-muted">Diagnoses</p>
-            <p className="text-xs text-content-muted">{diagnoses.length} total</p>
+          <div className="ci-sub" style={{ marginTop: 0 }}>
+            <span className="t-h4">Diagnoses</span>
+            <span className="t-caption ci-count">{diagnoses.length} total</span>
           </div>
-          <div className="divide-y divide-border-light">
-            {diagnoses.map((d, idx) => <DiagnosisRow key={d.id || idx} diagnosis={d} />)}
-          </div>
+          {diagnoses.map((d, idx) => {
+            const status = diagnosisStatusMeta(d.status)
+            return (
+              <div key={d.id || idx} className="ci-line">
+                <span className="t-cell">{d.name}{d.icd_code ? ` (ICD-10 ${d.icd_code})` : ''}</span>
+                <span className={`ci-line-meta ${status.cls}`}>{status.label}</span>
+              </div>
+            )
+          })}
         </>
       )}
-
-      {hasDiagnoses && hasSymptoms && <div className="my-4 h-px bg-border-light" />}
 
       {hasSymptoms && (
         <>
-          <div className="mb-1 flex items-baseline justify-between">
-            <p className="text-xs font-bold uppercase tracking-wide text-content-muted">Symptoms</p>
-            <p className="text-xs text-content-muted">{symptoms.length} total</p>
+          <div className="ci-sub">
+            <span className="t-h4">Symptoms</span>
+            <span className="t-caption ci-count">{symptoms.length} total</span>
           </div>
-          <div className="divide-y divide-border-light">
-            {symptoms.map((s, idx) => <SymptomRow key={s.id || idx} symptom={s} />)}
-          </div>
+          {symptoms.map((s, idx) => {
+            const sev = s.severity ? severityMeta(s.severity) : null
+            return (
+              <div key={s.id || idx} className="ci-line">
+                <span className="t-cell">{s.name}</span>
+                {sev && <span className={`ci-line-meta ${sev.cls}`}>{sev.label}</span>}
+              </div>
+            )
+          })}
         </>
       )}
+
+      {hasRisks && (
+        <>
+          <div className="ci-sub">
+            <span className="t-h4">Risk factors</span>
+            <span className="t-caption ci-count">{activeRisks.length} total</span>
+          </div>
+          {activeRisks.map((r, idx) => {
+            const sev = severityMeta(r.severity)
+            return (
+              <div key={r.id || idx} className="ci-row">
+                <ChevronRight size={16} strokeWidth={1.5} className="ci-row-caret" />
+                <div className="ci-row-body">
+                  <span className="t-cell ci-row-text">
+                    {formatEnum(r.risk_type)}
+                  </span>
+                  {r.last_assessment && <span className="t-caption tnum">{formatDateShort(r.last_assessment)}</span>}
+                </div>
+                <span className={`ci-row-meta ${sev.cls}`}>{sev.label}</span>
+              </div>
+            )
+          })}
+        </>
+      )}
+
+      <SourcesDisclose sources={allSources} items={allItems} />
     </div>
   )
 }
 
-// Goal text is often a full session note ("Continue to explore coping
-// strategies for..."), not a short label - clamped to 2 lines and capped to
-// a readable column width (instead of spanning the full card) so a list of
-// 10 doesn't read like a document. Tap to expand in place rather than
-// hover-to-reveal - hover doesn't work on tablet, and it's the same
-// useState idiom already used for "show N more" elsewhere on this card.
-// The date is `created_date` (when the goal was set/extracted), not a
-// visit date - it at least lets a practitioner tell a recent goal apart
-// from one that's been sitting untouched for months.
+// Goal text is often a full session note, not a short label - clamped to 2
+// lines and tap-to-expand in place. Status is only shown when it deviates
+// from the default (active/ongoing) - not an ordered scale, so never
+// coloured, just a quiet caption addition so a completed/discontinued goal
+// doesn't silently look identical to a current one.
 function GoalRow({ goal }) {
   const [expanded, setExpanded] = useState(false)
-  const date = goal.created_date &&
-    new Date(goal.created_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const date = goal.created_date && formatDateShort(goal.created_date)
+  // TreatmentGoalItem.status is current/completed/ongoing/discontinued
+  // (schemas.py) - "current" and "ongoing" are the unremarkable defaults,
+  // so only completed/discontinued earn a caption.
+  const showStatus = goal.status && !['current', 'ongoing'].includes(goal.status)
 
   return (
-    <button
-      onClick={() => setExpanded(prev => !prev)}
-      className="-mx-2 flex w-full items-start justify-between gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-slate-50/60 first:pt-0 last:pb-0"
-    >
-      <div className="flex min-w-0 items-start gap-2">
-        {expanded ? (
-          <ChevronDown className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
-        ) : (
-          <ChevronRight className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
-        )}
-        <div className="min-w-0 max-w-2xl">
-          <p className={`text-sm text-content-primary ${expanded ? '' : 'line-clamp-2'}`}>{goal.goal}</p>
-          {date && <p className="mt-1 text-xs text-content-muted">{date}</p>}
-        </div>
+    <button type="button" className="ci-row" style={rowButtonStyle} onClick={() => setExpanded(v => !v)}>
+      {expanded
+        ? <ChevronDown size={16} strokeWidth={1.5} className="ci-row-caret" />
+        : <ChevronRight size={16} strokeWidth={1.5} className="ci-row-caret" />}
+      <div className="ci-row-body">
+        <span className={expanded ? 't-cell' : 't-cell ci-row-text'}>{goal.goal}</span>
+        <span className="t-caption tnum">
+          {date}{showStatus ? ` · ${formatEnum(goal.status)}` : ''}
+        </span>
       </div>
-      <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[goal.status] || 'bg-gray-100 text-gray-600'}`}>
-        {goal.status}
-      </span>
     </button>
   )
 }
 
-// Shows the first 3 goals and hides the rest behind "Show N more" instead
-// of dumping the whole list - most patients accumulate far more goals than
-// anyone needs to see by default.
+const rowButtonStyle = {
+  width: '100%', textAlign: 'left', background: 'none', border: 0, cursor: 'pointer', font: 'inherit',
+}
+
 function TreatmentGoalsCard({ goals }) {
   const [showAll, setShowAll] = useState(false)
   if (!goals?.length) return null
@@ -661,69 +729,41 @@ function TreatmentGoalsCard({ goals }) {
 
   return (
     <div className="card">
-      <CardHeader
-        icon={Target}
-        iconClassName="bg-success-bg text-success-text"
-        title="Treatment Goals"
-        action={<span className="text-caption">{goals.length} total</span>}
-      />
-      <div className="divide-y divide-border-light">
-        {visible.map((g, idx) => <GoalRow key={g.id || idx} goal={g} />)}
+      <div className="ci-card-head">
+        <span className="icon-badge"><Target size={16} strokeWidth={1.5} /></span>
+        <span className="t-h3">Treatment goals</span>
+        <span className="t-caption ci-count">{goals.length} total</span>
       </div>
+      {visible.map((g, idx) => <GoalRow key={g.id || idx} goal={g} />)}
       {remaining > 0 && (
-        <button
-          onClick={() => setShowAll(true)}
-          className="mt-3.5 flex items-center gap-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
-        >
+        <button type="button" className="ci-disclose" style={{ justifyContent: 'center' }} onClick={() => setShowAll(true)}>
           Show {remaining} more goal{remaining === 1 ? '' : 's'}
-          <ChevronDown className="h-3.5 w-3.5" />
+          <ChevronDown size={14} strokeWidth={1.5} />
         </button>
       )}
     </div>
   )
 }
 
-// Kept as its own card rather than folded into "More detail" - these are
-// things the practitioner is expected to go find out, which makes them
-// more actionable than most other sections.
-// Same treatment as GoalRow: narrower reading column, the date it was
-// raised, and tap-to-expand instead of dumping the full question text -
-// keeps a card with several open questions from reading like a wall of text.
-function QuestionRow({ question: q }) {
+function QuestionRow({ question }) {
   const [expanded, setExpanded] = useState(false)
-  const date = q.created_date &&
-    new Date(q.created_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const date = question.created_date && formatDateShort(question.created_date)
+  const meta = priorityMeta(question.priority)
 
   return (
-    <button
-      onClick={() => setExpanded(prev => !prev)}
-      className="-mx-2 flex w-full items-start justify-between gap-4 rounded-lg px-2 py-3 text-left transition-colors hover:bg-slate-50/60 first:pt-0 last:pb-0"
-    >
-      <div className="flex min-w-0 items-start gap-2">
-        {expanded ? (
-          <ChevronDown className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
-        ) : (
-          <ChevronRight className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-content-muted" />
-        )}
-        <div className="min-w-0 max-w-2xl">
-          <p className={`text-sm text-content-primary ${expanded ? '' : 'line-clamp-2'}`}>{q.question}</p>
-          {date && <p className="mt-1 text-xs text-content-muted">{date}</p>}
-        </div>
+    <button type="button" className="ci-row" style={rowButtonStyle} onClick={() => setExpanded(v => !v)}>
+      {expanded
+        ? <ChevronDown size={16} strokeWidth={1.5} className="ci-row-caret" />
+        : <ChevronRight size={16} strokeWidth={1.5} className="ci-row-caret" />}
+      <div className="ci-row-body">
+        <span className={expanded ? 't-cell' : 't-cell ci-row-text'}>{question.question}</span>
+        {date && <span className="t-caption tnum">{date}</span>}
       </div>
-      <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-        q.priority === 'high' ? 'bg-error-bg text-error-text' :
-        q.priority === 'medium' ? 'bg-warning-bg text-warning-text' :
-        'bg-gray-100 text-gray-600'
-      }`}>
-        {q.priority} priority
-      </span>
+      <span className={`ci-row-meta ${meta.cls}`}>{meta.label}</span>
     </button>
   )
 }
 
-// Shows the first 3 and hides the rest behind "Show N more", same as
-// Treatment Goals - a patient with a long open-questions list shouldn't
-// dump the whole thing by default.
 function OutstandingQuestionsCard({ questions }) {
   const [showAll, setShowAll] = useState(false)
   const unresolved = (questions || []).filter(q => !q.resolved)
@@ -734,96 +774,126 @@ function OutstandingQuestionsCard({ questions }) {
 
   return (
     <div className="card">
-      <CardHeader
-        icon={HelpCircle}
-        iconClassName="bg-warning-bg text-warning-text"
-        title="Outstanding Questions"
-        action={<span className="text-caption">{unresolved.length} total</span>}
-      />
-      <div className="divide-y divide-border-light">
-        {visible.map((q, idx) => <QuestionRow key={q.id || idx} question={q} />)}
+      <div className="ci-card-head">
+        <span className="icon-badge"><HelpCircle size={16} strokeWidth={1.5} /></span>
+        <span className="t-h3">Outstanding questions</span>
+        <span className="t-caption ci-count">{unresolved.length} total</span>
       </div>
+      {visible.map((q, idx) => <QuestionRow key={q.id || idx} question={q} />)}
       {remaining > 0 && (
-        <button
-          onClick={() => setShowAll(true)}
-          className="mt-3.5 flex items-center gap-1.5 text-sm font-semibold text-primary-600 hover:text-primary-700"
-        >
+        <button type="button" className="ci-disclose" style={{ justifyContent: 'center' }} onClick={() => setShowAll(true)}>
           Show {remaining} more question{remaining === 1 ? '' : 's'}
-          <ChevronDown className="h-3.5 w-3.5" />
+          <ChevronDown size={14} strokeWidth={1.5} />
         </button>
       )}
     </div>
   )
 }
 
-// Relationships, Life Events and Timeline are real data a practitioner may
-// need, but not what they read on every visit - demoted into one flat,
-// de-emphasized, collapsed-by-default row instead of three more accordion
-// cards competing for the same attention as Clinical Picture and Goals.
+function RelationshipEntry({ relationship }) {
+  return (
+    <div className="ci-entry">
+      <div className="ci-entry-head">
+        <Users size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+        <span className="t-cell-key">{relationship.person}</span>
+        {relationship.relationship_type && <span className="t-caption">{formatEnum(relationship.relationship_type)}</span>}
+      </div>
+      {relationship.notes && <div className="t-cell">{relationship.notes}</div>}
+    </div>
+  )
+}
+
+function LifeEventEntry({ event }) {
+  return (
+    <div className="ci-entry">
+      <div className="ci-entry-head">
+        <Calendar size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+        <span className="t-cell-key">{event.event}</span>
+        {event.event_type && <span className="t-caption">{formatEnum(event.event_type)}</span>}
+      </div>
+      {event.description && <div className="t-cell">{event.description}</div>}
+      {event.date && <div className="t-caption tnum" style={{ marginTop: '6px' }}>{formatDate(event.date)}</div>}
+    </div>
+  )
+}
+
+function TimelineEntry({ item }) {
+  const Icon = TIMELINE_ICONS[item.event_type] || Clock
+  return (
+    <div className="ci-timeline-entry">
+      <span className="ci-timeline-dot" />
+      <div className="ci-entry">
+        <div className="ci-entry-head">
+          <Icon size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+          <span className="t-cell-key">{item.title}</span>
+        </div>
+        {item.description && <div className="t-cell">{item.description}</div>}
+        {item.date && <div className="t-caption tnum" style={{ marginTop: '6px' }}>{formatDate(item.date)}</div>}
+      </div>
+    </div>
+  )
+}
+
+// Relationships, life events and timeline: real data, but not what a
+// practitioner reads on every visit - collapsed by default. The prototype
+// only shows Life events and Timeline (its mock patient has no recorded
+// relationships to show); Relationships is kept as a third sub-group here
+// since the live data model and the pre-existing component both carry it.
 function MoreDetailSection({ relationships, lifeEvents, timeline }) {
   const [expanded, setExpanded] = useState(false)
 
   const sectionLabels = [
     relationships?.length > 0 && 'Relationships',
-    lifeEvents?.length > 0 && 'Life Events',
+    lifeEvents?.length > 0 && 'Life events',
     timeline?.length > 0 && 'Timeline',
   ].filter(Boolean)
   if (sectionLabels.length === 0) return null
 
+  const sortedTimeline = timeline?.length
+    ? timeline.slice().sort((a, b) => new Date(b.date) - new Date(a.date))
+    : []
+
   return (
-    <div className="overflow-hidden rounded-2xl border border-border-light bg-slate-50/60">
+    <div className="ci-more">
       <button
-        onClick={() => setExpanded(prev => !prev)}
-        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-100/60"
+        type="button"
+        className="ci-more-head"
+        style={{ width: '100%', border: 0, cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
+        aria-expanded={expanded}
+        onClick={() => setExpanded(v => !v)}
       >
-        <div className="flex items-center gap-2.5">
-          {expanded ? (
-            <ChevronDown className="h-4 w-4 flex-shrink-0 text-content-muted" />
-          ) : (
-            <ChevronRight className="h-4 w-4 flex-shrink-0 text-content-muted" />
-          )}
-          <span className="text-sm font-semibold text-content-secondary">More detail</span>
-          <span className="text-caption">{sectionLabels.join(' · ')}</span>
-        </div>
-        <span className="text-caption">{sectionLabels.length} section{sectionLabels.length === 1 ? '' : 's'}</span>
+        {expanded
+          ? <ChevronDown size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+          : <ChevronRight size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />}
+        <span className="t-h3">More detail</span>
+        <span className="t-body-s">{sectionLabels.join(' · ')}</span>
+        <span className="t-caption ci-count">{sectionLabels.length} section{sectionLabels.length === 1 ? '' : 's'}</span>
       </button>
       {expanded && (
-        <div className="space-y-6 border-t border-border-light bg-white p-5">
+        <div className="ci-more-body">
           {relationships?.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-content-muted">Relationships</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {relationships.map((rel, idx) => (
-                  <RelationshipCard key={rel.id || idx} relationship={rel} />
-                ))}
+            <>
+              <div className="ci-sub" style={{ marginTop: 0 }}><span className="t-h4">Relationships</span></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                {relationships.map((rel, idx) => <RelationshipEntry key={rel.id || idx} relationship={rel} />)}
               </div>
-            </div>
+            </>
           )}
           {lifeEvents?.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-content-muted">Life Events</p>
-              <div className="space-y-3">
-                {lifeEvents.map((event, idx) => (
-                  <LifeEventCard key={event.id || idx} event={event} />
-                ))}
+            <>
+              <div className="ci-sub"><span className="t-h4">Life events</span></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                {lifeEvents.map((event, idx) => <LifeEventEntry key={event.id || idx} event={event} />)}
               </div>
-            </div>
+            </>
           )}
-          {timeline?.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-content-muted">Timeline</p>
-              <div className="relative">
-                <div className="absolute left-4 top-0 h-full w-0.5 bg-slate-200" />
-                <div className="space-y-4">
-                  {timeline
-                    .slice()
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .map((item, idx) => (
-                      <TimelineItem key={item.id || idx} item={item} />
-                    ))}
-                </div>
+          {sortedTimeline.length > 0 && (
+            <>
+              <div className="ci-sub"><span className="t-h4">Timeline</span></div>
+              <div className="ci-timeline">
+                {sortedTimeline.map((item, idx) => <TimelineEntry key={item.id || idx} item={item} />)}
               </div>
-            </div>
+            </>
           )}
         </div>
       )}
@@ -831,63 +901,119 @@ function MoreDetailSection({ relationships, lifeEvents, timeline }) {
   )
 }
 
-// Maps a pending update's `section` to the same card component used to
-// render approved items in that section, plus the prop name it expects its
-// item under. Keeps the pending-review queue showing an accurate preview of
-// what the record will look like once approved, instead of a raw JSON dump.
+// Maps a pending update's `section` to the same preview component used
+// below, plus the prop name it expects its item under - keeps the
+// pending-review queue showing an accurate preview of what the record will
+// look like once approved, instead of a raw JSON dump.
 const SECTION_CARD_MAP = {
-  symptoms: { Component: SymptomCard, prop: 'symptom' },
-  diagnoses: { Component: DiagnosisCard, prop: 'diagnosis' },
-  treatment_goals: { Component: GoalCard, prop: 'goal' },
-  relationships: { Component: RelationshipCard, prop: 'relationship' },
-  life_events: { Component: LifeEventCard, prop: 'event' },
-  risk_factors: { Component: RiskCard, prop: 'risk' },
-  outstanding_questions: { Component: QuestionCard, prop: 'question' },
-  // No `timeline` entry: TimelineItem's dot is absolutely-positioned against
-  // the vertical rail its parent section renders (see the Timeline section
-  // below) - nested standalone in the pending queue it'd float with no rail.
-  // Timeline updates are also auto_apply everywhere they're generated, so
-  // they essentially never reach this queue; falls through to the raw-JSON
-  // fallback on the rare case one does.
+  symptoms: { Component: SymptomPreview, prop: 'symptom' },
+  diagnoses: { Component: DiagnosisPreview, prop: 'diagnosis' },
+  treatment_goals: { Component: GoalPreview, prop: 'goal' },
+  relationships: { Component: RelationshipPreview, prop: 'relationship' },
+  life_events: { Component: LifeEventPreview, prop: 'event' },
+  risk_factors: { Component: RiskPreview, prop: 'risk' },
+  outstanding_questions: { Component: QuestionPreview, prop: 'question' },
+  // No `timeline` entry: timeline updates are auto_apply everywhere
+  // they're generated, so they essentially never reach this queue.
 }
 
-// One collapsible-free block per source event (a clinical-history save, a
-// therapy session, etc) so a practitioner can act on "everything from this
-// event" at once instead of hunting through a flat list.
+// ---- Pending updates queue --------------------------------------------
+// Retained functionality (see clinical-ink.css's header comment on
+// .ci-pending-group/.ci-proposal) - restyled onto tokens.css vocabulary
+// rather than dropped: no chips, no colour-coded confidence badges, no
+// dashed warning borders. Approve/reject are neutral icon buttons, never
+// green/red - red stays reserved for safety flags elsewhere on this
+// screen (colour rule).
+function PendingUpdatesCard({
+  pendingUpdates, filteredPendingUpdates, pendingGroups, confidenceFilter,
+  setConfidenceFilter, confidenceCounts, onApprove, onReject, onBulkApprove, onBulkReject,
+}) {
+  return (
+    <div className="card">
+      <div className="ci-card-head">
+        <span className="icon-badge"><Sparkle size={16} strokeWidth={1.5} /></span>
+        <span className="t-h3">Pending updates</span>
+        <span className="t-caption ci-count">{pendingUpdates.length} total</span>
+      </div>
+      <p className="t-body-s">Review AI-generated updates before they're added to the record.</p>
+
+      <div className="action-row" style={{ marginTop: 'var(--space-4)', flexWrap: 'wrap' }}>
+        <div className="seg">
+          {CONFIDENCE_FILTERS.map(level => (
+            <button
+              key={level}
+              type="button"
+              className="seg-option"
+              aria-pressed={confidenceFilter === level}
+              onClick={() => setConfidenceFilter(level)}
+            >
+              {level === 'all' ? 'All' : formatEnum(level)} ({confidenceCounts[level]})
+            </button>
+          ))}
+        </div>
+        <span className="grow" />
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={filteredPendingUpdates.length === 0}
+          onClick={() => onBulkReject(confidenceFilter === 'all' ? null : filteredPendingUpdates.map(u => u.id))}
+        >
+          {confidenceFilter === 'all' ? 'Reject all' : `Reject filtered (${filteredPendingUpdates.length})`}
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={filteredPendingUpdates.length === 0}
+          onClick={() => onBulkApprove(confidenceFilter === 'all' ? null : filteredPendingUpdates.map(u => u.id))}
+        >
+          {confidenceFilter === 'all' ? 'Approve all' : `Approve filtered (${filteredPendingUpdates.length})`}
+        </button>
+      </div>
+
+      <div style={{ marginTop: 'var(--space-4)', maxHeight: '32rem', overflowY: 'auto' }}>
+        {pendingGroups.length === 0 ? (
+          <p className="t-body-s" style={{ textAlign: 'center', padding: 'var(--space-6) 0' }}>
+            No pending updates match this filter.
+          </p>
+        ) : (
+          pendingGroups.map(group => (
+            <PendingSourceGroup
+              key={group.key}
+              group={group}
+              onApprove={onApprove}
+              onReject={onReject}
+              onApproveGroup={() => onBulkApprove(group.updates.map(u => u.id))}
+              onRejectGroup={() => onBulkReject(group.updates.map(u => u.id))}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 function PendingSourceGroup({ group, onApprove, onReject, onApproveGroup, onRejectGroup }) {
   const meta = sourceGroupMeta(group.sourceType)
   const Icon = meta.icon
   const latestDate = group.updates[0]?.created_at
 
   return (
-    <div className="rounded-xl bg-white/60 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 opacity-70" />
-          <span className="text-sm font-medium">
-            From {meta.label}
-            {latestDate && ` — ${new Date(latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
-          </span>
-          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-warning-text">
-            {group.updates.length}
-          </span>
-        </div>
-        <div className="flex gap-1">
-          <button
-            onClick={onRejectGroup}
-            className="rounded-lg px-2 py-1 text-xs font-medium text-error-text hover:bg-error-bg transition-colors"
-          >
-            Reject shown ({group.updates.length})
-          </button>
-          <button
-            onClick={onApproveGroup}
-            className="rounded-lg px-2 py-1 text-xs font-medium text-success-text hover:bg-success-bg transition-colors"
-          >
-            Approve shown ({group.updates.length})
-          </button>
-        </div>
+    <div className="ci-pending-group">
+      <div className="action-row" style={{ flexWrap: 'wrap' }}>
+        <Icon size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+        <span className="t-body-s">
+          From {meta.label}{latestDate ? ` — ${formatDateShort(latestDate)}` : ''}
+        </span>
+        <span className="t-caption">{group.updates.length}</span>
+        <span className="grow" />
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRejectGroup}>
+          Reject shown ({group.updates.length})
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onApproveGroup}>
+          Approve shown ({group.updates.length})
+        </button>
       </div>
-      <div className="mt-3 space-y-3">
+      <div style={{ marginTop: 'var(--space-3)' }}>
         {group.updates.map(update => (
           <PendingUpdateCard
             key={update.id}
@@ -906,49 +1032,31 @@ function PendingUpdateCard({ update, onApprove, onReject }) {
   const changes = update.proposed_changes || {}
 
   return (
-    <div className="rounded-xl border-2 border-dashed border-warning bg-warning-bg/20 p-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-warning-bg px-2.5 py-0.5 text-xs font-medium text-warning-text">
-            {update.operation === 'update' ? 'Proposed update' : 'Proposed addition'}
-          </span>
-          {update.section && (
-            <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium capitalize text-content-secondary">
-              {update.section.replace(/_/g, ' ')}
-            </span>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onReject}
-            className="rounded-xl p-2 text-error-text hover:bg-error-bg transition-colors"
-            title="Reject"
-          >
-            <XCircle className="h-5 w-5" />
+    <div className="ci-proposal">
+      <div className="action-row" style={{ flexWrap: 'wrap' }}>
+        <span className="t-caption">{update.operation === 'update' ? 'Proposed update' : 'Proposed addition'}</span>
+        {update.section && <span className="t-caption">· {formatEnum(update.section)}</span>}
+        <span className="grow" />
+        <div className="ci-pending-actions">
+          <button type="button" className="btn btn-ghost btn-icon btn-icon-sm is-destructive" aria-label="Reject" title="Reject" onClick={onReject}>
+            <XCircle size={16} strokeWidth={1.5} />
           </button>
-          <button
-            onClick={onApprove}
-            className="rounded-xl p-2 text-success-text hover:bg-success-bg transition-colors"
-            title="Approve"
-          >
-            <CheckCircle className="h-5 w-5" />
+          <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Approve" title="Approve" onClick={onApprove}>
+            <CheckCircle size={16} strokeWidth={1.5} />
           </button>
         </div>
       </div>
-
-      {mapping ? (
-        <mapping.Component {...{ [mapping.prop]: changes }} />
-      ) : update.section === 'patient_summary' ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="text-sm text-gray-700">{changes.text}</p>
-          {changes.sources?.length > 0 && <SourceCitations sources={changes.sources} />}
-        </div>
-      ) : (
-        <FallbackPendingContent update={update} />
-      )}
-
+      <div style={{ marginTop: 'var(--space-3)' }}>
+        {mapping ? (
+          <mapping.Component {...{ [mapping.prop]: changes }} />
+        ) : update.section === 'patient_summary' ? (
+          <p className="t-cell">{changes.text}</p>
+        ) : (
+          <FallbackPendingContent update={update} />
+        )}
+      </div>
       {update.reasoning && (
-        <p className="mt-2 text-xs italic text-content-muted">{update.reasoning}</p>
+        <p className="t-caption" style={{ marginTop: 'var(--space-2)', fontStyle: 'italic' }}>{update.reasoning}</p>
       )}
     </div>
   )
@@ -956,383 +1064,231 @@ function PendingUpdateCard({ update, onApprove, onReject }) {
 
 function FallbackPendingContent({ update }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="flex items-center gap-2">
-        <span className="rounded-full bg-warning-bg px-2.5 py-0.5 text-xs font-medium text-warning-text">
-          {update.update_type}
-        </span>
-        <ConfidenceBadge confidence={update.confidence} />
+    <div>
+      <div className="t-caption">
+        {formatEnum(update.update_type)}
+        {update.confidence === 'low' && <> · <span className="status-warn">Low confidence</span></>}
       </div>
-      <p className="mt-2 text-secondary">
-        {update.proposed_changes?.name || update.proposed_changes?.goal || update.proposed_changes?.text || JSON.stringify(update.proposed_changes).slice(0, 100)}
+      <p className="t-cell" style={{ marginTop: '4px' }}>
+        {update.proposed_changes?.name || update.proposed_changes?.goal || update.proposed_changes?.text ||
+          JSON.stringify(update.proposed_changes).slice(0, 100)}
       </p>
       {update.source_excerpt && (
-        <p className="mt-1 text-caption">
-          Source: {update.source_excerpt.slice(0, 100)}...
-        </p>
+        <p className="t-caption" style={{ marginTop: '4px' }}>Source: {update.source_excerpt.slice(0, 100)}…</p>
       )}
     </div>
   )
 }
 
-function SymptomCard({ symptom }) {
+// ---- Pending-queue preview cards --------------------------------------
+// Compact previews of a single proposed change, using the same
+// t-cell-key/t-caption/status-* vocabulary as the approved-record rows
+// above (never a colour-coded confidence chip - low confidence is the
+// only one ever flagged, per the ordered-scale rule).
+function SymptomPreview({ symptom }) {
+  const sev = symptom.severity ? severityMeta(symptom.severity) : null
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h4 className="font-medium text-gray-900">{symptom.name}</h4>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[symptom.current_status] || 'bg-gray-100 text-gray-600'}`}>
-              {symptom.current_status}
-            </span>
-            {symptom.severity && (
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_COLORS[symptom.severity] || 'bg-gray-100 text-gray-600'}`}>
-                {symptom.severity}
-              </span>
-            )}
-          </div>
-          {symptom.first_mention && (
-            <p className="mt-1 text-xs text-gray-500">
-              First mentioned: {new Date(symptom.first_mention).toLocaleDateString()}
-            </p>
-          )}
-        </div>
-        <ConfidenceBadge confidence={symptom.confidence} />
+    <div>
+      <div className="t-cell-key">{symptom.name}</div>
+      <div className="t-caption" style={{ marginTop: '2px' }}>
+        {sev && <span className={sev.cls}>{sev.label}</span>}
+        {symptom.first_mention && <> · First mentioned {formatDate(symptom.first_mention)}</>}
       </div>
-      {symptom.sources?.length > 0 && <SourceCitations sources={symptom.sources} />}
+      {symptom.confidence === 'low' && <div className="status-warn" style={{ marginTop: '4px' }}>Low confidence</div>}
     </div>
   )
 }
 
-function DiagnosisCard({ diagnosis }) {
+function DiagnosisPreview({ diagnosis }) {
+  const status = diagnosisStatusMeta(diagnosis.status)
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h4 className="font-medium text-gray-900">{diagnosis.name}</h4>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[diagnosis.status] || 'bg-gray-100 text-gray-600'}`}>
-              {diagnosis.status}
-            </span>
-          </div>
-          {diagnosis.icd_code && (
-            <p className="mt-1 text-xs text-gray-500">ICD: {diagnosis.icd_code}</p>
-          )}
-          {diagnosis.diagnosed_date && (
-            <p className="mt-1 text-xs text-gray-500">
-              Diagnosed: {new Date(diagnosis.diagnosed_date).toLocaleDateString()}
-              {diagnosis.diagnosed_by && ` by ${diagnosis.diagnosed_by}`}
-            </p>
-          )}
-        </div>
-        <ConfidenceBadge confidence={diagnosis.confidence} />
+    <div>
+      <div className="t-cell-key">{diagnosis.name}</div>
+      <div className="t-caption" style={{ marginTop: '2px' }}>
+        <span className={status.cls}>{status.label}</span>
+        {diagnosis.icd_code && <> · ICD-10 {diagnosis.icd_code}</>}
+        {diagnosis.diagnosed_date && <> · {formatDate(diagnosis.diagnosed_date)}</>}
       </div>
-      {diagnosis.sources?.length > 0 && <SourceCitations sources={diagnosis.sources} />}
+      {diagnosis.confidence === 'low' && <div className="status-warn" style={{ marginTop: '4px' }}>Low confidence</div>}
     </div>
   )
 }
 
-function GoalCard({ goal }) {
+function GoalPreview({ goal }) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[goal.status] || 'bg-gray-100 text-gray-600'}`}>
-              {goal.status}
-            </span>
-          </div>
-          <p className="mt-2 text-sm text-gray-700">{goal.goal}</p>
-          {goal.target_date && (
-            <p className="mt-1 text-xs text-gray-500">
-              Target: {new Date(goal.target_date).toLocaleDateString()}
-            </p>
-          )}
-        </div>
-        <ConfidenceBadge confidence={goal.confidence} />
-      </div>
-      {goal.sources?.length > 0 && <SourceCitations sources={goal.sources} />}
+    <div>
+      <p className="t-cell">{goal.goal}</p>
+      {goal.target_date && <div className="t-caption tnum" style={{ marginTop: '4px' }}>Target {formatDate(goal.target_date)}</div>}
+      {goal.confidence === 'low' && <div className="status-warn" style={{ marginTop: '4px' }}>Low confidence</div>}
     </div>
   )
 }
 
-function RiskCard({ risk }) {
+function RiskPreview({ risk }) {
+  const sev = severityMeta(risk.severity)
   return (
-    <div className={`rounded-lg border p-4 ${
-      risk.severity === 'critical' ? 'border-red-300 bg-red-50' :
-      risk.severity === 'high' ? 'border-orange-300 bg-orange-50' :
-      'border-gray-200'
-    }`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <Shield className={`h-4 w-4 ${
-              risk.severity === 'critical' ? 'text-red-600' :
-              risk.severity === 'high' ? 'text-orange-600' :
-              'text-gray-400'
-            }`} />
-            <h4 className="font-medium text-gray-900">
-              {(risk.risk_type || 'Unknown').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
-            </h4>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_COLORS[risk.severity] || 'bg-gray-100 text-gray-600'}`}>
-              {risk.severity}
-            </span>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[risk.status] || 'bg-gray-100 text-gray-600'}`}>
-              {risk.status}
-            </span>
-          </div>
-          {risk.last_assessment && (
-            <p className="mt-1 text-xs text-gray-500">
-              Last assessed: {new Date(risk.last_assessment).toLocaleDateString()}
-            </p>
-          )}
-        </div>
-        <ConfidenceBadge confidence={risk.confidence} />
+    <div>
+      <div className="t-cell-key">{formatEnum(risk.risk_type)}</div>
+      <div className="t-caption" style={{ marginTop: '2px' }}>
+        <span className={sev.cls}>{sev.label}</span>
+        {risk.status && <> · {formatEnum(risk.status)}</>}
+        {risk.last_assessment && <> · {formatDate(risk.last_assessment)}</>}
       </div>
-      {risk.sources?.length > 0 && <SourceCitations sources={risk.sources} />}
+      {risk.confidence === 'low' && <div className="status-warn" style={{ marginTop: '4px' }}>Low confidence</div>}
     </div>
   )
 }
 
-function RelationshipCard({ relationship }) {
+function RelationshipPreview({ relationship }) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
-      <div className="flex items-center gap-2">
-        <Users className="h-4 w-4 text-gray-400" />
-        <h4 className="font-medium text-gray-900">{relationship.person}</h4>
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-          {relationship.relationship_type}
-        </span>
-      </div>
-      {relationship.notes && (
-        <p className="mt-2 text-sm text-gray-600">{relationship.notes}</p>
+    <div>
+      <div className="t-cell-key">{relationship.person}</div>
+      {relationship.relationship_type && (
+        <div className="t-caption" style={{ marginTop: '2px' }}>{formatEnum(relationship.relationship_type)}</div>
       )}
-      <ConfidenceBadge confidence={relationship.confidence} small />
+      {relationship.notes && <p className="t-cell" style={{ marginTop: '4px' }}>{relationship.notes}</p>}
+      {relationship.confidence === 'low' && <div className="status-warn" style={{ marginTop: '4px' }}>Low confidence</div>}
     </div>
   )
 }
 
-function LifeEventCard({ event }) {
+function LifeEventPreview({ event }) {
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-gray-400" />
-            <h4 className="font-medium text-gray-900">{event.event}</h4>
-            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-              {event.event_type}
-            </span>
-          </div>
-          {event.description && (
-            <p className="mt-2 text-sm text-gray-600">{event.description}</p>
-          )}
-          {event.date && (
-            <p className="mt-1 text-xs text-gray-500">
-              {new Date(event.date).toLocaleDateString()}
-            </p>
-          )}
-        </div>
-        <ConfidenceBadge confidence={event.confidence} />
+    <div>
+      <div className="t-cell-key">{event.event}</div>
+      <div className="t-caption" style={{ marginTop: '2px' }}>
+        {event.event_type && formatEnum(event.event_type)}
+        {event.date && <> · {formatDate(event.date)}</>}
       </div>
-      {event.sources?.length > 0 && <SourceCitations sources={event.sources} />}
+      {event.description && <p className="t-cell" style={{ marginTop: '4px' }}>{event.description}</p>}
+      {event.confidence === 'low' && <div className="status-warn" style={{ marginTop: '4px' }}>Low confidence</div>}
     </div>
   )
 }
 
-function QuestionCard({ question }) {
-  const priorityColors = {
-    high: 'border-l-red-400 bg-red-50',
-    medium: 'border-l-amber-400 bg-amber-50',
-    low: 'border-l-gray-300',
-  }
-  
+function QuestionPreview({ question }) {
+  const meta = priorityMeta(question.priority)
   return (
-    <div className={`rounded-lg border border-l-4 p-4 ${priorityColors[question.priority] || ''}`}>
-      <div className="flex items-start gap-2">
-        <HelpCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-400" />
-        <div>
-          <p className="text-sm text-gray-700">{question.question}</p>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-              {question.category}
-            </span>
-            <span className={`rounded px-2 py-0.5 text-xs font-medium ${
-              question.priority === 'high' ? 'bg-red-100 text-red-700' :
-              question.priority === 'medium' ? 'bg-amber-100 text-amber-700' :
-              'bg-gray-100 text-gray-600'
-            }`}>
-              {question.priority} priority
-            </span>
-          </div>
-        </div>
+    <div>
+      <p className="t-cell">{question.question}</p>
+      <div className="t-caption" style={{ marginTop: '4px' }}>
+        {question.category && <>{formatEnum(question.category)} · </>}
+        <span className={meta.cls}>{meta.label}</span>
       </div>
     </div>
   )
 }
 
-function TimelineItem({ item }) {
-  const typeIcons = {
-    clinical_history: FileText,
-    assessment: TrendingUp,
-    session: Activity,
-    report: FileText,
-    life_event: Calendar,
-    risk_event: AlertTriangle,
-    diagnosis: FileText,
-    treatment: Target,
-  }
-  const Icon = typeIcons[item.event_type] || Clock
-  
-  return (
-    <div className="relative flex gap-4 pl-8">
-      <div className="absolute left-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full border-2 border-white bg-primary-500">
-        <div className="h-2 w-2 rounded-full bg-white" />
-      </div>
-      <div className="flex-1 rounded-lg border border-gray-200 p-3">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-gray-400" />
-          <span className="font-medium text-gray-900">{item.title}</span>
-          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
-            {item.event_type.replace('_', ' ')}
-          </span>
-        </div>
-        {item.description && (
-          <p className="mt-1 text-sm text-gray-600">{item.description}</p>
-        )}
-        <p className="mt-1 text-xs text-gray-400">
-          {new Date(item.date).toLocaleDateString('en-US', {
-            month: 'long',
-            day: 'numeric',
-            year: 'numeric',
-          })}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function ConfidenceBadge({ confidence, small = false }) {
-  if (!confidence) return null
-  return (
-    <span className={`rounded-full ${CONFIDENCE_COLORS[confidence] || 'bg-gray-100 text-gray-600'} ${
-      small ? 'mt-2 px-2 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'
-    } font-medium`}>
-      {confidence}
-    </span>
-  )
-}
-
-// Multiple extracted facts often cite the same session, producing several
-// identical (type, date) source entries - collapsed here to one chip with a
-// ×N count instead of repeating the same label down the column. Hidden by
-// default behind a single "Sources (N)" toggle: the answer stays compact,
-// but every citation backing it is one click away rather than trimmed or
-// summarized away - trust here means nothing is hidden for good, just
-// collapsed until asked for.
-function SourceCitations({ sources }) {
+// Sources disclosure used on the approved-record cards - .ci-disclose's own
+// [aria-expanded] CSS rotates the chevron, so no inline style is needed.
+function SourcesDisclose({ sources, items }) {
   const [expanded, setExpanded] = useState(false)
-  if (!sources || sources.length === 0) return null
+  if (!sources?.length) return null
 
-  const grouped = []
-  const byKey = new Map()
-  for (const source of sources) {
-    const label = source.source_type?.replace('_', ' ') || 'source'
-    const date = source.date && new Date(source.date).toLocaleDateString()
-    const key = `${label}|${date || ''}`
-    const existing = byKey.get(key)
-    if (existing) {
-      existing.count += 1
-    } else {
-      const entry = { label, date, count: 1, excerpt: source.excerpt }
-      byKey.set(key, entry)
-      grouped.push(entry)
-    }
-  }
+  const note = confidenceNote(items)
+  const grouped = groupSources(sources)
 
   return (
-    <div className="mt-2 border-t border-border-light pt-2">
-      <button
-        onClick={() => setExpanded(prev => !prev)}
-        className="flex items-center gap-1 text-[10px] font-medium text-primary-600 hover:text-primary-700"
-      >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        Sources ({sources.length})
+    <>
+      <button type="button" className="ci-disclose" aria-expanded={expanded} onClick={() => setExpanded(v => !v)}>
+        <ChevronRight size={14} strokeWidth={1.5} />
+        <span>
+          Sources ({sources.length})
+          {note && (note.warn ? <> · <span className="status-warn">{note.text}</span></> : ` · ${note.text}`)}
+        </span>
       </button>
       {expanded && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
+        <div style={{ marginTop: 'var(--space-2)', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
           {grouped.map((g, idx) => (
             <span
               key={idx}
-              className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-content-muted"
+              className="t-caption"
               title={g.excerpt || ''}
+              style={{ background: 'var(--surface)', borderRadius: 'var(--radius-sm)', padding: '2px 8px' }}
             >
               {g.label}{g.date ? ` · ${g.date}` : ''}{g.count > 1 ? ` ×${g.count}` : ''}
             </span>
           ))}
         </div>
       )}
-    </div>
+    </>
   )
 }
 
-function VersionHistoryModal({ versions, onClose }) {
+// Version history modal - not in the prototype, so free to design, but
+// still built from tokens.css/clinical-ink.css vocabulary only. Also the
+// home for `recent_changes` (the rolling per-field audit log): it's meta
+// content about the record's edit history, not a patient-content
+// sub-group, so it belongs next to the version list behind the same
+// "Version history" trigger rather than folded into More detail.
+function VersionHistoryModal({ versions, recentChanges, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="max-h-[80vh] w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-gray-100 p-4">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-gray-900">
-            <History className="h-5 w-5 text-gray-400" />
-            Version History
-          </h2>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-          >
-            <XCircle className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="max-h-96 overflow-y-auto p-4">
-          {versions.length === 0 ? (
-            <p className="py-8 text-center text-sm text-gray-500">No version history yet</p>
-          ) : (
-            <div className="space-y-3">
-              {versions.map(version => (
-                <div key={version.id} className="rounded-lg border border-gray-200 p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-gray-900">Version {version.version}</span>
-                    <span className="text-xs text-gray-500">
-                      {new Date(version.created_at).toLocaleString()}
-                    </span>
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(21, 21, 27, 0.32)' }} onClick={onClose} />
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 41, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-5)' }}
+        onClick={onClose}
+      >
+        <div
+          className="card"
+          style={{ width: '100%', maxWidth: '480px', maxHeight: '80vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="ci-card-head" style={{ margin: 0, padding: 'var(--space-5)', borderBottom: 'var(--border-width) solid var(--hairline)' }}>
+            <span className="icon-badge"><History size={16} strokeWidth={1.5} /></span>
+            <span className="t-h3">Version history</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon btn-icon-sm"
+              style={{ marginLeft: 'auto' }}
+              aria-label="Close"
+              onClick={onClose}
+            >
+              <X size={16} strokeWidth={1.5} />
+            </button>
+          </div>
+          <div style={{ overflowY: 'auto', padding: 'var(--space-5)' }}>
+            {recentChanges?.length > 0 && (
+              <>
+                <div className="ci-sub" style={{ marginTop: 0 }}><span className="t-h4">Recent changes</span></div>
+                {recentChanges.slice(0, 20).map(change => (
+                  <div key={change.id} className="ci-line">
+                    <span className="t-cell">{change.label}</span>
+                    <span className="ci-line-meta t-caption">{sourceGroupMeta(change.source_type).label}</span>
                   </div>
-                  {version.change_reason && (
-                    <p className="mt-1 text-sm text-gray-600">{version.change_reason}</p>
-                  )}
-                  {version.changed_by_name && (
-                    <p className="mt-1 text-xs text-gray-400">By: {version.changed_by_name}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </>
+            )}
+
+            <div className="ci-sub"><span className="t-h4">Versions</span></div>
+            {versions.length === 0 ? (
+              <p className="t-body-s" style={{ textAlign: 'center', padding: 'var(--space-6) 0' }}>No version history yet</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                {versions.map(version => (
+                  <div key={version.id} className="ci-entry">
+                    <div className="ci-entry-head">
+                      <span className="t-cell-key">Version {version.version}</span>
+                      <span className="t-caption">{formatDate(version.created_at)}</span>
+                    </div>
+                    {version.change_reason && <p className="t-cell">{version.change_reason}</p>}
+                    {version.changed_by_name && <p className="t-caption" style={{ marginTop: '4px' }}>By {version.changed_by_name}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
-// Right-rail "ask about this patient" chat. Read-only over the patient's
-// approved Clinical Intelligence record - it can never write to it. Every
-// request is scoped by `patientId` at the API layer (see
-// clinical-intelligence/chat routes in main.py), so switching patients and
-// reopening this panel always starts from that patient's own history, never
-// a previous patient's.
-// A handful of example questions shown before the first message, spanning
-// the kinds of things this record can actually answer (current picture,
-// safety, progress over time, gaps) - not meant to be asked verbatim, just
-// to give a therapist new to this feature a sense of its range. Tapping one
-// fills the input rather than sending it immediately, since these are
-// examples to edit, not one-click actions on a real patient record.
+// ---- Ask Nook -----------------------------------------------------------
+// Read-only over the patient's approved Clinical Intelligence record - it
+// can never write to it. Every request is scoped by `patientId` at the API
+// layer, so switching patients and reopening this panel always starts from
+// that patient's own history, never a previous patient's.
 const SUGGESTED_QUESTIONS = [
   'What symptoms have been reported?',
   'Are there any risk factors on record?',
@@ -1340,7 +1296,7 @@ const SUGGESTED_QUESTIONS = [
   "What's still unresolved or unclear about this patient?",
 ]
 
-function ClinicalChatPanel({ patientId, onClose }) {
+function NookPanel({ patientId, patientName, onClose }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -1348,6 +1304,26 @@ function ClinicalChatPanel({ patientId, onClose }) {
   const [error, setError] = useState('')
   const scrollRef = useRef(null)
   const textareaRef = useRef(null)
+  const isNarrow = useIsNarrow()
+
+  // Bug fix (mobile only — desktop keeps the record scrollable behind the
+  // floating chat by design, same as ConfirmDialog's body-lock pattern):
+  // the mobile sheet is a fixed full-screen overlay, but with the
+  // background record page still scrollable behind it, focusing
+  // .nook-input made iOS scroll *that background page* to bring the input
+  // above the keyboard — since the fixed sheet tracks the page it just
+  // moved, this desynced the sheet from the visible viewport (record
+  // content bled through above the composer while the keyboard was up),
+  // and iOS didn't reliably restore that background scroll offset once
+  // the keyboard closed, leaving the page looking permanently shifted/
+  // resized. Locking body scroll removes anywhere for iOS to scroll to,
+  // so it pans the visual viewport instead, which the fixed sheet already
+  // tracks correctly.
+  useEffect(() => {
+    if (!isNarrow) return
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = '' }
+  }, [isNarrow])
 
   const fillDraft = (question) => {
     setDraft(question)
@@ -1365,8 +1341,6 @@ function ClinicalChatPanel({ patientId, onClose }) {
     return () => { cancelled = true }
   }, [patientId])
 
-  // Keep the transcript pinned to the latest message as the conversation
-  // grows, rather than making the practitioner scroll down manually.
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -1378,8 +1352,6 @@ function ClinicalChatPanel({ patientId, onClose }) {
     if (!question || sending) return
     setSending(true)
     setError('')
-    // Optimistic render of the user's own message; the server is still the
-    // source of truth for what gets persisted.
     const optimisticId = `pending-${Date.now()}`
     setMessages(prev => [...prev, { id: optimisticId, role: 'user', content: question, created_at: new Date().toISOString() }])
     setDraft('')
@@ -1388,8 +1360,6 @@ function ClinicalChatPanel({ patientId, onClose }) {
       setMessages(prev => [...prev, reply])
     } catch (err) {
       setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to get a response')
-      // Roll back the optimistic message so the transcript doesn't show an
-      // unanswered question sitting there forever.
       setMessages(prev => prev.filter(m => m.id !== optimisticId))
       setDraft(question)
     } finally {
@@ -1405,113 +1375,108 @@ function ClinicalChatPanel({ patientId, onClose }) {
   }
 
   return (
-    <>
-      <div className="fixed inset-0 z-50 bg-black/20" onClick={onClose} />
-      <div
-        className="fixed bottom-6 right-6 z-50 flex h-[70vh] max-h-[640px] w-full max-w-sm flex-col overflow-hidden rounded-[20px] bg-white"
-        style={{ boxShadow: 'var(--shadow-card-hover)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          className="flex items-center justify-between gap-3 px-4 py-2.5"
-          style={{ background: 'var(--color-primary-hover)' }}
-        >
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-white text-primary-600">
-              <Sparkle className="h-4 w-4" fill="currentColor" />
-            </span>
-            <h2 className="text-base font-semibold text-white">Nook</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-white/75 hover:bg-white/10 hover:text-white"
-          >
-            <XCircle className="h-4.5 w-4.5" />
-          </button>
-        </div>
-
-        <p className="border-b border-border-light bg-slate-50 px-4 py-2 text-xs text-content-muted">
-          Answers draw only from this patient's approved record. Updates still awaiting review aren't included.
-        </p>
-
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-content-muted" />
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="space-y-2 py-2">
-              <p className="text-center text-xs text-content-muted">Try one of these:</p>
-              <div className="space-y-1.5">
-                {SUGGESTED_QUESTIONS.map(q => (
-                  <button
-                    key={q}
-                    onClick={() => fillDraft(q)}
-                    className="w-full rounded-lg border border-border-light bg-white px-2.5 py-1.5 text-left text-xs leading-snug text-content-secondary transition-colors hover:border-primary-300 hover:bg-primary-light/40"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            messages.map(m => <ChatBubble key={m.id} message={m} />)
-          )}
-        </div>
-
-        {error && (
-          <p className="border-t border-error-bg bg-error-bg/40 px-4 py-2 text-xs text-error-text">{error}</p>
-        )}
-
-        <div className="border-t border-border-light p-3">
-          <div className="flex items-end gap-2">
-            <textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask Nook a question…"
-              rows={2}
-              disabled={sending}
-              className="flex-1 resize-none rounded-lg border border-border-light px-3 py-2 text-sm text-content-primary focus:border-primary-500 focus:outline-none disabled:bg-slate-50"
-            />
-            <button
-              onClick={handleSend}
-              disabled={sending || !draft.trim()}
-              className="rounded-lg bg-primary-600 p-2.5 text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </button>
-          </div>
-        </div>
+    <div className="nook-panel" role="dialog" aria-label="Ask Nook" aria-modal={isNarrow ? 'true' : undefined}>
+      <div className="nook-head">
+        <span className="nook-mark"><Sparkle size={15} strokeWidth={1.5} /></span>
+        <span className="t-h3">Nook</span>
+        <span className="t-caption" style={{ marginLeft: 'auto' }}>{patientName}</span>
+        <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Close" onClick={onClose}>
+          <X size={16} strokeWidth={1.5} />
+        </button>
       </div>
-    </>
+
+      <div className="nook-note">
+        Answers draw only from this patient's approved record. Updates still awaiting review aren't included.
+      </div>
+
+      <div ref={scrollRef} className="nook-body">
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-6) 0' }}>
+            <Loader2 size={20} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="nook-suggest">
+            {SUGGESTED_QUESTIONS.map(q => (
+              <button key={q} type="button" onClick={() => fillDraft(q)}>{q}</button>
+            ))}
+          </div>
+        ) : (
+          messages.map(m => <ChatTurn key={m.id} message={m} />)
+        )}
+      </div>
+
+      {error && (
+        <p className="t-caption status-warn" style={{ padding: '0 var(--space-5) var(--space-3)' }}>{error}</p>
+      )}
+
+      <div className="nook-composer">
+        <textarea
+          ref={textareaRef}
+          className="nook-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={`Ask about ${patientName ? patientName.split(' ')[0] + "'s" : "the patient's"} record…`}
+          rows={1}
+          disabled={sending}
+        />
+        <button type="button" className="btn btn-primary btn-icon" aria-label="Send" onClick={handleSend} disabled={sending || !draft.trim()}>
+          {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} strokeWidth={1.5} />}
+        </button>
+      </div>
+    </div>
   )
 }
 
-function ChatBubble({ message }) {
-  const isUser = message.role === 'user'
+function ChatTurn({ message }) {
+  if (message.role === 'user') {
+    return (
+      <div className="nook-turn nook-turn-user">
+        <div className="nook-bubble">{message.content}</div>
+      </div>
+    )
+  }
   return (
-    <div className={`flex items-start gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {!isUser && (
-        <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary-light text-primary-600">
-          <Sparkle className="h-3.5 w-3.5" fill="currentColor" />
-        </span>
-      )}
-      <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-        isUser ? 'bg-primary-600 text-white' : 'border border-border-light bg-white text-content-primary'
-      }`}>
-        <p className="whitespace-pre-wrap">{message.content}</p>
-        {!isUser && message.grounded === false && (
-          <div className="mt-2 flex items-center gap-1 text-[11px] text-warning-text">
-            <ShieldAlert className="h-3 w-3" />
-            No matching record citation - treat as unverified
+    <div className="nook-turn">
+      <span className="nook-avatar"><Sparkle size={13} strokeWidth={1.5} /></span>
+      <div className="nook-answer">
+        <p>{message.content}</p>
+        {message.grounded === false && (
+          <div className="status-warn" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: 'var(--space-2)', fontSize: '12px', fontWeight: 600 }}>
+            <ShieldAlert size={12} strokeWidth={1.5} />
+            Unverified — no matching record citation
           </div>
         )}
-        {!isUser && message.citations?.length > 0 && (
-          <SourceCitations sources={message.citations} />
-        )}
+        {message.citations?.length > 0 && <ChatSources sources={message.citations} />}
       </div>
     </div>
+  )
+}
+
+function ChatSources({ sources }) {
+  const [expanded, setExpanded] = useState(false)
+  const grouped = groupSources(sources)
+
+  return (
+    <>
+      <button type="button" className="nook-sources" aria-expanded={expanded} onClick={() => setExpanded(v => !v)}>
+        <ChevronRight size={13} strokeWidth={1.5} />
+        Sources ({sources.length})
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 'var(--space-2)', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {grouped.map((g, idx) => (
+            <span
+              key={idx}
+              className="t-caption"
+              title={g.excerpt || ''}
+              style={{ background: 'var(--surface)', borderRadius: 'var(--radius-sm)', padding: '2px 8px' }}
+            >
+              {g.label}{g.date ? ` · ${g.date}` : ''}{g.count > 1 ? ` ×${g.count}` : ''}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
   )
 }

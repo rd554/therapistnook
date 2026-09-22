@@ -3,19 +3,25 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from 'recharts'
-import ReactMarkdown from 'react-markdown'
-import {
-  Loader2, Download, Brain, BarChart3, FileText, AlertTriangle, TrendingUp, ArrowLeft,
-  Shield, Activity, Layers, FlaskConical,
-} from 'lucide-react'
+import { Loader2, Brain, ArrowLeft, X } from 'lucide-react'
 import { getSessionResults, interpretResults, getPdfUrl } from '../api/client'
+import { formatDate } from '../utils/date'
+
+// Single source of truth for the elevation cutoff — drives the scale-row bars,
+// the chart reference line, and the top-summary elevated list. The CSS notch
+// in .scale-track::after and the backend's Python copy (main.py's
+// _validity_section / interpretation-prompt logic) are the two unavoidable
+// non-JS duplicates of this same value; both are pinned to 65 by convention.
+const ELEVATION_T_THRESHOLD = 65
+const T_SCALE_MIN = 30
+const T_SCALE_MAX = 120
 
 const VALIDITY_KEYS = ['L', 'F', 'K']
 const CLINICAL_KEYS = ['1_Hs', '2_D', '3_Hy', '4_Pd', '5_Mf', '6_Pa', '7_Pt', '8_Sc', '9_Ma', '0_Si']
 
 const SCALE_LABELS = {
   'L': 'L (Lie)', 'F': 'F (Infrequency)', 'K': 'K (Correction)',
-  'Fb': 'Fb (Back F)', 'VRIN': 'VRIN (Variable Response Inconsistency)', 
+  'Fb': 'Fb (Back F)', 'VRIN': 'VRIN (Variable Response Inconsistency)',
   'TRIN': 'TRIN (True Response Inconsistency)',
   '1_Hs': '1-Hs (Hypochondriasis)', '2_D': '2-D (Depression)', '3_Hy': '3-Hy (Hysteria)',
   '4_Pd': '4-Pd (Psychopathic Deviate)', '5_Mf': '5-Mf (Masculinity-Femininity)',
@@ -57,175 +63,225 @@ const SUPPLEMENTARY_LABELS = {
   'TRIN': 'TRIN (True Response Inconsistency)',
 }
 
-function CustomTooltip({ active, payload }) {
+// "1-Hs (Hypochondriasis)" -> "Hypochondriasis" for the <small> line under
+// the scale abbreviation — the abbreviation itself is already the row's
+// primary label, so the parenthetical is all the second line needs.
+function scaleDescription(label) {
+  const match = /\(([^)]+)\)/.exec(label || '')
+  return match ? match[1] : label
+}
+
+// Old stored interpretations (generated before the numbered-header/title
+// prompt fix) still contain "## 1. Validity Scales" and an improvised title
+// line. Both the screen and the PDF read the same stored text, so both must
+// normalize at render time rather than assuming the prompt fix alone is enough.
+const KNOWN_SECTION_WORDS = [
+  'validity scales', 'clinical scales', 'harris-lingoes', 'code type',
+  'modifying variables', 'diagnostic considerations', 'prognosis',
+  'treatment implications', 'summary',
+]
+
+function isKnownHeading(text) {
+  const t = text.toLowerCase()
+  return KNOWN_SECTION_WORDS.some((w) => t.includes(w))
+}
+
+// "**Label:** body" or "**Label**: body" -> { label, body } — stored
+// interpretations use both shapes interchangeably depending on which LLM
+// call produced them, so the colon is matched whether it lands inside or
+// outside the bold markers.
+function splitLabel(line) {
+  const m = /^\*\*(.+?)\*\*:?\s*(.*)$/.exec(line)
+  if (!m) return null
+  const label = m[1].replace(/:\s*$/, '').trim()
+  if (!label) return null
+  return { label, body: m[2].trim() }
+}
+
+function extractTScore(body) {
+  const m = /T-score of (-?\d+)/i.exec(body)
+  return m ? parseInt(m[1], 10) : null
+}
+
+// Turns stored interpretation text (old numbered "## 1. Foo" headers, an
+// improvised title line, "- **Label:** prose" bullets, plain bullet lists,
+// and "### " subgroup headers) into a render-ready section tree. Both the
+// screen and the PDF read the same stored text, so this can't assume the
+// prompt fix alone normalized everything — it has to handle old records too.
+function parseInterpretation(text) {
+  if (!text) return []
+  let lines = text.replace(/\r\n/g, '\n').split('\n')
+  lines = lines.map((l) => l.replace(/^(#{1,3}\s*)\d+\.\s*/, '$1'))
+
+  const firstHeadingIdx = lines.findIndex((l) => /^#{1,2}\s/.test(l.trim()))
+  if (firstHeadingIdx > -1) {
+    const headingText = lines[firstHeadingIdx].replace(/^#{1,2}\s*/, '').trim()
+    lines = isKnownHeading(headingText) ? lines.slice(firstHeadingIdx) : lines.slice(firstHeadingIdx + 1)
+  }
+
+  const sections = []
+  let current = null
+  let listBuffer = null
+
+  const flushList = () => {
+    if (listBuffer && listBuffer.items.length) current.blocks.push(listBuffer)
+    listBuffer = null
+  }
+
+  for (const raw of lines) {
+    const line = raw.trim()
+    const headingMatch = /^##\s+(.+)$/.exec(line)
+    if (headingMatch) {
+      if (current) flushList()
+      current = { heading: headingMatch[1].trim(), blocks: [] }
+      sections.push(current)
+      continue
+    }
+    if (!current) continue
+
+    if (!line) { flushList(); continue }
+
+    const subMatch = /^###\s+(.+)$/.exec(line)
+    if (subMatch) {
+      flushList()
+      current.blocks.push({ type: 'sub', text: subMatch[1].trim() })
+      continue
+    }
+
+    const isBullet = /^[-*]\s+/.test(line)
+    const bulletText = isBullet ? line.replace(/^[-*]\s+/, '') : line
+
+    const split = splitLabel(bulletText)
+    if (split) {
+      flushList()
+      current.blocks.push({ type: 'item', label: split.label, body: split.body, tScore: extractTScore(split.body) })
+      continue
+    }
+
+    if (isBullet) {
+      if (!listBuffer) listBuffer = { type: 'list', items: [] }
+      listBuffer.items.push(bulletText)
+      continue
+    }
+
+    flushList()
+    current.blocks.push({ type: 'para', body: line })
+  }
+  if (current) flushList()
+
+  return sections
+}
+
+// Resolves the design tokens the chart needs into actual color values once,
+// at mount — recharts/SVG props need a real value, not var(--x), so this
+// reads the same custom properties tokens.css defines rather than
+// hand-copying a hex mirror of them.
+function useChartColors() {
+  const [colors] = useState(() => {
+    if (typeof document === 'undefined') return null
+    const style = getComputedStyle(document.documentElement)
+    const v = (name) => style.getPropertyValue(name).trim()
+    return {
+      line: v('--text-secondary'),
+      elevated: v('--warning'),
+      hairline: v('--hairline'),
+      border: v('--border'),
+      muted: v('--text-muted'),
+      canvas: v('--canvas'),
+    }
+  })
+  return colors
+}
+
+function ChartTooltip({ active, payload, colors }) {
   if (!active || !payload?.[0]) return null
   const d = payload[0].payload
+  if (d.t_score == null) return null
+  const elevated = d.t_score >= ELEVATION_T_THRESHOLD
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
-      <p className="text-xs font-bold text-gray-800">{d.label || d.short}</p>
-      <p className="text-sm text-primary-600">T-Score: <strong>{d.t_score}</strong></p>
-      {d.raw !== undefined && <p className="text-xs text-gray-500">Raw: {d.raw}</p>}
-      {d.t_score >= 65 && (
-        <p className="mt-1 text-xs font-semibold text-red-500">Clinically Elevated</p>
-      )}
+    <div className="card card-compact" style={{ padding: '10px 12px' }}>
+      <p className="t-body-s" style={{ margin: 0 }}>{d.label || d.short}</p>
+      <p className="t-cell-key" style={{ margin: 0 }}>T-Score: {Math.round(d.t_score)}</p>
+      {d.raw != null && <p className="t-caption" style={{ margin: 0 }}>Raw: {Math.round(d.raw)}</p>}
+      {elevated && <p className="t-caption" style={{ margin: 0, color: colors.elevated }}>Clinically elevated</p>}
     </div>
   )
 }
 
-function RawScoreTooltip({ active, payload }) {
-  if (!active || !payload?.[0]) return null
-  const d = payload[0].payload
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
-      <p className="text-xs font-bold text-gray-800">{d.label || d.short}</p>
-      <p className="text-sm text-primary-600">Raw Score: <strong>{d.raw}</strong></p>
-    </div>
-  )
+// T-score -> percent across the 30-120 track, shared by the bar fill/overlay
+// and the chart's y-domain so every visual reads the same scale.
+function tPct(t) {
+  return Math.min(100, Math.max(0, ((t - T_SCALE_MIN) / (T_SCALE_MAX - T_SCALE_MIN)) * 100))
 }
+const NOTCH_PCT = tPct(ELEVATION_T_THRESHOLD)
 
-function CustomDot({ cx, cy, payload }) {
-  const elevated = payload.t_score >= 65
+function ProfileChart({ data, height = 320 }) {
+  const colors = useChartColors()
+  if (!colors) return null
+  const pts = data.length
+  const minWidth = Math.max(560, pts * 38)
   return (
-    <circle
-      cx={cx} cy={cy} r={elevated ? 6 : 4}
-      fill={elevated ? '#ef4444' : '#3b82f6'}
-      stroke="#fff" strokeWidth={2}
-    />
-  )
-}
-
-function ValidityScoreTable({ data, fMinusK, trinDirection }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-200 bg-gray-50 text-left">
-            <th className="px-4 py-3 font-semibold text-gray-600">Scale</th>
-            <th className="px-4 py-3 text-center font-semibold text-gray-600">Raw Score</th>
-            <th className="px-4 py-3 text-center font-semibold text-gray-600">T-Score</th>
-            <th className="px-4 py-3 text-center font-semibold text-gray-600">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((d, i) => {
-            const hasTScore = d.t_score !== null && d.t_score !== undefined
-            const elevated = hasTScore && d.t_score >= 65
-            const labelSuffix = d.scale === 'TRIN' && trinDirection ? `-${trinDirection}` : ''
-            return (
-              <tr key={d.scale} className={`border-b border-gray-100 ${elevated ? 'bg-red-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                <td className="px-4 py-3 font-medium text-gray-800">{d.label}{labelSuffix && <span className="ml-1 text-xs font-bold text-purple-600">({labelSuffix})</span>}</td>
-                <td className="px-4 py-3 text-center text-gray-600">{Math.round(d.raw)}</td>
-                <td className="px-4 py-3 text-center font-bold text-gray-800">{hasTScore ? Math.round(d.t_score) : '—'}</td>
-                <td className="px-4 py-3 text-center">
-                  {hasTScore ? (
-                    elevated ? (
-                      <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Elevated</span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Normal</span>
-                    )
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-          <tr className="border-t-2 border-gray-300 bg-blue-50">
-            <td className="px-4 py-3 font-bold text-blue-800">F - K (Index)</td>
-            <td className="px-4 py-3 text-center font-bold text-blue-800">{fMinusK}</td>
-            <td className="px-4 py-3 text-center text-gray-400">—</td>
-            <td className="px-4 py-3 text-center text-gray-400">—</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function ScoreTable({ data, showKCorrection = false, showTScore = true }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-200 bg-gray-50 text-left">
-            <th className="px-4 py-3 font-semibold text-gray-600">Scale</th>
-            <th className="px-4 py-3 text-center font-semibold text-gray-600">Raw Score</th>
-            {showKCorrection && <th className="px-4 py-3 text-center font-semibold text-gray-600">K-Corrected</th>}
-            {showTScore && <th className="px-4 py-3 text-center font-semibold text-gray-600">T-Score</th>}
-            {showTScore && <th className="px-4 py-3 text-center font-semibold text-gray-600">Status</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((d, i) => {
-            const hasTScore = showTScore && d.t_score !== null && d.t_score !== undefined
-            const elevated = hasTScore && d.t_score >= 65
-            return (
-              <tr key={d.scale || d.key} className={`border-b border-gray-100 ${elevated ? 'bg-red-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                <td className="px-4 py-3 font-medium text-gray-800">{d.label}</td>
-                <td className="px-4 py-3 text-center text-gray-600">{Math.round(d.raw)}</td>
-                {showKCorrection && <td className="px-4 py-3 text-center text-gray-600">{Math.round(d.k_corrected)}</td>}
-                {showTScore && <td className="px-4 py-3 text-center font-bold text-gray-800">{hasTScore ? Math.round(d.t_score) : '—'}</td>}
-                {showTScore && (
-                  <td className="px-4 py-3 text-center">
-                    {hasTScore ? (
-                      elevated ? (
-                        <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Elevated</span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Normal</span>
-                      )
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                )}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function TScoreChart({ data, title, height = 350, color = '#3b82f6' }) {
-  const filteredData = data.filter(d => d.t_score !== null && d.t_score !== undefined)
-  if (filteredData.length === 0) return null
-  
-  return (
-    <div className="mt-6">
-      {title && <h4 className="mb-3 text-sm font-semibold text-gray-700">{title}</h4>}
-      <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={filteredData} margin={{ top: 20, right: 30, left: 10, bottom: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-          <XAxis dataKey="short" tick={{ fontSize: 10, fontWeight: 600 }} tickLine={false} interval={0} angle={-45} textAnchor="end" height={60} />
-          <YAxis domain={[30, 120]} tick={{ fontSize: 11 }} label={{ value: 'T-Score', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }} />
-          <Tooltip content={<CustomTooltip />} />
-          <ReferenceLine y={65} stroke="#ef4444" strokeDasharray="6 3" strokeWidth={2}
-            label={{ value: 'T=65', position: 'right', fill: '#ef4444', fontSize: 10 }} />
-          <ReferenceLine y={50} stroke="#94a3b8" strokeDasharray="2 4" strokeWidth={1} />
-          <Line type="linear" dataKey="t_score" stroke={color} strokeWidth={2}
-            dot={<CustomDot />} activeDot={{ r: 8, stroke: color, strokeWidth: 2, fill: '#fff' }} />
+    <div className="profile-chart" style={{ '--pts': pts }}>
+      <ResponsiveContainer width="100%" height={height} minWidth={minWidth}>
+        <LineChart data={data} margin={{ top: 16, right: 40, left: 8, bottom: 32 }}>
+          <CartesianGrid stroke={colors.hairline} vertical={false} />
+          <XAxis dataKey="short" tick={{ fontSize: 12, fontWeight: 500, fill: colors.muted }}
+            tickLine={false} axisLine={{ stroke: colors.border }} interval={0}
+            angle={-45} textAnchor="end" height={50} />
+          <YAxis domain={[T_SCALE_MIN, T_SCALE_MAX]} tick={{ fontSize: 12, fontWeight: 500, fill: colors.muted }}
+            tickLine={false} axisLine={false} width={36} />
+          <Tooltip content={(p) => <ChartTooltip {...p} colors={colors} />} />
+          <ReferenceLine y={50} stroke={colors.hairline} strokeWidth={1} />
+          <ReferenceLine y={ELEVATION_T_THRESHOLD} stroke={colors.border} strokeDasharray="4 4" strokeWidth={1}
+            label={{ value: `T=${ELEVATION_T_THRESHOLD}`, position: 'right', fill: colors.muted, fontSize: 11 }} />
+          <Line type="linear" dataKey="t_score" stroke={colors.line} strokeWidth={2}
+            dot={(p) => {
+              if (p.payload.t_score == null) return null
+              const elevated = p.payload.t_score >= ELEVATION_T_THRESHOLD
+              return (
+                <circle key={p.key} cx={p.cx} cy={p.cy} r={elevated ? 5 : 3}
+                  fill={elevated ? colors.elevated : colors.line} stroke={colors.canvas} strokeWidth={1.5} />
+              )
+            }}
+            activeDot={{ r: 6, stroke: colors.canvas, strokeWidth: 2 }}
+            connectNulls
+          />
         </LineChart>
       </ResponsiveContainer>
+      <p className="profile-hint">Scroll to see the full profile.</p>
     </div>
   )
 }
 
-function RawScoreChart({ data, title, height = 300, color = '#8b5cf6' }) {
-  const maxRaw = Math.max(...data.map(d => d.raw), 30)
+function ScaleRows({ data, showKCorrected = false }) {
   return (
-    <div className="mt-6">
-      {title && <h4 className="mb-3 text-sm font-semibold text-gray-700">{title}</h4>}
-      <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 20, right: 30, left: 10, bottom: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-          <XAxis dataKey="short" tick={{ fontSize: 9, fontWeight: 600 }} tickLine={false} interval={0} angle={-45} textAnchor="end" height={60} />
-          <YAxis domain={[0, Math.ceil(maxRaw / 10) * 10 + 5]} tick={{ fontSize: 11 }} label={{ value: 'Raw Score', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }} />
-          <Tooltip content={<RawScoreTooltip />} />
-          <Line type="linear" dataKey="raw" stroke={color} strokeWidth={2}
-            dot={{ r: 4, fill: color, stroke: '#fff', strokeWidth: 2 }} />
-        </LineChart>
-      </ResponsiveContainer>
+    <div>
+      {data.map((d) => {
+        const hasT = d.t_score !== null && d.t_score !== undefined
+        const elevated = hasT && d.t_score >= ELEVATION_T_THRESHOLD
+        const pct = hasT ? tPct(d.t_score) : 0
+        const overWidth = elevated ? Math.max(0, pct - NOTCH_PCT) : 0
+        return (
+          <div key={d.key || d.scale} className={`scale-row${elevated ? ' is-elevated' : ''}`}>
+            <span className="scale-name">
+              <span className="scale-abbr">{d.short}</span>
+              <small className="scale-full">{d.desc}</small>
+            </span>
+            <span className="scale-raw">
+              <b>{d.raw != null ? Math.round(d.raw) : '—'}</b>
+              {showKCorrected && d.k_corrected != null && <small>K-corr {Math.round(d.k_corrected)}</small>}
+            </span>
+            <span className="scale-track">
+              <span className="scale-fill" style={{ width: `${pct}%` }} />
+              {overWidth > 0 && <span className="scale-over" style={{ left: `${NOTCH_PCT}%`, width: `${overWidth}%` }} />}
+            </span>
+            <span className="scale-t">{hasT ? Math.round(d.t_score) : '—'}</span>
+          </div>
+        )
+      })}
+      <div className="scale-legend">
+        Bar shows T-score, {T_SCALE_MIN}–{T_SCALE_MAX} · Notch marks T={ELEVATION_T_THRESHOLD}
+      </div>
     </div>
   )
 }
@@ -246,6 +302,7 @@ export default function Results() {
   const [interpreting, setInterpreting] = useState(false)
   const [error, setError] = useState('')
   const [activeSection, setActiveSection] = useState('validity')
+  const [chartSheet, setChartSheet] = useState(null) // { data, label } | null
 
   const backUrl = '/home' // Unified routes
 
@@ -277,15 +334,17 @@ export default function Results() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-10 w-10 animate-spin text-primary-500" />
+      <div className="clinical-ink flex items-center justify-center py-24">
+        <Loader2 size={28} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
       </div>
     )
   }
 
   if (!results) {
     return (
-      <div className="text-center py-16 text-gray-500">{error || 'No results found.'}</div>
+      <div className="clinical-ink">
+        <p className="status-quiet" style={{ textAlign: 'center', padding: 'var(--space-9) 0' }}>{error || 'No results found.'}</p>
+      </div>
     )
   }
 
@@ -293,16 +352,18 @@ export default function Results() {
 
   // Get TRIN direction
   const trinDirection = supplementary_scales?.TRIN?.direction || null
+  const trinDirWord = trinDirection === 'T' ? 'True' : trinDirection === 'F' ? 'False' : null
 
   // Validity Scales Data (L, F, K + Fb, VRIN, TRIN)
   const validityData = VALIDITY_KEYS.map(key => ({
     scale: key,
     label: SCALE_LABELS[key] || key,
     short: SHORT_LABELS[key] || key,
-    raw: raw_scores[key] || 0,
-    t_score: t_scores[key] || 50,
+    desc: scaleDescription(SCALE_LABELS[key] || key),
+    raw: raw_scores[key] ?? null,
+    t_score: t_scores[key] ?? null,
   }))
-  
+
   // Add Fb from supplementary
   if (supplementary_scales?.Fb !== undefined) {
     const fbData = supplementary_scales.Fb
@@ -310,6 +371,7 @@ export default function Results() {
       scale: 'Fb',
       label: SCALE_LABELS['Fb'],
       short: 'Fb',
+      desc: scaleDescription(SCALE_LABELS['Fb']),
       raw: getSubscaleValue(fbData, 'raw') ?? fbData,
       t_score: getSubscaleValue(fbData, 't_score'),
     })
@@ -322,6 +384,7 @@ export default function Results() {
       scale: 'VRIN',
       label: SCALE_LABELS['VRIN'],
       short: 'VRIN',
+      desc: scaleDescription(SCALE_LABELS['VRIN']),
       raw: getSubscaleValue(vrinData, 'raw') ?? vrinData,
       t_score: getSubscaleValue(vrinData, 't_score'),
     })
@@ -334,12 +397,18 @@ export default function Results() {
       scale: 'TRIN',
       label: SCALE_LABELS['TRIN'],
       short: 'TRIN',
+      desc: scaleDescription(SCALE_LABELS['TRIN']) + (trinDirWord ? ` · ${trinDirWord} direction` : ''),
       raw: getSubscaleValue(trinData, 'raw') ?? trinData,
       t_score: getSubscaleValue(trinData, 't_score'),
     })
   }
 
   const fMinusK = Math.round((raw_scores.F || 0) - (raw_scores.K || 0))
+  const fMinusKText = fMinusK > 11
+    ? 'May indicate exaggeration or faking bad.'
+    : fMinusK < -11
+      ? 'May indicate defensiveness or faking good.'
+      : 'Within normal limits.'
 
   // Clinical Scales Data
   const clinicalData = CLINICAL_KEYS.map(key => ({
@@ -347,15 +416,16 @@ export default function Results() {
     key,
     label: SCALE_LABELS[key] || key,
     short: SHORT_LABELS[key] || key,
-    raw: raw_scores[key] || 0,
-    k_corrected: k_corrected_scores[key] || 0,
-    t_score: t_scores[key] || 50,
+    desc: scaleDescription(SCALE_LABELS[key] || key),
+    raw: raw_scores[key] ?? null,
+    k_corrected: k_corrected_scores[key] ?? null,
+    t_score: t_scores[key] ?? null,
   }))
 
   // Harris-Lingoes + Si Subscales Data (with T-scores from new format)
   const hlOrder = ['D1', 'D2', 'D3', 'D4', 'D5', 'Hy1', 'Hy2', 'Hy3', 'Hy4', 'Hy5', 'Pd1', 'Pd2', 'Pd3', 'Pd4', 'Pd5', 'Pa1', 'Pa2', 'Pa3', 'Sc1', 'Sc2', 'Sc3', 'Sc4', 'Sc5', 'Sc6', 'Ma1', 'Ma2', 'Ma3', 'Ma4']
   const siOrder = ['Si1', 'Si2', 'Si3']
-  
+
   const harrisLingoesData = hlOrder
     .filter(key => harris_lingoes_subscales?.[key] !== undefined)
     .map(key => {
@@ -365,6 +435,7 @@ export default function Results() {
         key,
         label: HARRIS_LINGOES_LABELS[key] || key,
         short: key,
+        desc: scaleDescription(HARRIS_LINGOES_LABELS[key] || key),
         raw: getSubscaleValue(scaleData, 'raw') ?? scaleData,
         t_score: getSubscaleValue(scaleData, 't_score'),
       }
@@ -379,6 +450,7 @@ export default function Results() {
         key,
         label: HARRIS_LINGOES_LABELS[key] || key,
         short: key,
+        desc: scaleDescription(HARRIS_LINGOES_LABELS[key] || key),
         raw: getSubscaleValue(scaleData, 'raw') ?? scaleData,
         t_score: getSubscaleValue(scaleData, 't_score'),
       }
@@ -392,220 +464,257 @@ export default function Results() {
     .filter(key => supplementary_scales?.[key] !== undefined)
     .map(key => {
       const scaleData = supplementary_scales[key]
-      const labelSuffix = key === 'TRIN' && trinDirection ? ` (${trinDirection})` : ''
       return {
         scale: key,
         key,
-        label: (SUPPLEMENTARY_LABELS[key] || key) + labelSuffix,
+        label: SUPPLEMENTARY_LABELS[key] || key,
         short: key,
+        desc: scaleDescription(SUPPLEMENTARY_LABELS[key] || key) + (key === 'TRIN' && trinDirWord ? ` · ${trinDirWord} direction` : ''),
         raw: getSubscaleValue(scaleData, 'raw') ?? scaleData,
         t_score: getSubscaleValue(scaleData, 't_score'),
       }
     })
 
-  const elevatedClinical = clinicalData.filter(d => d.t_score >= 65)
+  const elevatedClinical = clinicalData.filter(d => d.t_score != null && d.t_score >= ELEVATION_T_THRESHOLD)
+  const validityQuestioned = results.validity_status !== 'Valid' || (results.validity_cautions?.length > 0)
 
-  const dobDisplay = results.patient_dob
-    ? new Date(results.patient_dob).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-    : ''
+  const dobDisplay = formatDate(results.patient_dob)
+  const assessedDisplay = formatDate(results.assessed_at)
+  const metaLine = [
+    results.patient_gender,
+    results.patient_age != null ? `Age ${results.patient_age}` : null,
+    dobDisplay ? `DOB ${dobDisplay}` : null,
+    assessedDisplay ? `Assessed ${assessedDisplay}` : null,
+  ].filter(Boolean).join(' · ')
 
   const sections = [
-    { id: 'validity', label: 'Validity Scales', icon: Shield },
-    { id: 'clinical', label: 'Clinical Scales', icon: Activity },
-    { id: 'harris', label: 'Harris-Lingoes & Si', icon: Layers },
-    { id: 'supplementary', label: 'Supplementary', icon: FlaskConical },
-    { id: 'interpretation', label: 'Interpretation', icon: Brain },
+    { id: 'validity', label: 'Validity Scales', count: validityData.length },
+    { id: 'clinical', label: 'Clinical Scales', count: clinicalData.length },
+    { id: 'harris', label: 'Harris-Lingoes & Si', count: combinedSubscalesData.length },
+    { id: 'supplementary', label: 'Supplementary', count: supplementaryData.length },
+    { id: 'interpretation', label: 'Interpretation' },
   ]
 
+  // Below 760px the chart itself is hidden (.profile-chart-inline) in favor
+  // of a "View profile chart" trigger (.profile-chart-open) that opens it
+  // full-screen — the .scale-row list above is already the profile on a
+  // phone, so the chart isn't the default mobile reading of the data.
+  const renderChartBlock = (data, height, label) => (
+    <>
+      <div className="profile-chart-inline">
+        <ProfileChart data={data} height={height} />
+      </div>
+      <div className="profile-chart-open">
+        <button type="button" className="btn btn-secondary" onClick={() => setChartSheet({ data, label })}>
+          View profile chart
+        </button>
+      </div>
+    </>
+  )
+
+  const interpretButton = (fullWidth) => (
+    <button onClick={handleInterpret} className="btn btn-secondary" disabled={interpreting}
+      style={fullWidth ? { width: '100%', justifyContent: 'center' } : undefined}>
+      {interpreting ? <Loader2 size={16} strokeWidth={1.5} className="animate-spin" /> : <Brain size={16} strokeWidth={1.5} />}
+      {interpreting ? 'Generating…' : 'AI interpretation'}
+    </button>
+  )
+
+  const downloadButton = (fullWidth) => (
+    <a href={getPdfUrl(sessionId)} className="btn btn-primary" target="_blank" rel="noreferrer"
+      style={fullWidth ? { width: '100%', justifyContent: 'center' } : undefined}>
+      Download PDF
+    </a>
+  )
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="card">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <button
-              onClick={() => navigate(backUrl)}
-              className="mb-2 flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
-            >
-              <ArrowLeft className="h-3 w-3" /> Back to Dashboard
+    <div className="clinical-ink">
+      {/* Desktop header */}
+      <div className="hidden sm:block">
+        <div className="report-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to dashboard" title="Back to dashboard" onClick={() => navigate(backUrl)}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
             </button>
-            <h1 className="text-2xl font-bold text-gray-900">{results.patient_name}</h1>
-            <p className="text-sm text-gray-500">
-              {results.patient_gender}, Age {results.patient_age}
-              {dobDisplay ? ` (DOB: ${dobDisplay})` : ''}
-            </p>
+            <div className="report-id">
+              <h1 className="t-h1">{results.patient_name}</h1>
+              <p className="t-body-s">{metaLine}</p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            {!interpretation && (
-              <button onClick={handleInterpret} className="btn-secondary" disabled={interpreting}>
-                {interpreting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Brain className="h-4 w-4" />}
-                {interpreting ? 'Generating...' : 'AI Interpretation'}
-              </button>
-            )}
-            <a href={getPdfUrl(sessionId)} className="btn-primary" target="_blank" rel="noreferrer">
-              <Download className="h-4 w-4" />
-              Download PDF
-            </a>
+          <div className="profile-actions">
+            {!interpretation && interpretButton(false)}
+            {downloadButton(false)}
           </div>
         </div>
       </div>
 
+      {/* Mobile header */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-5)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to dashboard" onClick={() => navigate(backUrl)}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{results.patient_name}</h1>
+        </div>
+        <p className="t-body-s">{metaLine}</p>
+        {!interpretation && interpretButton(true)}
+        {downloadButton(true)}
+      </div>
+
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+        <div className="alert alert-error" style={{ marginBottom: 'var(--space-5)' }}>{error}</div>
       )}
 
-      {elevatedClinical.length > 0 && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-          <div>
-            <p className="text-sm font-semibold text-amber-800">Clinically Elevated Scales (T ≥ 65)</p>
-            <p className="mt-1 text-sm text-amber-700">
-              {elevatedClinical.map(d => `${SHORT_LABELS[d.scale] || d.scale}: T=${d.t_score}`).join(' · ')}
+      {/* Summary block — validity first, elevated scales second (Part 0) */}
+      <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+        {validityQuestioned ? (
+          <div className="alert alert-warn">
+            <p style={{ margin: 0 }}>
+              <strong>Profile validity: {results.validity_status}.</strong>
+              {results.validity_cautions?.length > 0 && ' ' + results.validity_cautions.join('; ') + '.'}
             </p>
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="status-quiet">Profile validity: {results.validity_status}. No response-style concerns.</p>
+        )}
+        <p className="status-plain" style={{ marginTop: 'var(--space-3)' }}>
+          {elevatedClinical.length > 0
+            ? `Clinically elevated (T ≥ ${ELEVATION_T_THRESHOLD}): ${elevatedClinical.map(d => `${d.short} T=${Math.round(d.t_score)}`).join(' · ')}`
+            : `No clinical scales are elevated (T ≥ ${ELEVATION_T_THRESHOLD}).`}
+        </p>
+      </div>
 
       {/* Section Tabs */}
-      <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
+      <div className="tabs" style={{ marginBottom: 'var(--space-5)' }}>
         {sections.map(sec => (
           <button
             key={sec.id}
+            type="button"
+            className={`tab${activeSection === sec.id ? ' is-active' : ''}`}
             onClick={() => setActiveSection(sec.id)}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors min-w-[120px] ${
-              activeSection === sec.id
-                ? 'bg-white text-primary-700 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
           >
-            <sec.icon className="h-4 w-4" />
-            <span className="hidden sm:inline">{sec.label}</span>
+            {sec.label}
+            {sec.count != null && <span className="tab-count">{sec.count}</span>}
           </button>
         ))}
       </div>
 
       {/* Validity Scales */}
       {activeSection === 'validity' && (
-        <div className="card">
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-800">
-            <Shield className="h-5 w-5 text-purple-500" />
-            Validity Scales
-          </h3>
-          <p className="mb-4 text-sm text-gray-500">
-            Validity scales assess test-taking attitude and response consistency.
-          </p>
-          <ValidityScoreTable data={validityData} fMinusK={fMinusK} trinDirection={trinDirection} />
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>F - K Index:</strong> {fMinusK} — 
-              {fMinusK > 11 ? ' May indicate exaggeration or faking bad' : 
-               fMinusK < -11 ? ' May indicate defensiveness or faking good' : 
-               ' Within normal limits'}
-            </p>
+        <div className="card card-flush">
+          <ScaleRows data={validityData} />
+          <div style={{ padding: 'var(--space-4)' }}>
+            <p className="t-body-s">F − K Index: {fMinusK} — {fMinusKText}</p>
           </div>
-          {trinDirection && (
-            <div className="mt-2 p-3 bg-purple-50 rounded-lg">
-              <p className="text-sm text-purple-800">
-                <strong>TRIN Direction:</strong> {trinDirection === 'T' ? 'True' : 'False'} responding — 
-                {trinDirection === 'T' ? ' Tendency to answer True indiscriminately (acquiescence)' : ' Tendency to answer False indiscriminately (non-acquiescence)'}
-              </p>
-            </div>
-          )}
         </div>
       )}
 
       {/* Clinical Scales */}
       {activeSection === 'clinical' && (
-        <div className="card">
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-800">
-            <Activity className="h-5 w-5 text-blue-500" />
-            Clinical Scales
-          </h3>
-          <ScoreTable data={clinicalData} showKCorrection={true} showTScore={true} />
-          <TScoreChart 
-            data={clinicalData.map(d => ({ ...d, short: SHORT_LABELS[d.scale] || d.scale }))} 
-            title="Clinical Scales T-Score Profile"
-            color="#3b82f6"
-          />
+        <div className="card card-flush">
+          <ScaleRows data={clinicalData} showKCorrected />
+          <div style={{ padding: 'var(--space-4)' }}>
+            {renderChartBlock(clinicalData, 320, 'Clinical Scales')}
+          </div>
         </div>
       )}
 
       {/* Harris-Lingoes & Si Subscales */}
       {activeSection === 'harris' && (
-        <div className="card">
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-800">
-            <Layers className="h-5 w-5 text-green-500" />
-            Harris-Lingoes Subscales & Si Subscales
-          </h3>
-          <p className="mb-4 text-sm text-gray-500">
-            These subscales provide more detailed interpretation of the clinical scales.
-          </p>
+        <div className="card card-flush">
           {combinedSubscalesData.length > 0 ? (
             <>
-              <ScoreTable data={combinedSubscalesData} showKCorrection={false} showTScore={true} />
-              <TScoreChart 
-                data={combinedSubscalesData} 
-                title="Harris-Lingoes & Si Subscales T-Score Profile"
-                height={400}
-                color="#22c55e"
-              />
+              <ScaleRows data={combinedSubscalesData} />
+              <div style={{ padding: 'var(--space-4)' }}>
+                {renderChartBlock(combinedSubscalesData, 360, 'Harris-Lingoes & Si Subscales')}
+              </div>
             </>
           ) : (
-            <p className="text-gray-500 text-center py-8">No subscale data available.</p>
+            <p className="status-quiet" style={{ textAlign: 'center', padding: 'var(--space-9) 0' }}>No subscale data available.</p>
           )}
         </div>
       )}
 
       {/* Supplementary Scales */}
       {activeSection === 'supplementary' && (
-        <div className="card">
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-800">
-            <FlaskConical className="h-5 w-5 text-orange-500" />
-            Supplementary Scales
-          </h3>
-          <p className="mb-4 text-sm text-gray-500">
-            Additional scales measuring anxiety, repression, ego strength, substance use risk, response consistency, and gender roles.
-          </p>
+        <div className="card card-flush">
           {supplementaryData.length > 0 ? (
             <>
-              <ScoreTable data={supplementaryData} showKCorrection={false} showTScore={true} />
-              <TScoreChart 
-                data={supplementaryData} 
-                title="Supplementary Scales T-Score Profile"
-                height={350}
-                color="#f97316"
-              />
+              <ScaleRows data={supplementaryData} />
+              <div style={{ padding: 'var(--space-4)' }}>
+                {renderChartBlock(supplementaryData, 320, 'Supplementary Scales')}
+              </div>
             </>
           ) : (
-            <p className="text-gray-500 text-center py-8">No supplementary scale data available.</p>
+            <p className="status-quiet" style={{ textAlign: 'center', padding: 'var(--space-9) 0' }}>No supplementary scale data available.</p>
           )}
         </div>
       )}
 
       {/* Interpretation */}
       {activeSection === 'interpretation' && (
-        <div className="card">
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-gray-800">
-            <Brain className="h-5 w-5 text-purple-500" />
-            Clinical Interpretation
-          </h3>
-          {interpretation ? (
-            <div className="prose prose-sm max-w-none prose-headings:text-gray-800 prose-headings:font-bold prose-headings:mt-6 prose-headings:mb-3 prose-p:text-gray-600 prose-p:leading-relaxed prose-li:text-gray-600 prose-li:leading-relaxed prose-li:my-2 prose-strong:text-gray-800">
-              <ReactMarkdown>{interpretation}</ReactMarkdown>
+        interpretation ? (
+          <div className="card-narrative">
+            <div className="interp">
+              {parseInterpretation(interpretation).map((section, i) => {
+                const isSummary = /^summary$/i.test(section.heading)
+                return (
+                  <div key={i} className={isSummary ? 'interp-summary' : 'interp-section'}>
+                    {!isSummary && <h3 className="interp-h">{section.heading}</h3>}
+                    {section.blocks.map((block, j) => {
+                      if (block.type === 'sub') {
+                        return <h4 key={j} className="t-h4" style={{ marginTop: 'var(--space-5)', marginBottom: 'var(--space-3)' }}>{block.text}</h4>
+                      }
+                      if (block.type === 'list') {
+                        return (
+                          <ul key={j} className="interp-list">
+                            {block.items.map((item, k) => <li key={k}>{item}</li>)}
+                          </ul>
+                        )
+                      }
+                      if (block.type === 'item') {
+                        const elevated = block.tScore != null && block.tScore >= ELEVATION_T_THRESHOLD
+                        return (
+                          <div key={j} className="interp-item">
+                            <span className="interp-label">
+                              {block.label}
+                              {block.tScore != null && (
+                                <span className={`interp-t${elevated ? ' is-elevated' : ''}`}>{block.tScore}</span>
+                              )}
+                            </span>
+                            <p className="interp-body">{block.body}</p>
+                          </div>
+                        )
+                      }
+                      return <p key={j} className="interp-body">{block.body}</p>
+                    })}
+                  </div>
+                )
+              })}
             </div>
-          ) : (
-            <div className="py-12 text-center">
-              <Brain className="mx-auto mb-4 h-12 w-12 text-gray-300" />
-              <p className="mb-4 text-gray-500">No interpretation generated yet.</p>
-              <button onClick={handleInterpret} className="btn-primary" disabled={interpreting}>
-                {interpreting ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
-                ) : (
-                  <><Brain className="h-4 w-4" /> Generate AI Interpretation</>
-                )}
+          </div>
+        ) : (
+          <div className="card" style={{ textAlign: 'center', padding: 'var(--space-9) var(--space-6)' }}>
+            <p className="status-quiet" style={{ marginBottom: 'var(--space-4)' }}>No interpretation generated yet.</p>
+            <button onClick={handleInterpret} className="btn btn-primary" disabled={interpreting} style={{ margin: '0 auto' }}>
+              {interpreting ? <Loader2 size={16} strokeWidth={1.5} className="animate-spin" /> : <Brain size={16} strokeWidth={1.5} />}
+              {interpreting ? 'Generating…' : 'Generate AI interpretation'}
+            </button>
+          </div>
+        )
+      )}
+
+      {chartSheet && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" style={{ padding: 'var(--space-4)' }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="chart-sheet-title" style={{ maxWidth: '100%', width: '100%', height: '100%', maxHeight: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-5)' }}>
+              <h3 id="chart-sheet-title" className="modal-title">{chartSheet.label}</h3>
+              <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Close" onClick={() => setChartSheet(null)}>
+                <X size={16} strokeWidth={1.5} />
               </button>
             </div>
-          )}
+            <ProfileChart data={chartSheet.data} height={360} />
+          </div>
         </div>
       )}
     </div>

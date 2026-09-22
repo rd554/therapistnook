@@ -18,6 +18,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional, Any
 from abc import ABC, abstractmethod
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -76,15 +77,37 @@ class NotificationChannel(ABC):
 
 
 class EmailChannel(NotificationChannel):
-    """Email notification channel using SMTP."""
-    
+    """Email notification channel using SMTP.
+
+    Each field falls back independently to the SMTP_* env var default when
+    not supplied — see NotificationService.send_email, which builds one of
+    these per send from the live EmailConfiguration DB row (Settings >
+    Messaging), rather than a channel permanently bound to the env vars this
+    module was imported with. That's what makes the enable/disable toggle
+    and saved SMTP credentials in Settings actually take effect.
+    """
+
+    def __init__(
+        self,
+        smtp_host: Optional[str] = None,
+        smtp_port: Optional[int] = None,
+        smtp_email: Optional[str] = None,
+        smtp_password: Optional[str] = None,
+        sender_name: Optional[str] = None,
+    ):
+        self.smtp_host = smtp_host or SMTP_HOST
+        self.smtp_port = smtp_port or SMTP_PORT
+        self.smtp_email = smtp_email or SMTP_EMAIL
+        self.smtp_password = smtp_password or SMTP_PASSWORD
+        self.sender_name = sender_name or OWNER_NAME
+
     @property
     def channel_name(self) -> str:
         return "email"
-    
+
     def is_configured(self) -> bool:
-        return bool(SMTP_EMAIL and SMTP_PASSWORD and not SMTP_PASSWORD.startswith("your-"))
-    
+        return bool(self.smtp_email and self.smtp_password and not self.smtp_password.startswith("your-"))
+
     async def send(
         self,
         recipient: str,
@@ -96,19 +119,19 @@ class EmailChannel(NotificationChannel):
         if not self.is_configured():
             log.warning("SMTP not configured — skipping email to %s", recipient)
             return NotificationResult(success=False, error="SMTP not configured")
-        
+
         msg = MIMEMultipart("alternative")
-        msg["From"] = f"{OWNER_NAME} <{SMTP_EMAIL}>"
+        msg["From"] = f"{self.sender_name} <{self.smtp_email}>"
         msg["To"] = recipient
         msg["Subject"] = subject or "Notification"
         msg.attach(MIMEText(body, "html"))
-        
+
         try:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
                 server.starttls()
-                server.login(SMTP_EMAIL, SMTP_PASSWORD)
-                server.sendmail(SMTP_EMAIL, recipient, msg.as_string())
-            
+                server.login(self.smtp_email, self.smtp_password)
+                server.sendmail(self.smtp_email, recipient, msg.as_string())
+
             log.info("Email sent to %s", recipient)
             return NotificationResult(success=True)
         except Exception as e:
@@ -285,46 +308,37 @@ def format_amount(amount: int, currency: str = "INR") -> str:
 
 DEFAULT_EMAIL_TEMPLATES = {
     "booking_created": {
-        "subject": "Booking Request Received - {{therapist_name}}",
+        # This fires for the public "Book a session" CTA, which requests a
+        # free introductory call — not a paid session. No payment is taken
+        # or owed at this step; the therapist reviews the request and calls
+        # to confirm. See accept_booking_request in main.py.
+        "subject": "Request Received - {{therapist_name}}",
         "body": """
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; color: #1f2937;">
     <div style="text-align: center; margin-bottom: 32px;">
         <div style="display: inline-block; background: #ecfdf5; border-radius: 16px; padding: 16px;">
             <span style="font-size: 28px;">📅</span>
         </div>
-        <h1 style="font-size: 24px; color: #111827; margin: 16px 0 4px;">Booking Request Received</h1>
-        <p style="color: #6b7280; font-size: 14px; margin: 0;">Your appointment request has been submitted</p>
+        <h1 style="font-size: 24px; color: #111827; margin: 16px 0 4px;">Request Received</h1>
+        <p style="color: #6b7280; font-size: 14px; margin: 0;">Your introductory call request has been submitted</p>
     </div>
 
     <p style="font-size: 15px; line-height: 1.7;">Hi <strong>{{patient_name}}</strong>,</p>
-    
+
     <p style="font-size: 15px; line-height: 1.7;">
-        Thank you for requesting an appointment with <strong>{{therapist_name}}</strong>.
+        Thank you for requesting an introductory call with <strong>{{therapist_name}}</strong>. There's nothing to pay for this call — {{therapist_name}} will review your request and call you to confirm a time.
     </p>
 
     <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; margin: 24px 0;">
-        <h3 style="font-size: 14px; color: #374151; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.05em;">Appointment Details</h3>
+        <h3 style="font-size: 14px; color: #374151; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.05em;">Requested Time</h3>
         <table style="width: 100%; font-size: 14px;">
             <tr><td style="padding: 6px 0; color: #6b7280; width: 120px;">Date:</td><td style="padding: 6px 0; font-weight: 600; color: #111827;">{{appointment_date}}</td></tr>
             <tr><td style="padding: 6px 0; color: #6b7280;">Time:</td><td style="padding: 6px 0; font-weight: 600; color: #111827;">{{appointment_time}}</td></tr>
-            <tr><td style="padding: 6px 0; color: #6b7280;">Session Type:</td><td style="padding: 6px 0; font-weight: 600; color: #111827;">{{session_type}}</td></tr>
         </table>
     </div>
 
-    <div style="background: #fef3c7; border: 1px solid #fde68a; border-radius: 12px; padding: 16px; margin: 24px 0;">
-        <p style="font-size: 14px; color: #92400e; margin: 0;">
-            <strong>⏳ Payment Required:</strong> Please complete your payment to confirm this appointment.
-        </p>
-    </div>
-
-    <div style="text-align: center; margin: 24px 0;">
-        <a href="{{payment_link}}" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-size: 15px; font-weight: 600;">
-            Complete Payment →
-        </a>
-    </div>
-
     <p style="font-size: 13px; color: #6b7280; text-align: center;">
-        View your booking status anytime at:<br>
+        View your request status anytime at:<br>
         <a href="{{booking_url}}" style="color: #2563eb;">{{booking_url}}</a>
     </p>
 
@@ -499,6 +513,46 @@ DEFAULT_EMAIL_TEMPLATES = {
 """
     },
     
+    "reminder": {
+        "subject": "Reminder: Upcoming Appointment with {{therapist_name}}",
+        "body": """
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; color: #1f2937;">
+    <div style="text-align: center; margin-bottom: 32px;">
+        <div style="display: inline-block; background: #fef3c7; border-radius: 16px; padding: 16px;">
+            <span style="font-size: 28px;">⏰</span>
+        </div>
+        <h1 style="font-size: 24px; color: #111827; margin: 16px 0 4px;">Appointment Reminder</h1>
+        <p style="color: #6b7280; font-size: 14px; margin: 0;">You have an upcoming session</p>
+    </div>
+
+    <p style="font-size: 15px; line-height: 1.7;">Hi <strong>{{patient_name}}</strong>,</p>
+
+    <p style="font-size: 15px; line-height: 1.7;">
+        This is a reminder that you have an upcoming appointment with <strong>{{therapist_name}}</strong>.
+    </p>
+
+    <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; margin: 24px 0;">
+        <table style="width: 100%; font-size: 14px;">
+            <tr><td style="padding: 6px 0; color: #6b7280;">Date:</td><td style="padding: 6px 0; font-weight: 600;">{{appointment_date}}</td></tr>
+            <tr><td style="padding: 6px 0; color: #6b7280;">Time:</td><td style="padding: 6px 0; font-weight: 600;">{{appointment_time}}</td></tr>
+        </table>
+    </div>
+
+    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 16px; margin: 24px 0;">
+        <p style="font-size: 14px; color: #1e40af; margin: 0;">
+            <strong>Meeting Link:</strong><br>
+            <a href="{{meeting_link}}" style="color: #2563eb;">{{meeting_link}}</a>
+        </p>
+    </div>
+
+    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;">
+    <p style="font-size: 12px; color: #9ca3af; text-align: center;">
+        This email was sent by {{therapist_name}}'s practice.
+    </p>
+</div>
+"""
+    },
+
     "reminder_24h": {
         "subject": "Reminder: Appointment Tomorrow with {{therapist_name}}",
         "body": """
@@ -755,7 +809,7 @@ DEFAULT_EMAIL_TEMPLATES = {
 
 
 DEFAULT_WHATSAPP_MESSAGES = {
-    "booking_created": "Hi {{patient_name}}! Your appointment request with {{therapist_name}} on {{appointment_date}} at {{appointment_time}} has been received. Please complete payment to confirm: {{payment_link}}",
+    "booking_created": "Hi {{patient_name}}! Your introductory call request with {{therapist_name}} on {{appointment_date}} at {{appointment_time}} has been received — nothing to pay. {{therapist_name}} will call you to confirm: {{booking_url}}",
     
     "payment_pending": "Reminder: Your appointment with {{therapist_name}} on {{appointment_date}} is pending payment. Complete payment here: {{payment_link}}",
     
@@ -765,6 +819,8 @@ DEFAULT_WHATSAPP_MESSAGES = {
     
     "meeting_link_generated": "Your meeting link for {{appointment_date}} at {{appointment_time}}:\n\n{{meeting_link}}\n\nSee you soon!",
     
+    "reminder": "⏰ Reminder: Your appointment with {{therapist_name}} is on {{appointment_date}} at {{appointment_time}}.\n\n📹 Join: {{meeting_link}}",
+
     "reminder_24h": "⏰ Reminder: Your appointment with {{therapist_name}} is tomorrow at {{appointment_time}}.\n\n📹 Join: {{meeting_link}}",
     
     "reminder_2h": "⏰ 2 Hour Reminder: Your session with {{therapist_name}} starts at {{appointment_time}}.\n\n📹 Join: {{meeting_link}}",
@@ -779,10 +835,10 @@ DEFAULT_WHATSAPP_MESSAGES = {
 
 class NotificationService:
     """Main notification service managing all channels and templates."""
-    
+
     def __init__(self):
-        self._email_channel = EmailChannel()
-    
+        pass
+
     def get_whatsapp_channel(
         self,
         phone_number_id: Optional[str] = None,
@@ -801,7 +857,21 @@ class NotificationService:
         if phone_number_id:
             return WhatsAppChannel(phone_number_id, access_token)
         return WhatsAppChannel()
-    
+
+    def get_email_channel(
+        self,
+        smtp_host: Optional[str] = None,
+        smtp_port: Optional[int] = None,
+        smtp_email: Optional[str] = None,
+        smtp_password: Optional[str] = None,
+        sender_name: Optional[str] = None,
+    ) -> EmailChannel:
+        """Build an email channel for the given config. Same no-caching
+        reasoning as get_whatsapp_channel — DB credentials (Settings >
+        Messaging) can change at any time, so nothing is cached across sends.
+        """
+        return EmailChannel(smtp_host, smtp_port, smtp_email, smtp_password, sender_name)
+
     def get_email_template(self, event_type: str) -> Optional[dict]:
         """Get default email template for an event type."""
         return DEFAULT_EMAIL_TEMPLATES.get(event_type)
@@ -810,24 +880,83 @@ class NotificationService:
         """Get default WhatsApp message template for an event type."""
         return DEFAULT_WHATSAPP_MESSAGES.get(event_type)
     
+    async def _is_gated_off(self, db, gate_event: Optional[str], channel: str) -> bool:
+        """True if a patient-facing send should be skipped because Settings >
+        Messaging has this event/channel combination turned off.
+
+        `gate_event` is one of MessagingPreferences' six event names
+        (session_booked/reminder/session_rescheduled/session_cancelled/
+        payment_request/payment_received) — callers pass it explicitly only
+        for the patient-facing sends the Messaging section actually governs.
+        Practitioner-facing notifications (e.g. "new booking" alerts to the
+        therapist) and one-off explicit actions (e.g. "email meeting link"
+        from the Appointments list) pass no gate_event and are never blocked
+        here — that's a different, pre-existing preference surface.
+
+        Fails open (never gates off) on a lookup error — send_email/
+        send_whatsapp are otherwise designed to never raise (the underlying
+        channel.send() calls are themselves try/excepted into a
+        NotificationResult), and callers like booking_service.py call these
+        with no try/except of their own. A messaging_preferences read
+        failure here must not turn into a 500 on the public booking path;
+        better to send an email that a broken preferences read couldn't
+        confirm was wanted than to break booking creation entirely.
+        """
+        if not gate_event or db is None:
+            return False
+        import settings_service
+        try:
+            return not await settings_service.is_message_enabled(db, gate_event, channel)
+        except Exception as e:
+            log.warning("Messaging preferences lookup failed for gate_event=%s channel=%s — failing open: %s", gate_event, channel, e)
+            return False
+
     async def send_email(
         self,
         recipient_email: str,
         event_type: str,
         placeholders: dict,
         custom_template: Optional[dict] = None,
+        db: Optional[AsyncSession] = None,
+        gate_event: Optional[str] = None,
     ) -> NotificationResult:
-        """Send an email notification."""
+        """Send an email notification.
+
+        `db`, when provided, is used to read the live EmailConfiguration row
+        (Settings > Messaging) — is_enabled is honored (a disabled config
+        blocks the send outright) and each SMTP field falls back
+        independently to the SMTP_* env vars when the DB field is empty.
+        Without `db`, this falls back to pure env-var behavior.
+        """
+        if await self._is_gated_off(db, gate_event, "email"):
+            log.info("Email to %s for %s skipped — disabled in messaging preferences", recipient_email, event_type)
+            return NotificationResult(success=False, error="Disabled in messaging preferences")
+
         template = custom_template or self.get_email_template(event_type)
-        
+
         if not template:
             return NotificationResult(success=False, error=f"No template for {event_type}")
-        
+
         subject = render_template(template.get("subject", ""), placeholders)
         body = render_template(template.get("body", ""), placeholders)
-        
-        return await self._email_channel.send(recipient_email, subject, body)
-    
+
+        channel = EmailChannel()
+        if db is not None:
+            import settings_service
+            config = await settings_service.get_email_config(db)
+            if not config.is_enabled:
+                log.info("Email to %s for %s skipped — disabled in Settings", recipient_email, event_type)
+                return NotificationResult(success=False, error="Email disabled in Settings")
+            channel = self.get_email_channel(
+                smtp_host=config.smtp_host or None,
+                smtp_port=config.smtp_port or None,
+                smtp_email=config.smtp_username or None,
+                smtp_password=config.smtp_password or None,
+                sender_name=config.sender_name or None,
+            )
+
+        return await channel.send(recipient_email, subject, body)
+
     async def send_whatsapp(
         self,
         recipient_phone: str,
@@ -838,8 +967,14 @@ class NotificationService:
         whatsapp_template_id: Optional[str] = None,
         template_params: Optional[dict] = None,
         language_code: str = "en_US",
+        db: Optional[AsyncSession] = None,
+        gate_event: Optional[str] = None,
     ) -> NotificationResult:
         """Send a WhatsApp notification."""
+        if await self._is_gated_off(db, gate_event, "whatsapp"):
+            log.info("WhatsApp to %s for %s skipped — disabled in messaging preferences", recipient_phone, event_type)
+            return NotificationResult(success=False, error="Disabled in messaging preferences")
+
         channel = self.get_whatsapp_channel(phone_number_id, access_token)
 
         if whatsapp_template_id:
@@ -851,14 +986,14 @@ class NotificationService:
                 template_params=template_params,
                 language_code=language_code,
             )
-        
+
         message_template = self.get_whatsapp_template(event_type)
         if not message_template:
             return NotificationResult(success=False, error=f"No template for {event_type}")
-        
+
         body = render_template(message_template, placeholders)
         return await channel.send(recipient_phone, None, body)
-    
+
     async def send_notification(
         self,
         channel: str,
@@ -867,10 +1002,12 @@ class NotificationService:
         placeholders: dict,
         whatsapp_config: Optional[dict] = None,
         custom_template: Optional[dict] = None,
+        db: Optional[AsyncSession] = None,
+        gate_event: Optional[str] = None,
     ) -> NotificationResult:
         """Send a notification via the specified channel."""
         if channel == "email":
-            return await self.send_email(recipient, event_type, placeholders, custom_template)
+            return await self.send_email(recipient, event_type, placeholders, custom_template, db=db, gate_event=gate_event)
         elif channel == "whatsapp":
             return await self.send_whatsapp(
                 recipient,
@@ -878,6 +1015,8 @@ class NotificationService:
                 placeholders,
                 phone_number_id=whatsapp_config.get("phone_number_id") if whatsapp_config else None,
                 access_token=whatsapp_config.get("access_token") if whatsapp_config else None,
+                db=db,
+                gate_event=gate_event,
             )
         else:
             return NotificationResult(success=False, error=f"Unknown channel: {channel}")

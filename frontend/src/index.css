@@ -1,3 +1,53 @@
+/* Clinical Ink design system (in-progress migration, see design/therapist-nook-design-system.md).
+   Everything in this file is scoped under `.clinical-ink` and is a no-op
+   until a screen root is given that class — see the header comment in
+   styles/tokens.css for the full cascade/collision writeup.
+   Must precede @tailwind (a plain CSS @import has to come before all other
+   statements besides @charset) — this is fine: the scoped selectors below
+   win on specificity (0,2,0 vs Tailwind utilities' 0,1,0), not on source
+   order, against anything Tailwind emits after it. */
+@import './styles/tokens.css';
+
+/* New Settings-screen vocabulary (.settings-shell/-nav/-row, .switch, .check,
+   .channel-matrix, etc.) — base design-system classes, not app-specific
+   overrides, so it belongs beside tokens.css rather than in
+   clinical-ink-overrides.css. Same scoping/import-order reasoning as
+   tokens.css above; see styles/settings.css's own header for the .check/
+   .switch vs. tokens.css's .checkbox decision. */
+@import './styles/settings.css';
+
+/* New public-profile vocabulary (.pp-page/-header/-book/-sheet, etc.) for
+   /p/:slug — base design-system classes, not app-specific overrides, so it
+   belongs beside tokens.css/settings.css rather than in
+   clinical-ink-overrides.css. Same scoping/import-order reasoning as
+   tokens.css above. */
+@import './styles/public-profile.css';
+
+/* Marketing-only classes for the landing page (walkthrough section, trust
+   row). Canonical source is design/marketing.css; same scoping/import-order
+   reasoning as tokens.css above. */
+@import './styles/marketing.css';
+
+/* Layout-only scaffolding classes ported from design/prototype/prototype.css
+   (e.g. .sched-card) — see this file's own header for why it's separate
+   from tokens.css. Same import-order reasoning as tokens.css above. */
+@import './styles/clinical-ink.css';
+
+/* Restyles the app's OWN existing classes (not tokens.css's) under
+   .clinical-ink, for the classes tokens.css has no equivalent for — see the
+   header comment in this file for why. Every selector in it includes the
+   `.clinical-ink` class, so it always out-specifies this same file's bare
+   rules below regardless of import order (0,N+1,0 vs 0,N,0). */
+@import './styles/clinical-ink-overrides.css';
+
+/* Public Profile editor — page-local tokens/layout, kept inside the page's
+   own folder (pages/profile-editor/) per that revamp's scope rules, but
+   wired in here since this app has no precedent for a page importing its
+   own CSS module directly (every screen-specific stylesheet loads through
+   this same chain). Scoped under .tn-profile throughout; last in the
+   chain so it can win any genuine same-specificity conflict. */
+@import './pages/profile-editor/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -697,17 +747,25 @@
   }
 
   /* ============================================
-     SIDEBAR — 220px width, 44px item height, 16px radius
+     SIDEBAR
+     .sidebar/.sidebar-logo(__mark/__text)/.sidebar-nav/.sidebar-nav-item
+     (span/svg/:hover/--active/--active:hover/--active span/--active svg/
+     :focus-visible)/.sidebar-section-label/.nav-group-label/.nav-item
+     (alias)/.sidebar-item(alias)/.sidebar-profile(:hover/:focus-visible)/
+     __avatar/__avatar--placeholder/__info/__name/__role were all deleted
+     here: Sidebar.jsx now renders tokens.css's real .sidebar/.nav-item/
+     .is-active/.avatar, plus the layout-only .logo-row/.logo-tile/
+     .sidebar-footer/.sidebar-footer-text/.sidebar-footer__avatar-img
+     from styles/clinical-ink.css (1:1 ports of prototype.css, per design
+     system §B8). .sidebar-nav-item's global un-scoped `.nav-item { @apply
+     sidebar-nav-item }`/`.sidebar-item` aliases had to go in the same pass
+     as .sidebar-nav-item itself — leaving either alone would either orphan
+     a dead @apply target (build error) or leave the old bespoke styles
+     reachable through the alias after Sidebar.jsx stopped using them.
+     .sidebar--desktop/--mobile/--mobile.sidebar--open below survive: they're
+     the responsive-drawer mechanics (fixed positioning, slide transform),
+     which have no prototype equivalent — it's a static desktop artboard.
      ============================================ */
-  
-  .sidebar {
-    @apply flex flex-col;
-    width: var(--sidebar-width);
-    height: 100vh;
-    background: var(--sidebar-bg);
-    border-right: none;
-    padding: 24px;
-  }
 
   .sidebar--desktop {
     @apply hidden lg:flex lg:fixed lg:inset-y-0 lg:left-0 lg:z-30;
@@ -715,6 +773,12 @@
   }
 
   .sidebar--mobile {
+    /* display: flex above the @apply line (not merged into the literal
+       props below it) so it lands in the same unconditional, pre-media-hoist
+       output block as `fixed`/`inset-y-0`/etc. — `lg:hidden`'s hoisted
+       `@media (min-width: 1024px) { display: none }` needs to come after it
+       in source order to win the equal-specificity tie at desktop width. */
+    display: flex;
     @apply fixed inset-y-0 left-0 z-50 lg:hidden;
     transform: translateX(-100%);
     transition: transform 300ms ease;
@@ -722,174 +786,6 @@
 
   .sidebar--mobile.sidebar--open {
     transform: translateX(0);
-  }
-
-  .sidebar-logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 0;
-  }
-
-  .sidebar-logo__mark {
-    width: 36px;
-    height: 36px;
-    flex-shrink: 0;
-  }
-
-  .sidebar-logo__text {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 17px;
-    font-weight: 700;
-    line-height: 1.3;
-    color: var(--color-text-primary);
-    white-space: nowrap;
-  }
-
-  /* Navigation — 36-40px gap from logo */
-  .sidebar-nav {
-    @apply flex flex-col flex-1;
-    margin-top: var(--logo-nav-gap);
-    gap: var(--nav-item-gap);
-  }
-
-  /* Navigation Item - 44px height, 16px radius
-     Thin outline icons (~1.5px stroke) */
-  .sidebar-nav-item {
-    @apply flex items-center cursor-pointer no-underline;
-    height: var(--nav-item-height);
-    padding: 0 var(--nav-item-padding-left);
-    gap: var(--nav-icon-gap);
-    border-radius: var(--radius-nav);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 15px;
-    font-weight: 500;
-    line-height: 1.5;
-    color: var(--sidebar-text);
-    background: transparent;
-    box-shadow: none;
-    transition: color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
-    width: 100%;
-  }
-
-  .sidebar-nav-item span {
-    font-weight: 500;
-    color: inherit;
-  }
-
-  .sidebar-nav-item svg {
-    color: var(--sidebar-icon-idle);
-    stroke: currentColor;
-    stroke-width: 1.5;
-    flex-shrink: 0;
-  }
-
-  .sidebar-nav-item:hover:not(.sidebar-nav-item--active) {
-    background: var(--sidebar-bg-hover);
-    color: var(--sidebar-text);
-  }
-
-  /* Active state - Soft lavender bg + subtle border + lavender icon/text */
-  .sidebar-nav-item--active,
-  .sidebar-nav-item--active:hover {
-    border-radius: var(--radius-nav);
-    background: #F3F0FF;
-    border: 1px solid #DDD6FE;
-    color: var(--color-primary);
-    font-weight: 500;
-    box-shadow: none;
-  }
-
-  .sidebar-nav-item--active span {
-    color: var(--color-primary);
-    font-weight: 500;
-  }
-
-  .sidebar-nav-item--active svg {
-    color: var(--color-primary);
-    stroke: currentColor;
-  }
-
-  .sidebar-nav-item:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(124, 114, 232, 0.3);
-  }
-
-  .sidebar-section-label,
-  .nav-group-label {
-    display: none;
-  }
-
-  .nav-item {
-    @apply sidebar-nav-item;
-  }
-
-  .sidebar-item {
-    @apply sidebar-nav-item;
-  }
-
-  /* Practitioner Profile */
-  .sidebar-profile {
-    @apply flex items-center cursor-pointer;
-    gap: 12px;
-    margin-top: auto;
-    padding: 12px;
-    border-radius: var(--radius-nav);
-    transition: background-color 150ms ease;
-  }
-
-  .sidebar-profile:hover {
-    background: var(--sidebar-bg-hover);
-  }
-
-  .sidebar-profile:focus-visible {
-    @apply outline-none;
-    box-shadow: 0 0 0 2px rgba(124, 114, 232, 0.3);
-    border-radius: var(--radius-nav);
-  }
-
-  .sidebar-profile__avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-  }
-
-  .sidebar-profile__avatar--placeholder {
-    @apply flex items-center justify-center;
-    background: var(--color-lavender-soft);
-    color: var(--color-primary);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  .sidebar-profile__info {
-    @apply flex flex-col flex-1 min-w-0;
-    gap: 2px;
-  }
-
-  .sidebar-profile__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-secondary);
-    line-height: 1.5;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .sidebar-profile__role {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 400;
-    color: var(--color-text-muted);
-    line-height: 1.4;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   /* ============================================
@@ -972,32 +868,13 @@
     color: #FFFFFF;
   }
 
-  .workspace-header__btn--primary {
-    background: var(--color-primary);
-    color: #FFFFFF;
-    border: none;
-    box-shadow: none;
-  }
-
-  .workspace-header__btn--primary:hover {
-    background: var(--color-primary-hover);
-  }
-
-  /* Navbar action buttons (Add Patient / Add Practitioner / Schedule Session) —
-     lavender by default, solid purple on hover/active */
-  .workspace-header__btn--nav {
-    background: var(--color-lavender-soft);
-    color: var(--color-primary);
-    border: none;
-    box-shadow: none;
-  }
-
-  .workspace-header__btn--nav:hover,
-  .workspace-header__btn--nav:focus-visible,
-  .workspace-header__btn--nav:active {
-    background: var(--color-primary-hover);
-    color: #FFFFFF;
-  }
+  /* .workspace-header__btn--primary and --nav were deleted here: --primary
+     had zero JSX usages (confirmed via grep), and --nav's only two call
+     sites (WorkspaceHeader's Add patient / Schedule session buttons) were
+     converted to tokens.css's real .btn-secondary / .btn-primary as part of
+     the Clinical Ink migration (design/live-vs-prototype-gaps.md). --soft
+     stays: PatientProfile.jsx and PractitionerPatients.jsx still use it and
+     haven't been converted yet. */
 
   @media (max-width: 767px) {
     .workspace-header__btn {
@@ -1120,161 +997,27 @@
   }
 
   /* ============================================
-     DASHBOARD SECTION STYLES
+     DASHBOARD SECTION STYLES — deleted here: .dash-section/__heading/
+     __heading-left/__title/__badge/__action(:hover/svg) were the shared
+     section-chrome vocabulary every dashboard widget used to share.
+     TodaySchedule/RecentPatients/Payments already render a bare .section-head
+     (tokens.css) instead; TherapistNote.jsx (the last consumer) now does too
+     — its title/date live inside .card-narrative itself, per design system
+     §C. .dash-section__action had no call sites left even before this
+     deletion (dead since Recent Patients' §7 rebuild dropped its "View all"
+     link in favor of a real .link).
      ============================================ */
-
-  .dash-section {
-    @apply flex flex-col;
-    gap: var(--heading-card-gap);
-  }
-
-  .dash-section__heading {
-    @apply flex items-center justify-between;
-    width: 100%;
-    min-height: 28px;
-  }
-
-  /* Constrained heading widths — align "View all" with card edges */
-  .dash-section__heading--narrow {
-    width: 88%;
-  }
-
-  .dash-section__heading--medium {
-    width: 94%;
-  }
-
-  .dash-section__heading-left {
-    @apply flex items-center;
-    gap: 10px;
-  }
-
-  .dash-section__title {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    line-height: 1.3;
-    color: #1F2937;
-  }
-
-  .dash-section__badge {
-    @apply inline-flex items-center;
-    padding: 2px 10px;
-    border-radius: var(--radius-badge);
-    background: var(--color-primary-light);
-    color: var(--color-primary);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    line-height: 1.4;
-  }
-
-  .dash-section__action {
-    @apply inline-flex items-center;
-    gap: 4px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-primary);
-    transition: color 150ms ease;
-  }
-
-  .dash-section__action:hover {
-    color: var(--color-primary-hover);
-  }
-
-  .dash-section__action svg {
-    flex-shrink: 0;
-  }
 
   /* ============================================
-     TODAY'S SCHEDULE CARDS — Tinted backgrounds
-     Online: #EEF5FF bg, #A7BED3 accent
-     Offline: #F2FBF4 bg, #A8C7A1 accent
-     No borders, subtle tint
+     TODAY'S SCHEDULE CARDS
+     .dash-session-card, --online/--offline, __chip, __name, __meta, __join
+     were deleted here: TodaySchedule.jsx now renders sessions with tokens.css's
+     real .card/.rule-accent/.icon-badge/.btn-primary/.btn-secondary and the
+     layout-only .sched-* classes (styles/clinical-ink.css), per design system
+     §6. __icon-btn and __error survive below — they're app-specific affordances
+     (email-a-link, link-generation error) the prototype doesn't model, so they
+     stay bespoke, restyled neutral/error via clinical-ink-overrides.css.
      ============================================ */
-
-  .dash-session-card {
-    @apply flex items-center;
-    width: 88%;
-    gap: 14px;
-    padding: 16px 20px;
-    border-radius: var(--radius-card);
-    border: none;
-    box-shadow: var(--shadow-card-elevation);
-    transition: transform 150ms ease, box-shadow 150ms ease;
-    cursor: pointer;
-  }
-
-  .dash-session-card:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-card-hover);
-  }
-
-  .dash-session-card--online {
-    background: var(--color-online-bg);
-  }
-
-  .dash-session-card--offline {
-    background: var(--color-offline-bg);
-  }
-
-  .dash-session-card__chip {
-    @apply flex items-center justify-center shrink-0;
-    width: 40px;
-    height: 40px;
-    border-radius: 12px;
-  }
-
-  .dash-session-card--online .dash-session-card__chip {
-    background: rgba(159, 186, 210, 0.28);
-    color: #1E5F8A;
-  }
-
-  .dash-session-card--offline .dash-session-card__chip {
-    background: rgba(159, 195, 154, 0.28);
-    color: #3F5F49;
-  }
-
-  .dash-session-card__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 15px;
-    font-weight: 500;
-    line-height: 1.4;
-    color: var(--color-text-primary);
-  }
-
-  .dash-session-card__meta {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 400;
-    line-height: 1.4;
-    color: var(--color-text-secondary);
-    margin-top: 2px;
-  }
-
-  .dash-session-card__join {
-    @apply flex items-center justify-center shrink-0;
-    gap: 6px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    background: var(--color-primary);
-    border-radius: 999px;
-    padding: 8px 14px;
-    white-space: nowrap;
-    transition: filter 150ms ease, transform 150ms ease;
-  }
-
-  .dash-session-card__join:hover:not(:disabled) {
-    filter: brightness(0.94);
-    transform: translateY(-1px);
-  }
-
-  .dash-session-card__join:disabled {
-    opacity: 0.7;
-    cursor: default;
-  }
 
   .dash-session-card__error {
     font-family: 'Manrope', system-ui, sans-serif;
@@ -1305,290 +1048,43 @@
   }
 
   /* ============================================
-     RECENT PATIENTS TABLE — Refined
-     Header: 13px, 400 weight, #94A3B8
-     Rows: 58-60px height
-     Patient Name: 500 weight
-     Checkbox: #CBD5E1
+     RECENT PATIENTS
+     .dash-recent-wrap/-labels/-list/-card(-m)/__appt, .dash-mode-dot(--online/
+     --offline), .dash-check(--present/--absent), .dash-recent-mobile,
+     .dash-recent-pill(--present/--absent) were deleted here: RecentPatients.jsx
+     (renamed from RecentPatientsTable.jsx — it's a flush list now, not a
+     table) renders one .table-wrap.card-flush of .list-row.rp-row rows,
+     with tokens.css's real .seg/.seg-option segmented control replacing the
+     old check-square/pill split, per design system §7. The identity dot is
+     gone entirely — it duplicated modality, which Today's Schedule already
+     shows. One render path now covers both the old desktop grid and mobile
+     stacked-card variants; styles/clinical-ink.css's .rp-row media query
+     handles the width difference that used to need two JSX branches.
      ============================================ */
-
-  .dash-recent-wrap {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 88%;
-  }
-
-  .dash-recent-labels {
-    display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px;
-    gap: 8px;
-    padding: 0 14px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 12px;
-    font-weight: 400;
-    color: #64748B;
-    letter-spacing: 0.01em;
-    background: transparent;
-    border: none;
-    box-shadow: none;
-  }
-
-  .dash-recent-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .dash-recent-card {
-    display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.2fr) 48px 48px;
-    align-items: center;
-    gap: 8px;
-    padding: 14px;
-    height: 58px;
-    background: #FAFBFC;
-    border: none;
-    border-radius: 16px;
-    box-shadow: var(--shadow-card-elevation);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-secondary);
-    transition: background 150ms ease, box-shadow 150ms ease;
-  }
-
-  .dash-recent-card:hover {
-    background: #F1F5F9;
-  }
-
-  .dash-recent-card__appt {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .dash-mode-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .dash-mode-dot--online {
-    background: #9FBAD2;
-  }
-
-  .dash-mode-dot--offline {
-    background: #9FC39A;
-  }
-
-  .dash-check {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    border: 1.5px solid #CBD5E1;
-    background: #FFFFFF;
-    cursor: pointer;
-    transition: background 150ms ease, border-color 150ms ease;
-  }
-
-  .dash-check--present.dash-check--on {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    color: #FFFFFF;
-  }
-
-  .dash-check--absent.dash-check--on {
-    background: var(--color-overdue-accent);
-    border-color: var(--color-overdue-accent);
-    color: #FFFFFF;
-  }
-
-  /* Phone/tablet stacked cards for Recent Patients (< lg only; desktop grid
-     above is untouched) — labeled buttons instead of bare checkboxes since
-     there's no room for a header row to explain them. */
-
-  .dash-recent-mobile {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    width: 100%;
-  }
-
-  .dash-recent-card-m {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px;
-    background: #FAFBFC;
-    border-radius: 16px;
-    box-shadow: var(--shadow-card-elevation);
-  }
-
-  .dash-recent-card-m__top {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .dash-recent-card-m__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .dash-recent-card-m__meta {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    color: #64748B;
-  }
-
-  .dash-recent-card-m__actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .dash-recent-pill {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    flex: 1;
-    padding: 7px 0;
-    border-radius: 8px;
-    border: 1.5px solid #CBD5E1;
-    background: #FFFFFF;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: #64748B;
-    cursor: pointer;
-    transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-  }
-
-  .dash-recent-pill--present.dash-recent-pill--on {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    color: #FFFFFF;
-  }
-
-  .dash-recent-pill--absent.dash-recent-pill--on {
-    background: var(--color-overdue-accent);
-    border-color: var(--color-overdue-accent);
-    color: #FFFFFF;
-  }
 
   /* ============================================
-     PAYMENTS — Only Received & Overdue
-     Received: #F3FAF5 bg, #A8C7A1 accent, #3F5F49 text
-     Overdue: #FFF8E8 bg, #E8C66A accent, #6E5A18 text
+     PAYMENTS — deleted here: .dash-payment-list/-card(--collected/--received/
+     --pending/--overdue/--outstanding)/__name/__amount/__right/__status/__date
+     were the whole-card-tinted version this comment used to document.
+     PaymentsList.jsx now renders one .table-wrap.card-flush of .list-row
+     .pay-row rows, white with a .rule-error left stripe on overdue rows
+     instead of a tinted background, per design system §8/B4/B6/A3. The
+     name/amount/date type comes from tokens.css's own .t-cell-key/.t-num/
+     .t-num-key/.t-caption plus clinical-ink.css's .pay-name-received gap-fill
+     class — nothing bespoke left to restyle here.
      ============================================ */
-
-  .dash-payment-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--card-gap);
-    width: 94%;
-  }
-
-  .dash-payment-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 18px;
-    border: none;
-    border-radius: var(--radius-card);
-    box-shadow: var(--shadow-card-elevation);
-  }
-
-  .dash-payment-card--collected,
-  .dash-payment-card--received {
-    background: var(--color-received-bg);
-  }
-
-  .dash-payment-card--pending,
-  .dash-payment-card--overdue,
-  .dash-payment-card--outstanding {
-    background: var(--color-overdue-bg);
-  }
-
-  .dash-payment-card__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.35;
-    color: var(--color-text-primary);
-  }
-
-  .dash-payment-card__amount {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 400;
-    line-height: 1.35;
-    color: var(--color-text-muted);
-    margin-top: 2px;
-  }
-
-  .dash-payment-card__right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 2px;
-    flex-shrink: 0;
-  }
-
-  .dash-payment-card__status {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    line-height: 1.35;
-    text-align: right;
-    white-space: nowrap;
-  }
-
-  .dash-payment-card--collected .dash-payment-card__status,
-  .dash-payment-card--received .dash-payment-card__status {
-    color: var(--color-received-text);
-  }
-
-  .dash-payment-card--pending .dash-payment-card__status,
-  .dash-payment-card--overdue .dash-payment-card__status,
-  .dash-payment-card--outstanding .dash-payment-card__status {
-    color: var(--color-overdue-text);
-  }
-
-  .dash-payment-card__date {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 1.3;
-    color: var(--color-text-muted);
-    text-align: right;
-  }
 
   /* ============================================
      THERAPIST NOTE CARD
+     .dash-note-card/__textarea/__textarea::placeholder deleted here:
+     TherapistNote.jsx now renders tokens.css's real .card-narrative +
+     .t-narrative (design system §C) instead of a bespoke white card and
+     plain textarea. .dash-note-card__picker/__popover survive below —
+     the date-picker affordance has no prototype equivalent (it's a static
+     mockup with no editable note), so it stays bespoke, restyled onto
+     design tokens via clinical-ink-overrides.css same as
+     .dash-session-card__icon-btn above.
      ============================================ */
-
-  .dash-note-card {
-    position: relative;
-    background: #FFFFFF;
-    border-radius: var(--radius-card);
-    border: 1px solid rgba(226, 232, 240, 0.5);
-    box-shadow: var(--shadow-card-elevation);
-    padding: 20px 48px 20px 20px;
-    width: 94%;
-  }
 
   .dash-note-card__picker {
     position: absolute;
@@ -1607,24 +1103,6 @@
   .dash-note-card__picker:hover {
     background: rgba(47, 47, 47, 0.06);
     color: var(--color-text-secondary);
-  }
-
-  .dash-note-card__textarea {
-    width: 100%;
-    min-height: 120px;
-    resize: none;
-    border: none;
-    outline: none;
-    background: transparent;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 15px;
-    font-weight: 400;
-    line-height: 1.6;
-    color: var(--color-text-primary);
-  }
-
-  .dash-note-card__textarea::placeholder {
-    color: var(--color-text-muted);
   }
 
   .dash-note-card__popover {
@@ -1651,15 +1129,11 @@
 
   /* ============================================
      EMPTY STATES
+     .dash-empty deleted here: PaymentsList.jsx (its last consumer) now
+     renders tokens.css's own .empty/.empty-title/.empty-body, same as
+     RecentPatients.jsx. .empty-state-icon below stays — components/ui/
+     EmptyState.jsx still uses it.
      ============================================ */
-
-  .dash-empty {
-    @apply flex flex-col items-center justify-center text-center;
-    padding: 48px 24px;
-    background: #FFFFFF;
-    border-radius: var(--radius-card);
-    box-shadow: var(--shadow-card);
-  }
 
   /* ============================================
      WORKSPACE MAIN CONTENT
@@ -1696,15 +1170,26 @@
   @media (min-width: 1280px) {
     .dashboard-layout {
       grid-template-columns: 1fr 360px;
+      grid-template-rows: auto auto;
+      grid-auto-flow: column;
       gap: var(--column-gap);
     }
   }
 
-  /* Dashboard column — vertical stack of sections */
+  /* Dashboard column — vertical stack of sections on mobile/tablet. On
+     desktop it becomes a no-op (display: contents) so its children join
+     the parent grid directly as row 1 / row 2, keeping Today's schedule
+     level with Therapist's note, and Recent patients level with Payments. */
   .dashboard-column {
     display: flex;
     flex-direction: column;
     gap: var(--module-gap);
+  }
+
+  @media (min-width: 1280px) {
+    .dashboard-column {
+      display: contents;
+    }
   }
 
   .dashboard {
@@ -2376,423 +1861,6 @@
     flex-shrink: 0;
   }
 
-  /* ============================================
-     ASSESSMENTS PAGE
-     ============================================ */
-
-  .assessments-page {
-    @apply flex flex-col;
-    gap: 32px;
-    max-width: 1120px;
-  }
-
-  .assessments-header {
-    @apply flex flex-wrap items-start justify-between gap-6;
-  }
-
-  .assessments-header__title {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--color-text-primary);
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-  }
-
-  .assessments-header__subtitle {
-    margin-top: 8px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-secondary);
-  }
-
-  .assessments-banner {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-overdue-text);
-    background: var(--color-overdue-bg);
-    border: 1px solid rgba(221, 189, 99, 0.35);
-    border-radius: var(--radius-input);
-    padding: 12px 16px;
-  }
-
-  .assessments-cta {
-    @apply inline-flex items-center justify-center gap-2;
-    height: 40px;
-    padding: 0 20px;
-    border-radius: var(--radius-btn);
-    background: var(--color-primary);
-    color: #FFFFFF;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 15px;
-    font-weight: 500;
-    transition: background 200ms ease;
-    white-space: nowrap;
-  }
-
-  .assessments-cta:hover {
-    background: var(--color-primary-hover);
-  }
-
-  .assessments-cta:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .assessments-toolbar {
-    @apply flex flex-wrap items-center justify-between gap-4;
-  }
-
-  .assessments-filters {
-    @apply flex flex-wrap items-center gap-2;
-  }
-
-  .assessments-filter-chip {
-    height: 34px;
-    padding: 0 14px;
-    border-radius: 999px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-text-secondary);
-    background: transparent;
-    border: 1px solid var(--color-border-light);
-    transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
-  }
-
-  .assessments-filter-chip:hover {
-    color: var(--color-text-primary);
-    background: #FAFBFC;
-  }
-
-  .assessments-filter-chip--active {
-    background: var(--color-primary-light);
-    border-color: transparent;
-    color: var(--color-primary);
-  }
-
-  .assessments-search {
-    @apply relative flex items-center;
-  }
-
-  .assessments-search__icon {
-    @apply absolute left-3.5 pointer-events-none;
-    color: var(--color-text-muted);
-  }
-
-  .assessments-search input {
-    width: 260px;
-    height: 40px;
-    padding: 0 16px 0 40px;
-    border-radius: 999px;
-    border: 1px solid var(--color-border-light);
-    background: #FAFBFC;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-primary);
-  }
-
-  .assessments-search input::placeholder {
-    color: var(--color-text-muted);
-  }
-
-  .assessments-search input:focus {
-    outline: none;
-    border-color: var(--color-border);
-    background: #FFFFFF;
-  }
-
-  .assessments-list {
-    @apply flex flex-col;
-  }
-
-  .assessments-row {
-    @apply flex items-center gap-4;
-    min-height: 72px;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--color-border-light);
-  }
-
-  .assessments-row:last-child {
-    border-bottom: none;
-  }
-
-  .assessments-row__patient {
-    @apply flex-1 min-w-0;
-    min-width: 160px;
-  }
-
-  .assessments-row__name {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 16px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .assessments-row__meta {
-    margin-top: 2px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-secondary);
-  }
-
-  .assessments-row__type {
-    @apply shrink-0;
-    width: 80px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .assessments-row__date {
-    @apply shrink-0;
-    width: 130px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-secondary);
-  }
-
-  .assessments-row__actions {
-    @apply flex items-center justify-end gap-1 shrink-0;
-    min-width: 200px;
-  }
-
-  .assessments-action {
-    @apply inline-flex items-center gap-1.5;
-    height: 36px;
-    padding: 0 12px;
-    border-radius: 999px;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-primary);
-    transition: background 200ms ease;
-  }
-
-  .assessments-action:hover {
-    background: var(--color-primary-light);
-  }
-
-  .assessments-action:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .assessments-action-icon {
-    @apply flex items-center justify-center;
-    width: 36px;
-    height: 36px;
-    border-radius: 999px;
-    color: var(--color-text-secondary);
-    transition: background 200ms ease, color 200ms ease;
-  }
-
-  .assessments-action-icon:hover {
-    background: #FAFBFC;
-    color: var(--color-text-primary);
-  }
-
-  .assessments-action-icon--danger:hover {
-    background: #FEF2F2;
-    color: #EF4444;
-  }
-
-  .assessments-empty {
-    @apply flex flex-col items-center justify-center text-center;
-    padding: 80px 24px;
-  }
-
-  .assessments-empty__icon {
-    @apply flex items-center justify-center;
-    width: 64px;
-    height: 64px;
-    border-radius: 20px;
-    background: #FAFBFC;
-    color: var(--color-text-muted);
-    margin-bottom: 20px;
-  }
-
-  .assessments-empty__title {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 16px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    margin-bottom: 6px;
-  }
-
-  .assessments-empty__text {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-secondary);
-    margin-bottom: 24px;
-    max-width: 320px;
-  }
-
-  /* Assessment Modal */
-  .assessments-modal-overlay {
-    @apply fixed inset-0 z-50 flex items-center justify-center;
-    background: rgba(47, 47, 47, 0.25);
-    padding: 24px;
-  }
-
-  .assessments-modal {
-    width: 100%;
-    max-width: 440px;
-    background: #FFFFFF;
-    border-radius: var(--radius-card);
-    border: none;
-    box-shadow: var(--shadow-lg);
-    overflow: hidden;
-  }
-
-  .assessments-modal__header {
-    @apply flex items-center justify-between;
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--color-border-light);
-  }
-
-  .assessments-modal__header h2 {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 18px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .assessments-modal__close {
-    @apply flex items-center justify-center;
-    width: 36px;
-    height: 36px;
-    border-radius: 999px;
-    color: var(--color-text-secondary);
-    transition: background 200ms ease;
-  }
-
-  .assessments-modal__close:hover {
-    background: #FAFBFC;
-  }
-
-  .assessments-modal__body {
-    @apply flex flex-col gap-4;
-    padding: 24px;
-  }
-
-  .assessments-field {
-    @apply flex flex-col gap-2;
-  }
-
-  .assessments-field > span {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .assessments-field select,
-  .assessments-field input {
-    height: 44px;
-    padding: 0 14px;
-    border-radius: var(--radius-input);
-    border: 1px solid var(--color-border);
-    background: #FFFFFF;
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--color-text-primary);
-  }
-
-  .assessments-field select:focus,
-  .assessments-field input:focus {
-    outline: none;
-    border-color: var(--color-primary);
-  }
-
-  .assessments-link-row {
-    @apply flex items-center gap-2;
-  }
-
-  .assessments-link-row input {
-    @apply flex-1;
-    min-width: 0;
-  }
-
-  .assessments-modal__error {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 13px;
-    color: #EF4444;
-  }
-
-  .assessments-modal__success {
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    color: var(--color-text-secondary);
-  }
-
-  .assessments-modal__success strong {
-    color: var(--color-text-primary);
-    font-weight: 500;
-  }
-
-  .assessments-modal__actions {
-    @apply flex items-center gap-2;
-  }
-
-  .assessments-secondary-btn {
-    @apply inline-flex items-center justify-center gap-2 flex-1;
-    height: 40px;
-    border-radius: var(--radius-btn);
-    border: 1px solid var(--color-border);
-    font-family: 'Manrope', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-    transition: background 200ms ease;
-  }
-
-  .assessments-secondary-btn:hover {
-    background: #FAFBFC;
-  }
-
-  .assessments-qr {
-    @apply flex justify-center;
-    padding: 16px;
-  }
-
-  @media (max-width: 900px) {
-    .assessments-row {
-      @apply flex-wrap;
-      height: auto;
-      gap: 12px;
-    }
-
-    .assessments-row__type,
-    .assessments-row__date {
-      width: auto;
-    }
-
-    .assessments-row__actions {
-      width: 100%;
-      justify-content: flex-start;
-      min-width: 0;
-    }
-
-    .assessments-search input {
-      width: 100%;
-    }
-
-    .assessments-toolbar {
-      @apply flex-col items-stretch;
-    }
-  }
 }
 
 @layer utilities {

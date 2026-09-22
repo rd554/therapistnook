@@ -1,0 +1,230 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+:root {
+  --primary: #7C72E8;
+  --primary-light: #ECE8FC;
+  --primary-soft: #E4DFFB;
+  --primary-tint: #F1EEFC;
+  --app-bg: #FFFFFF;
+  --surface: #FFFFFF;
+  --slate-50: #F5F3FA;
+  --slate-300: #C3BAD9;
+  --text-primary: #241F35;
+  --text-secondary: #5C5277;
+  --text-muted: #8B8098;
+  --border-light: #EBE7F5;
+  --online-accent: var(--primary);
+  --online-bg: var(--primary);
+  --online-chip-bg: rgba(255, 255, 255, 0.22);
+  --online-chip-fg: #FFFFFF;
+  --offline-accent: #463F5C;
+  --offline-bg: #FFFFFF;
+  --offline-chip-bg: var(--primary-light);
+  --offline-chip-fg: var(--primary);
+  --overdue-accent: #A23B5C;
+  --overdue-bg: #F5DCE5;
+  --overdue-text: #6B2038;
+  --received-bg: #F5F3FA;
+  --received-text: #241F35;
+  --shadow-card: 0 4px 16px rgba(58, 45, 92, 0.07);
+  --shadow-navbar: 0 2px 10px rgba(58, 45, 92, 0.05);
+}
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; border: none; background: none; padding: 0; margin: 0; cursor: pointer; appearance: none; -webkit-appearance: none; text-align: inherit; }
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: var(--app-bg); color: var(--text-primary); }
+.screen { width: 390px; min-height: 1850px; background: var(--app-bg); display: flex; flex-direction: column; }
+.workspace-header { height: 72px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; background: var(--surface); padding: 0 20px; box-shadow: var(--shadow-navbar); }
+.workspace-header__icon-btn { width: 36px; height: 36px; border-radius: 11px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); position: relative; }
+.workspace-header__notif-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--overdue-accent); border: 1.5px solid var(--surface); }
+.workspace-header__right { display: flex; align-items: center; gap: 8px; }
+.workspace-header__avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--primary-soft); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+.workspace-main { flex: 1; padding: 24px 20px 40px; }
+.dashboard-stack { display: flex; flex-direction: column; gap: 40px; }
+.dash-section { display: flex; flex-direction: column; gap: 16px; }
+.dash-section__heading { display: flex; align-items: center; justify-content: space-between; }
+.dash-section__heading-left { display: flex; align-items: center; gap: 10px; }
+.dash-section__title { font-size: 17px; font-weight: 700; color: var(--text-primary); margin: 0; }
+.dash-section__badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; background: var(--primary-light); color: var(--primary); font-size: 12px; font-weight: 500; }
+.dash-section__action { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; color: var(--primary); }
+.session-cards { display: flex; flex-direction: column; gap: 12px; }
+.dash-session-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 20px; box-shadow: var(--shadow-card); }
+.dash-session-card--online { background: var(--online-bg); }
+.dash-session-card--offline { background: var(--offline-bg); border: 1.5px solid var(--primary-soft); }
+.dash-session-card__chip { width: 36px; height: 36px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.dash-session-card--online .dash-session-card__chip { background: var(--online-chip-bg); color: var(--online-chip-fg); }
+.dash-session-card--offline .dash-session-card__chip { background: var(--offline-chip-bg); color: var(--offline-chip-fg); }
+.dash-session-card__name { font-size: 14px; font-weight: 500; color: var(--text-primary); margin: 0; }
+.dash-session-card__meta { font-size: 12px; color: var(--text-secondary); margin: 2px 0 0; }
+.dash-session-card--online .dash-session-card__name { color: #fff; }
+.dash-session-card--online .dash-session-card__meta { color: rgba(255,255,255,0.82); }
+.dash-session-card--online .dash-session-card__join { background: #fff; color: var(--primary); }
+.dash-session-card__join { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: #fff; background: var(--primary); border-radius: 999px; padding: 7px 12px; white-space: nowrap; margin-left: auto; flex-shrink: 0; }
+.dash-recent-mobile { display: flex; flex-direction: column; gap: 10px; }
+.dash-recent-card-m { background: var(--primary-tint); border-radius: 16px; padding: 14px; box-shadow: var(--shadow-card); display: flex; flex-direction: column; gap: 8px; }
+.dash-recent-card-m__top { display: flex; align-items: center; gap: 8px; }
+.dash-mode-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dash-mode-dot--online { background: var(--online-accent); }
+.dash-mode-dot--offline { background: var(--offline-accent); }
+.dash-recent-card-m__name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.dash-recent-card-m__meta { font-size: 12px; color: var(--text-muted); }
+.dash-recent-card-m__actions { display: flex; gap: 8px; }
+.dash-recent-pill { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 34px; border-radius: 999px; border: 1.5px solid var(--slate-300); background: #fff; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.dash-recent-pill--on.present { background: var(--primary); border-color: var(--primary); color: #fff; }
+.dash-recent-pill--on.absent { background: var(--overdue-accent); border-color: var(--overdue-accent); color: #fff; }
+.dash-note-card { position: relative; background: var(--surface); border-radius: 20px; border: 1px solid var(--border-light); box-shadow: var(--shadow-card); padding: 18px 44px 18px 18px; }
+.dash-note-card__date { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+.dash-note-card__text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+.dash-note-card__picker { position: absolute; top: 14px; right: 14px; width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); background: var(--slate-50); }
+.dash-payment-list { display: flex; flex-direction: column; gap: 10px; }
+.dash-payment-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 16px; border-radius: 18px; box-shadow: var(--shadow-card); }
+.dash-payment-card--received { background: var(--primary-tint); }
+.dash-payment-card--overdue { background: var(--overdue-bg); }
+.dash-payment-card__name { font-size: 13px; font-weight: 500; color: var(--text-primary); margin: 0; }
+.dash-payment-card__amount { font-size: 12px; color: var(--text-muted); margin: 2px 0 0; }
+.dash-payment-card__right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.dash-payment-card__status { font-size: 13px; font-weight: 600; margin: 0; }
+.dash-payment-card--received .dash-payment-card__status { color: var(--primary-hover); }
+.dash-payment-card--overdue .dash-payment-card__status { color: var(--overdue-text); }
+.dash-payment-card__date { font-size: 11px; color: var(--text-muted); margin: 0; }
+  </style>
+</helmet>
+
+<div class="screen">
+  <header class="workspace-header">
+    <div style="display:flex; align-items:center; gap:14px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-secondary)"><path d="M3 6h18M3 12h18M3 18h18"></path></svg>
+    </div>
+    <div class="workspace-header__right">
+      <div class="workspace-header__icon-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+      </div>
+      <div class="workspace-header__icon-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18"></path><path d="M8 3v4M16 3v4"></path></svg>
+      </div>
+      <div class="workspace-header__icon-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0112 0c0 5 2 6 2 6H4s2-1 2-6"></path><path d="M10 21a2 2 0 004 0"></path></svg>
+        <span class="workspace-header__notif-dot"></span>
+      </div>
+      <div class="workspace-header__avatar">RD</div>
+    </div>
+  </header>
+
+  <main class="workspace-main">
+    <div class="dashboard-stack">
+      <section class="dash-section">
+        <div class="dash-section__heading">
+          <div class="dash-section__heading-left">
+            <h2 class="dash-section__title">Today's Schedule</h2>
+            <span class="dash-section__badge">3 sessions</span>
+          </div>
+        </div>
+        <div class="session-cards">
+          <div class="dash-session-card dash-session-card--online">
+            <div class="dash-session-card__chip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"></rect><path d="M16 10l6-3v10l-6-3z"></path></svg>
+            </div>
+            <div style="min-width:0; flex:1;">
+              <p class="dash-session-card__name">Priya Sharma</p>
+              <p class="dash-session-card__meta">10:00 AM &middot; Online</p>
+            </div>
+            <button class="dash-session-card__join">Join</button>
+          </div>
+          <div class="dash-session-card dash-session-card--offline">
+            <div class="dash-session-card__chip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.3 7-11a7 7 0 10-14 0c0 4.7 7 11 7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>
+            </div>
+            <div style="min-width:0; flex:1;">
+              <p class="dash-session-card__name">Arjun Mehta</p>
+              <p class="dash-session-card__meta">11:30 AM &middot; In-person</p>
+            </div>
+          </div>
+          <div class="dash-session-card dash-session-card--online">
+            <div class="dash-session-card__chip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"></rect><path d="M16 10l6-3v10l-6-3z"></path></svg>
+            </div>
+            <div style="min-width:0; flex:1;">
+              <p class="dash-session-card__name">Sana Kapoor</p>
+              <p class="dash-session-card__meta">2:00 PM &middot; Online</p>
+            </div>
+            <button class="dash-session-card__join">Get Link</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="dash-section">
+        <div class="dash-section__heading">
+          <div class="dash-section__heading-left"><h2 class="dash-section__title">Recent Patients</h2></div>
+          <a class="dash-section__action" href="#">View all</a>
+        </div>
+        <div class="dash-recent-mobile">
+          <div class="dash-recent-card-m">
+            <div class="dash-recent-card-m__top"><span class="dash-mode-dot dash-mode-dot--online"></span><span class="dash-recent-card-m__name">Priya Sharma</span></div>
+            <div class="dash-recent-card-m__meta">Sep 10 &middot; 4:00 PM</div>
+            <div class="dash-recent-card-m__actions">
+              <button class="dash-recent-pill dash-recent-pill--on present"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg>Present</button>
+              <button class="dash-recent-pill">Absent</button>
+            </div>
+          </div>
+          <div class="dash-recent-card-m">
+            <div class="dash-recent-card-m__top"><span class="dash-mode-dot dash-mode-dot--offline"></span><span class="dash-recent-card-m__name">Arjun Mehta</span></div>
+            <div class="dash-recent-card-m__meta">Sep 10 &middot; 2:30 PM</div>
+            <div class="dash-recent-card-m__actions">
+              <button class="dash-recent-pill">Present</button>
+              <button class="dash-recent-pill dash-recent-pill--on absent"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg>Absent</button>
+            </div>
+          </div>
+          <div class="dash-recent-card-m">
+            <div class="dash-recent-card-m__top"><span class="dash-mode-dot dash-mode-dot--online"></span><span class="dash-recent-card-m__name">Sana Kapoor</span></div>
+            <div class="dash-recent-card-m__meta">Sep 9 &middot; 11:00 AM</div>
+            <div class="dash-recent-card-m__actions">
+              <button class="dash-recent-pill">Present</button>
+              <button class="dash-recent-pill">Absent</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dash-section">
+        <div class="dash-note-card">
+          <div class="dash-note-card__picker">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18"></path><path d="M8 3v4M16 3v4"></path></svg>
+          </div>
+          <p class="dash-note-card__date">Today</p>
+          <p class="dash-note-card__text">Priya showed good progress with grounding exercises. Continue breathing techniques next session.</p>
+        </div>
+      </section>
+
+      <section class="dash-section">
+        <div class="dash-section__heading">
+          <div class="dash-section__heading-left"><h2 class="dash-section__title">Payments</h2></div>
+          <a class="dash-section__action" href="#">View all</a>
+        </div>
+        <div class="dash-payment-list">
+          <div class="dash-payment-card dash-payment-card--received">
+            <div><p class="dash-payment-card__name">Priya Sharma</p><p class="dash-payment-card__amount">&#8377;2,500</p></div>
+            <div class="dash-payment-card__right"><span class="dash-payment-card__status">Received</span><span class="dash-payment-card__date">Today</span></div>
+          </div>
+          <div class="dash-payment-card dash-payment-card--overdue">
+            <div><p class="dash-payment-card__name">Arjun Mehta</p><p class="dash-payment-card__amount">&#8377;3,000</p></div>
+            <div class="dash-payment-card__right"><span class="dash-payment-card__status">Overdue</span><span class="dash-payment-card__date">Yesterday</span></div>
+          </div>
+          <div class="dash-payment-card dash-payment-card--received">
+            <div><p class="dash-payment-card__name">Sana Kapoor</p><p class="dash-payment-card__amount">&#8377;2,000</p></div>
+            <div class="dash-payment-card__right"><span class="dash-payment-card__status">Received</span><span class="dash-payment-card__date">Sep 8</span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>

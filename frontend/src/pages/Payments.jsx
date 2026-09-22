@@ -1,106 +1,121 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import {
-  CreditCard, TrendingUp, Clock, AlertCircle, CheckCircle, XCircle,
-  RefreshCcw, Search, Filter, ChevronDown, Eye, Send,
-  MoreVertical, Download, Loader2, Calendar, User, IndianRupee, X,
-  Banknote, Plus, FileText, ExternalLink,
-  Wallet, Stethoscope, ClipboardCheck, MessageSquare,
+  Search, Loader2, Plus, Download, MoreVertical, Eye, Send, Banknote,
+  X, User, ExternalLink, CreditCard, CheckCircle, RefreshCcw, Receipt,
 } from 'lucide-react'
 import {
-  getPaymentDashboard, listPayments, getPayment,
-  markPaymentPaid, sendPaymentReminder, initiateRefund, completeRefund,
-  getPaymentReceipt, getInvoicePdfUrl, getInvoicePdfPreviewUrl, regeneratePaymentLink, listPractitioners,
+  getPaymentDashboard, listPayments, getPayment, listPractitioners,
+  markPaymentPaid, sendPaymentReminder, getPaymentReceipt,
+  getInvoicePdfUrl, getInvoicePdfPreviewUrl, createBulkInvoice,
 } from '../api/client'
-import { EmptyState, SummaryCard } from '../components/ui'
-
-const STATUS_CONFIG = {
-  pending: { 
-    label: 'Pending', 
-    color: 'bg-warning-bg text-warning-text', 
-    icon: Clock,
-    dotColor: 'bg-amber-500',
-  },
-  paid: { 
-    label: 'Paid', 
-    color: 'bg-success-bg text-success-text', 
-    icon: CheckCircle,
-    dotColor: 'bg-green-500',
-  },
-  failed: { 
-    label: 'Failed', 
-    color: 'bg-error-bg text-error-text', 
-    icon: XCircle,
-    dotColor: 'bg-red-500',
-  },
-  refunded: { 
-    label: 'Refunded', 
-    color: 'bg-purple-100 text-purple-700', 
-    icon: RefreshCcw,
-    dotColor: 'bg-purple-500',
-  },
-  cancelled: { 
-    label: 'Cancelled', 
-    color: 'bg-slate-100 text-slate-600', 
-    icon: XCircle,
-    dotColor: 'bg-slate-400',
-  },
-  expired: { 
-    label: 'Expired', 
-    color: 'bg-slate-100 text-slate-500', 
-    icon: Clock,
-    dotColor: 'bg-slate-400',
-  },
-}
+import { formatDate, formatDateTime } from '../utils/date'
+import {
+  formatCurrency, formatAmountParts, formatAmountSpoken,
+  derivePaymentStatus, paymentStatusMeta,
+} from '../utils/payments'
+import { BulkInvoiceBar, MonthCheckbox, useBulkInvoiceSelection } from '../components/payments/BulkInvoiceBar'
 
 const PAYMENT_METHODS = {
-  payment_link: 'Payment Link',
+  payment_link: 'Payment link',
   cash: 'Cash',
-  bank_transfer: 'Bank Transfer',
+  bank_transfer: 'Bank transfer',
   card: 'Card',
   upi: 'UPI',
   other: 'Other',
 }
 
-const SESSION_TYPES = {
-  therapy_session: { label: 'Therapy Session', icon: Stethoscope },
-  follow_up: { label: 'Follow Up', icon: RefreshCcw },
-  assessment_session: { label: 'Assessment', icon: ClipboardCheck },
-  consultation: { label: 'Consultation', icon: MessageSquare },
-}
-
 const DATE_RANGE_OPTIONS = [
-  { value: '', label: 'All Time' },
+  { value: '', label: 'All time' },
   { value: 'today', label: 'Today' },
-  { value: 'week', label: 'This Week' },
-  { value: 'month', label: 'This Month' },
-  { value: 'custom', label: 'Custom Range' },
+  { value: 'week', label: 'This week' },
+  { value: 'month', label: 'This month' },
+  { value: 'custom', label: 'Custom range' },
 ]
 
-function formatCurrency(amount, currency = 'INR') {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-  }).format(amount / 100)
+function getInitials(name = '') {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
 }
 
-function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
-}
+// A session can be invoiced (individually or swept into a bulk invoice) as
+// long as it hasn't been invoiced yet and isn't failed/refunded/cancelled —
+// mirrors PatientPaymentsTab's identical rule.
+const isInvoiceable = (p) => !p.receipt_id && (p.status === 'pending' || p.status === 'paid')
 
-function formatDateTime(dateStr) {
-  return new Date(dateStr).toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  })
+// Kebab row-action menu, portaled to <body> since .card-flush (the list's
+// outer container) has overflow:hidden and would clip an ordinary
+// absolutely-positioned popover. Mirrors Assessments.jsx's RowMenu.
+function RowMenu({ label, actions }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btnRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => { setOpen(false); setPos(null) }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  const toggle = (e) => {
+    e.stopPropagation()
+    if (open) { setOpen(false); setPos(null); return }
+    const rect = btnRef.current.getBoundingClientRect()
+    setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    setOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className="btn btn-ghost btn-icon btn-icon-sm"
+        aria-label={`${label} actions`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <MoreVertical size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+      </button>
+      {open && pos && createPortal(
+        // .menu-popover/.menu-item are .clinical-ink-scoped; a portal to
+        // document.body escapes any .clinical-ink ancestor, so it needs its
+        // own wrapper.
+        <div className="clinical-ink">
+          <div className="fixed inset-0" style={{ zIndex: 99 }} onClick={() => { setOpen(false); setPos(null) }} />
+          <div
+            className="menu-popover"
+            style={{ position: 'fixed', top: pos.top, left: 'auto', right: pos.right, zIndex: 100 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {actions.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                className={`menu-item${a.destructive ? ' is-destructive' : ''}`}
+                disabled={a.disabled}
+                onClick={() => { setOpen(false); setPos(null); a.onClick() }}
+              >
+                <a.icon size={14} strokeWidth={1.5} className={a.spin ? 'animate-spin' : undefined} /> {a.label}
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
 }
 
 export default function Payments() {
@@ -112,7 +127,10 @@ export default function Payments() {
   const [practitioners, setPractitioners] = useState([])
   const [selectedPayment, setSelectedPayment] = useState(null)
   const [showPaymentDrawer, setShowPaymentDrawer] = useState(false)
-  
+  const [generatingId, setGeneratingId] = useState(null)
+  const [bulkGenerating, setBulkGenerating] = useState(false)
+  const [toast, setToast] = useState('')
+
   const [filters, setFilters] = useState({
     status: '',
     practitionerId: '',
@@ -120,12 +138,11 @@ export default function Payments() {
     startDate: '',
     endDate: '',
     paymentMethod: '',
-    sessionType: '',
     search: '',
   })
   const [showFilters, setShowFilters] = useState(false)
   const [sortBy, setSortBy] = useState('newest')
-  
+
   const userRole = localStorage.getItem('mmpi_role')
 
   useEffect(() => {
@@ -135,6 +152,12 @@ export default function Payments() {
   useEffect(() => {
     loadPayments()
   }, [filters, sortBy])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   async function loadData() {
     try {
@@ -157,7 +180,7 @@ export default function Payments() {
     try {
       let startDate = filters.startDate
       let endDate = filters.endDate
-      
+
       if (filters.dateRange === 'today') {
         startDate = new Date().toISOString().split('T')[0]
         endDate = startDate
@@ -180,8 +203,9 @@ export default function Payments() {
         endDate: endDate || undefined,
         paymentMethod: filters.paymentMethod || undefined,
         search: filters.search || undefined,
+        perPage: 100,
       })
-      
+
       let sorted = [...data]
       switch (sortBy) {
         case 'oldest':
@@ -202,7 +226,7 @@ export default function Payments() {
         default:
           sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
       }
-      
+
       setPayments(sorted)
     } catch (err) {
       console.error('Failed to load payments:', err)
@@ -221,13 +245,52 @@ export default function Payments() {
     }
   }
 
+  async function handleGenerateSingle(paymentId) {
+    if (generatingId) return
+    setGeneratingId(paymentId)
+    try {
+      await getPaymentReceipt(paymentId) // get-or-create
+      await loadPayments()
+      setToast('Invoice generated')
+    } catch (err) {
+      console.error('Failed to generate invoice:', err)
+      setToast(err.userMessage || 'Failed to generate invoice')
+    } finally {
+      setGeneratingId(null)
+    }
+  }
+
+  // Only sessions grouped under the same patient AND practitioner can be
+  // combined — create_bulk_invoice is scoped to a single patient in its URL
+  // path, and rejects a mix of practitioners the same way the patient tab's
+  // own bulk invoicing does.
+  const { selectedIds, selectedItems: selectedPayments, isSelectable, hasBlockedOthers, toggleRow, toggleGroup, clearSelection } =
+    useBulkInvoiceSelection({ items: payments, isInvoiceable, lockKeyOf: (p) => `${p.patient_id}:${p.practitioner_id}` })
+
+  async function handleBulkInvoice() {
+    if (bulkGenerating || selectedIds.size === 0) return
+    setBulkGenerating(true)
+    try {
+      const patientId = selectedPayments[0].patient_id
+      const receipt = await createBulkInvoice(patientId, Array.from(selectedIds))
+      clearSelection()
+      await loadPayments()
+      setToast('Invoice generated')
+      window.open(getInvoicePdfUrl(receipt.payment_id), '_blank')
+    } catch (err) {
+      console.error('Failed to create bulk invoice:', err)
+      setToast(err.userMessage || 'Failed to create bulk invoice')
+    } finally {
+      setBulkGenerating(false)
+    }
+  }
+
   const activeFilterCount = useMemo(() => {
     return [
       filters.status,
       filters.practitionerId,
       filters.dateRange,
       filters.paymentMethod,
-      filters.sessionType,
     ].filter(Boolean).length
   }, [filters])
 
@@ -239,321 +302,346 @@ export default function Payments() {
       startDate: '',
       endDate: '',
       paymentMethod: '',
-      sessionType: '',
       search: '',
     })
   }
 
+  // Month grouping only makes sense for the date-ordered sorts — grouping a
+  // list sorted by amount or status into calendar months would put groups
+  // out of order relative to the sort the user picked.
+  const isDateSort = sortBy === 'newest' || sortBy === 'oldest'
+
+  const monthGroups = useMemo(() => {
+    if (!isDateSort) return []
+    const map = new Map()
+    for (const p of payments) {
+      const d = new Date(p.appointment_date)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          label: d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+          payments: [],
+        })
+      }
+      map.get(key).payments.push(p)
+    }
+    return Array.from(map.values()).map((group) => ({
+      ...group,
+      total: group.payments.reduce((sum, p) => sum + p.final_amount, 0),
+    }))
+  }, [payments, isDateSort])
+
+  const selectedSum = selectedPayments.reduce((sum, p) => sum + p.final_amount, 0)
+
+  function renderRow(payment) {
+    const derivedStatus = derivePaymentStatus(payment)
+    const statusMeta = paymentStatusMeta(derivedStatus)
+    const flagged = derivedStatus === 'overdue' || derivedStatus === 'failed'
+    const selected = selectedIds.has(payment.id)
+    const selectable = isSelectable(payment)
+    const amountParts = formatAmountParts(payment.final_amount, payment.currency)
+    const checkboxLabel = `Select payment, ${payment.patient_name}, ${formatCurrency(payment.final_amount, payment.currency)}`
+    const checkboxTitle = !isInvoiceable(payment)
+      ? 'Already invoiced'
+      : !selectable
+        ? 'Different patient or practitioner — clear the current selection to include this session'
+        : undefined
+
+    const actions = [
+      { label: 'View details', icon: Eye, onClick: () => handleViewPayment(payment.id) },
+    ]
+    if (payment.receipt_number) {
+      actions.push({ label: 'Preview invoice', icon: Eye, onClick: () => window.open(getInvoicePdfPreviewUrl(payment.id), '_blank') })
+      actions.push({ label: 'Download invoice', icon: Download, onClick: () => window.open(getInvoicePdfUrl(payment.id), '_blank') })
+    }
+    if (payment.status === 'pending') {
+      actions.push({ label: 'Send reminder', icon: Send, onClick: async () => {
+        try {
+          await sendPaymentReminder(payment.id)
+          setToast('Reminder sent')
+        } catch (err) {
+          console.error('Failed to send reminder:', err)
+          setToast(err.userMessage || 'Failed to send reminder')
+        }
+      } })
+    }
+
+    return (
+      <div
+        key={payment.id}
+        className={`pay-row${selected ? ' is-selected' : ''}${flagged ? ' is-overdue' : ''}`}
+        style={{ cursor: 'pointer' }}
+        onClick={() => handleViewPayment(payment.id)}
+      >
+        <input
+          type="checkbox"
+          className="checkbox"
+          checked={selected}
+          disabled={!selectable}
+          title={checkboxTitle}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => toggleRow(payment)}
+          aria-label={checkboxLabel}
+        />
+        <span className="avatar" aria-hidden="true">{getInitials(payment.patient_name) || '?'}</span>
+        <div className="pay-main">
+          <p className="doc-name">{payment.patient_name}</p>
+          <p className="doc-meta">{formatDate(payment.appointment_date)}</p>
+        </div>
+        <div className="pay-foot">
+          <span className="pay-amount" aria-label={formatAmountSpoken(payment.final_amount, payment.currency)} style={!flagged ? { fontWeight: 500 } : undefined}>
+            <span className="cur">{amountParts.symbol}</span>{amountParts.digits}
+          </span>
+          <span className="pay-status"><span className={statusMeta.cls}>{statusMeta.label}</span></span>
+          {payment.receipt_id ? (
+            <a
+              href={getInvoicePdfUrl(payment.id)}
+              className="btn btn-ghost btn-icon btn-icon-sm pay-action"
+              aria-label="Download invoice"
+              title="Download invoice"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Download size={16} strokeWidth={1.5} />
+            </a>
+          ) : isInvoiceable(payment) ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm pay-action"
+              disabled={generatingId === payment.id}
+              onClick={(e) => { e.stopPropagation(); handleGenerateSingle(payment.id) }}
+            >
+              {generatingId === payment.id ? 'Generating…' : 'Invoice'}
+            </button>
+          ) : (
+            <span className="status-quiet pay-action">—</span>
+          )}
+          <span onClick={(e) => e.stopPropagation()}>
+            <RowMenu label={payment.patient_name} actions={actions} />
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-32">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" strokeWidth={1.5} />
+      <div className="clinical-ink flex items-center justify-center py-24">
+        <Loader2 size={28} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* Page Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-section-title text-content-primary">Payments</h1>
-        <div className="flex items-center gap-3">
-          <button className="btn-secondary !py-2.5">
-            <Download className="h-4 w-4" strokeWidth={1.5} />
+    <div className="clinical-ink">
+      {/* Header */}
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="t-h1">Payments</h1>
+        <div className="flex gap-3">
+          <button type="button" className="btn btn-secondary btn-icon sm:hidden" aria-label="Export">
+            <Download size={16} strokeWidth={1.5} />
+          </button>
+          <button type="button" className="btn btn-secondary hidden sm:inline-flex">
+            <Download size={16} strokeWidth={1.5} />
             Export
           </button>
           <button
+            type="button"
+            className="btn btn-primary flex-1 sm:flex-none"
             onClick={() => navigate('/calendar')}
-            className="btn-primary !py-2.5 shadow-lg shadow-indigo-500/20"
           >
-            <Plus className="h-4 w-4" strokeWidth={1.5} />
-            Create Payment
+            <Plus size={16} strokeWidth={1.5} />
+            Create payment
           </button>
         </div>
       </div>
 
-      {/* Financial Snapshot - 4 Summary Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard
-          title="Pending Revenue"
-          amount={formatCurrency(dashboard?.pending_amount || 0)}
-          supportingText={`${dashboard?.pending_count || 0} payment${dashboard?.pending_count !== 1 ? 's' : ''} pending`}
-          icon={Clock}
-          semantic="payments"
-          variant="mini"
-          className="summary-card-mini--with-support"
-        />
-        <SummaryCard
-          title="Today's Revenue"
-          amount={formatCurrency(dashboard?.today_revenue || 0)}
-          supportingText="Collected today"
-          icon={TrendingUp}
-          semantic="revenue"
-          variant="mini"
-          className="summary-card-mini--with-support"
-        />
-        <SummaryCard
-          title="Monthly Revenue"
-          amount={formatCurrency(dashboard?.monthly_revenue || 0)}
-          supportingText={`${dashboard?.paid_count || 0} paid this month`}
-          icon={Wallet}
-          semantic="analytics"
-          variant="mini"
-          className="summary-card-mini--with-support"
-        />
-        <SummaryCard
-          title="Outstanding"
-          amount={formatCurrency(dashboard?.outstanding_amount || 0)}
-          supportingText={`${dashboard?.failed_count || 0} need follow-up`}
-          icon={AlertCircle}
-          semantic="sessions"
-          variant="mini"
-          className="summary-card-mini--with-support"
-        />
+      {/* Stat strip */}
+      <div className="stat-row" style={{ marginBottom: 'var(--space-5)' }}>
+        <div className="stat">
+          <span className="stat-label">Outstanding</span>
+          <span className="stat-value">{formatCurrency(dashboard?.outstanding_amount || 0)}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Overdue</span>
+          <span className={`stat-value${dashboard?.overdue_count > 0 ? ' is-warn' : ''}`}>{formatCurrency(dashboard?.overdue_amount || 0)}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Collected this month</span>
+          <span className="stat-value">{formatCurrency(dashboard?.monthly_revenue || 0)}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Collected today</span>
+          <span className="stat-value">{formatCurrency(dashboard?.today_revenue || 0)}</span>
+        </div>
       </div>
 
-      {/* All Payments */}
-      <div id="all-payments" className="flex flex-col gap-5 mt-12">
-        {/* Section Header */}
-        <div>
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <h2 className="text-section-title text-content-primary">All Payments</h2>
-              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-content-muted">
-                {payments.length}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-content-muted" strokeWidth={1.5} />
-                <input
-                  type="text"
-                  placeholder="Search patient or invoice..."
-                  value={filters.search}
-                  onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                  className="h-10 w-72 rounded-[12px] border border-[#E2E8F0] bg-white pl-10 pr-4 text-sm text-content-primary placeholder:text-content-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all"
-                />
-                {filters.search && (
-                  <button
-                    onClick={() => setFilters({ ...filters, search: '' })}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-content-muted hover:text-content-secondary"
-                  >
-                    <X className="h-4 w-4" strokeWidth={1.5} />
-                  </button>
-                )}
-              </div>
-              
-              {/* Filter Button */}
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={`flex items-center gap-2 rounded-[12px] border h-10 px-4 text-sm font-medium transition-all ${
-                  showFilters || activeFilterCount > 0
-                    ? 'border-primary bg-primary-light text-primary'
-                    : 'border-[#E2E8F0] text-content-secondary hover:border-primary/30 hover:bg-lavender/50'
-                }`}
-              >
-                <Filter className="h-4 w-4" strokeWidth={1.5} />
-                Filters
-                {activeFilterCount > 0 && (
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-white">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-
-              {/* Sort Dropdown */}
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="h-10 rounded-[12px] border border-[#E2E8F0] bg-white px-3 pr-8 text-sm font-medium text-content-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/10 appearance-none cursor-pointer transition-all"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                  backgroundPosition: 'right 8px center',
-                  backgroundRepeat: 'no-repeat',
-                  backgroundSize: '20px',
-                }}
-              >
-                <option value="newest">Newest First</option>
-                <option value="oldest">Oldest First</option>
-                <option value="highest">Highest Amount</option>
-                <option value="lowest">Lowest Amount</option>
-                <option value="pending_first">Pending First</option>
-                <option value="paid_first">Paid First</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Filters Panel */}
-          {showFilters && (
-            <div className="mt-4 pt-4 border-t border-[#F1F5F9]">
-              <div className="flex flex-wrap items-end gap-4">
-                {/* Status Filter */}
-                <div>
-                  <label className="label !text-xs !mb-1.5">Status</label>
-                  <select
-                    value={filters.status}
-                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                    className="h-9 rounded-[10px] border border-[#E2E8F0] bg-white px-3 pr-7 text-sm focus:border-primary focus:outline-none appearance-none cursor-pointer"
-                    style={{
-                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                      backgroundPosition: 'right 6px center',
-                      backgroundRepeat: 'no-repeat',
-                      backgroundSize: '16px',
-                    }}
-                  >
-                    <option value="">All Statuses</option>
-                    <option value="pending">Pending</option>
-                    <option value="paid">Paid</option>
-                    <option value="failed">Failed</option>
-                    <option value="refunded">Refunded</option>
-                  </select>
-                </div>
-
-                {/* Date Range Filter */}
-                <div>
-                  <label className="label !text-xs !mb-1.5">Date Range</label>
-                  <select
-                    value={filters.dateRange}
-                    onChange={(e) => setFilters({ ...filters, dateRange: e.target.value })}
-                    className="h-9 rounded-[10px] border border-[#E2E8F0] bg-white px-3 pr-7 text-sm focus:border-primary focus:outline-none appearance-none cursor-pointer"
-                    style={{
-                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                      backgroundPosition: 'right 6px center',
-                      backgroundRepeat: 'no-repeat',
-                      backgroundSize: '16px',
-                    }}
-                  >
-                    {DATE_RANGE_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Custom Date Range */}
-                {filters.dateRange === 'custom' && (
-                  <>
-                    <div>
-                      <label className="label !text-xs !mb-1.5">From</label>
-                      <input
-                        type="date"
-                        value={filters.startDate}
-                        onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
-                        className="h-9 rounded-[10px] border border-[#E2E8F0] bg-white px-3 text-sm focus:border-primary focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="label !text-xs !mb-1.5">To</label>
-                      <input
-                        type="date"
-                        value={filters.endDate}
-                        onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
-                        className="h-9 rounded-[10px] border border-[#E2E8F0] bg-white px-3 text-sm focus:border-primary focus:outline-none"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {/* Payment Method Filter */}
-                <div>
-                  <label className="label !text-xs !mb-1.5">Payment Method</label>
-                  <select
-                    value={filters.paymentMethod}
-                    onChange={(e) => setFilters({ ...filters, paymentMethod: e.target.value })}
-                    className="h-9 rounded-[10px] border border-[#E2E8F0] bg-white px-3 pr-7 text-sm focus:border-primary focus:outline-none appearance-none cursor-pointer"
-                    style={{
-                      backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                      backgroundPosition: 'right 6px center',
-                      backgroundRepeat: 'no-repeat',
-                      backgroundSize: '16px',
-                    }}
-                  >
-                    <option value="">All Methods</option>
-                    <option value="cash">Cash</option>
-                    <option value="upi">UPI</option>
-                    <option value="card">Card</option>
-                    <option value="bank_transfer">Bank Transfer</option>
-                  </select>
-                </div>
-
-                {/* Practitioner Filter (Owner only) */}
-                {userRole === 'owner' && practitioners.length > 0 && (
-                  <div>
-                    <label className="label !text-xs !mb-1.5">Practitioner</label>
-                    <select
-                      value={filters.practitionerId}
-                      onChange={(e) => setFilters({ ...filters, practitionerId: e.target.value })}
-                      className="h-9 rounded-[10px] border border-[#E2E8F0] bg-white px-3 pr-7 text-sm focus:border-primary focus:outline-none appearance-none cursor-pointer"
-                      style={{
-                        backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                        backgroundPosition: 'right 6px center',
-                        backgroundRepeat: 'no-repeat',
-                        backgroundSize: '16px',
-                      }}
-                    >
-                      <option value="">All Practitioners</option>
-                      {practitioners.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {activeFilterCount > 0 && (
-                  <button
-                    onClick={clearFilters}
-                    className="h-9 px-3 text-sm font-medium text-content-muted hover:text-content-secondary transition-colors"
-                  >
-                    Clear All
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Table Content */}
-        {loadingPayments ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" strokeWidth={1.5} />
-          </div>
-        ) : payments.length === 0 ? (
-          <div className="py-16">
-            <EmptyState
-              icon="payment"
-              title="No Payments Yet"
-              description="Payments from completed appointments will appear here."
-              action={() => navigate('/calendar')}
-              actionLabel="Create Payment"
+      <div className="card card-flush">
+        <div className="table-toolbar">
+          <div className="input-search">
+            <Search size={16} strokeWidth={1.5} />
+            <input
+              type="search"
+              className="input"
+              placeholder="Search patient or invoice"
+              value={filters.search}
+              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+              aria-label="Search payments"
             />
           </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            aria-expanded={showFilters}
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          </button>
+          <select
+            className="select"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            aria-label="Sort payments"
+            style={{ width: 'auto' }}
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="highest">Highest amount</option>
+            <option value="lowest">Lowest amount</option>
+            <option value="pending_first">Pending first</option>
+            <option value="paid_first">Paid first</option>
+          </select>
+        </div>
+
+        {showFilters && (
+          <div className="filter-bar">
+            <div className="field-inline field-inline-sm">
+              <label htmlFor="pay_status">Status</label>
+              <select id="pay_status" className="select" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="failed">Failed</option>
+                <option value="refunded">Refunded</option>
+              </select>
+            </div>
+            <div className="field-inline field-inline-sm">
+              <label htmlFor="pay_date_range">Date range</label>
+              <select id="pay_date_range" className="select" value={filters.dateRange} onChange={(e) => setFilters({ ...filters, dateRange: e.target.value })}>
+                {DATE_RANGE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            {filters.dateRange === 'custom' && (
+              <>
+                <div className="field-inline field-inline-sm">
+                  <label htmlFor="pay_from">From</label>
+                  <input id="pay_from" type="date" className="input" value={filters.startDate} onChange={(e) => setFilters({ ...filters, startDate: e.target.value })} />
+                </div>
+                <div className="field-inline field-inline-sm">
+                  <label htmlFor="pay_to">To</label>
+                  <input id="pay_to" type="date" className="input" value={filters.endDate} onChange={(e) => setFilters({ ...filters, endDate: e.target.value })} />
+                </div>
+              </>
+            )}
+            <div className="field-inline field-inline-sm">
+              <label htmlFor="pay_method">Payment method</label>
+              <select id="pay_method" className="select" value={filters.paymentMethod} onChange={(e) => setFilters({ ...filters, paymentMethod: e.target.value })}>
+                <option value="">All methods</option>
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="card">Card</option>
+                <option value="bank_transfer">Bank transfer</option>
+              </select>
+            </div>
+            {userRole === 'owner' && practitioners.length > 0 && (
+              <div className="field-inline field-inline-sm">
+                <label htmlFor="pay_practitioner">Practitioner</label>
+                <select id="pay_practitioner" className="select" value={filters.practitionerId} onChange={(e) => setFilters({ ...filters, practitionerId: e.target.value })}>
+                  <option value="">All practitioners</option>
+                  {practitioners.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="filter-spacer" />
+            {activeFilterCount > 0 && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters}>
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
+
+        <p className="t-caption" style={{ padding: 'var(--space-3) var(--space-4) 0' }}>
+          {payments.length} payment{payments.length !== 1 ? 's' : ''}
+        </p>
+
+        {loadingPayments ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-8) 0' }}>
+            <Loader2 size={24} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
+          </div>
+        ) : payments.length === 0 ? (
+          <div className="empty">
+            <Receipt size={20} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} aria-hidden="true" />
+            <h3 className="empty-title">No payments yet</h3>
+            <p className="empty-body">Payments from completed appointments will appear here.</p>
+          </div>
+        ) : isDateSort ? (
+          <div>
+            {monthGroups.map((group) => {
+              const eligible = group.payments.filter(isSelectable)
+              const allSelected = eligible.length > 0 && eligible.every((p) => selectedIds.has(p.id))
+              const someSelected = eligible.some((p) => selectedIds.has(p.id))
+              return (
+                <div key={group.key} className="month-group">
+                  <div className="month-head">
+                    <MonthCheckbox
+                      checked={allSelected}
+                      indeterminate={someSelected && !allSelected}
+                      disabled={eligible.length === 0}
+                      onChange={() => toggleGroup(group.payments)}
+                      label={`Select all in ${group.label}`}
+                    />
+                    <span className="month-head-label">{group.label}</span>
+                    <span className="month-head-meta">
+                      {group.payments.length} payment{group.payments.length !== 1 ? 's' : ''} · {formatCurrency(group.total)}
+                    </span>
+                  </div>
+                  {group.payments.map(renderRow)}
+                </div>
+              )
+            })}
+          </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <div className="grid grid-cols-[2.2fr_1fr_1.3fr_1fr_1fr_0.9fr_40px] gap-3 px-[18px] text-xs text-[#64748B] tracking-[0.01em]">
-              <span>Patient</span>
-              <span>Date</span>
-              <span>Session Type</span>
-              <span className="text-right">Amount</span>
-              <span>Status</span>
-              <span>Invoice</span>
-              <span />
-            </div>
-            <div className="flex flex-col gap-2">
-              {payments.map((payment) => (
-                <PaymentRow
-                  key={payment.id}
-                  payment={payment}
-                  onView={() => handleViewPayment(payment.id)}
-                  onGenerated={loadPayments}
-                />
-              ))}
-            </div>
+          <div>
+            {payments.map(renderRow)}
           </div>
         )}
       </div>
 
-      {/* Payment Detail Drawer */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {selectedIds.size > 0 ? `${selectedIds.size} payment${selectedIds.size !== 1 ? 's' : ''} selected` : ''}
+      </span>
+
+      <BulkInvoiceBar
+        count={selectedIds.size}
+        sumLabel={formatCurrency(selectedSum)}
+        note={hasBlockedOthers ? 'Only sessions for the same patient and practitioner can be combined' : null}
+        generating={bulkGenerating}
+        generateLabel={`Generate invoice for ${selectedIds.size} payment${selectedIds.size !== 1 ? 's' : ''}`}
+        onClear={clearSelection}
+        onGenerate={handleBulkInvoice}
+      />
+
+      {toast && (
+        <div className="toast toast-wrap" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
+
       {showPaymentDrawer && selectedPayment && (
         <PaymentDrawer
           payment={selectedPayment}
@@ -571,157 +659,31 @@ export default function Payments() {
   )
 }
 
-
-function PaymentRow({ payment, onView, onGenerated }) {
-  const [showMenu, setShowMenu] = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const menuRef = useRef(null)
-  const config = STATUS_CONFIG[payment.status] || STATUS_CONFIG.pending
-  const Icon = config.icon
-  const sessionType = SESSION_TYPES[payment.session_type] || { label: payment.session_type, icon: Stethoscope }
-
-  async function handleGenerate(e) {
-    e.stopPropagation()
-    if (generating) return
-    setGenerating(true)
-    try {
-      await getPaymentReceipt(payment.id) // auto-generates the invoice if it doesn't exist yet
-      onGenerated?.()
-    } catch (err) {
-      console.error('Failed to generate invoice:', err)
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setShowMenu(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  return (
-    <div
-      onClick={onView}
-      className="grid grid-cols-[2.2fr_1fr_1.3fr_1fr_1fr_0.9fr_40px] items-center gap-3 rounded-[16px] bg-[#FAFBFC] px-[18px] cursor-pointer transition-colors duration-150 hover:bg-[#F1F5F9] shadow-[0_4px_12px_rgba(15,23,42,0.06)]"
-      style={{ height: '64px' }}
-    >
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-light text-sm font-semibold text-primary">
-          {payment.patient_name?.charAt(0) || '?'}
-        </div>
-        <div className="min-w-0">
-          <p className="font-medium text-content-primary truncate">{payment.patient_name}</p>
-          <p className="text-xs text-content-muted truncate">{sessionType.label}</p>
-        </div>
-      </div>
-      <span className="text-sm text-content-secondary">{formatDate(payment.appointment_date)}</span>
-      <span className="text-sm text-content-secondary truncate">{sessionType.label}</span>
-      <span className="text-sm font-semibold text-content-primary text-right">
-        {formatCurrency(payment.final_amount, payment.currency)}
-      </span>
-      <span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${config.color}`}>
-        <Icon className="h-3 w-3" strokeWidth={2} />
-        {config.label}
-      </span>
-      {payment.receipt_number ? (
-        <span className="font-mono text-xs text-content-secondary truncate">{payment.receipt_number}</span>
-      ) : (payment.status === 'paid' || payment.status === 'pending') ? (
-        <span
-          onClick={handleGenerate}
-          className="text-xs text-primary font-medium cursor-pointer hover:underline w-fit"
-        >
-          {generating ? 'Generating…' : 'Generate'}
-        </span>
-      ) : (
-        <span className="text-content-muted">—</span>
-      )}
-      <div className="relative" ref={menuRef} onClick={(e) => e.stopPropagation()}>
-        <button
-          onClick={() => setShowMenu(!showMenu)}
-          className="flex h-8 w-8 items-center justify-center rounded-[10px] text-content-muted hover:bg-lavender hover:text-content-primary transition-colors"
-        >
-          <MoreVertical className="h-4 w-4" strokeWidth={1.5} />
-        </button>
-
-        {showMenu && (
-          <div className="absolute right-0 z-20 mt-1 min-w-[180px] rounded-[14px] border border-[#E8ECF4] bg-white py-1.5 shadow-lg animate-in fade-in zoom-in-95 duration-150">
-            <button
-              onClick={() => { onView(); setShowMenu(false) }}
-              className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
-            >
-              <Eye className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-              View Details
-            </button>
-            {payment.receipt_number && (
-              <>
-                <a
-                  href={getInvoicePdfPreviewUrl(payment.id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setShowMenu(false)}
-                  className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
-                >
-                  <Eye className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-                  Preview Invoice
-                </a>
-                <a
-                  href={getInvoicePdfUrl(payment.id)}
-                  onClick={() => setShowMenu(false)}
-                  className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
-                >
-                  <Download className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-                  Download Invoice
-                </a>
-              </>
-            )}
-            {payment.status === 'pending' && (
-              <>
-                <button className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors">
-                  <Banknote className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-                  Mark Paid
-                </button>
-                <button className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors">
-                  <Send className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-                  Send Reminder
-                </button>
-              </>
-            )}
-            <div className="my-1.5 border-t border-[#F1F5F9]" />
-            <button className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-error-text hover:bg-error-bg transition-colors">
-              <XCircle className="h-4 w-4" strokeWidth={1.5} />
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function PaymentDrawer({ payment, onClose, onUpdate }) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [receipt, setReceipt] = useState(null)
   const [showMarkPaid, setShowMarkPaid] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [toast, setToast] = useState('')
 
-  const config = STATUS_CONFIG[payment.status] || STATUS_CONFIG.pending
-  const Icon = config.icon
-  const sessionType = SESSION_TYPES[payment.session_type] || { label: payment.session_type }
+  const derivedStatus = derivePaymentStatus(payment)
+  const statusMeta = paymentStatusMeta(derivedStatus)
 
   useEffect(() => {
     // Only fetch if a receipt is already attached — getPaymentReceipt() will
-    // get-or-create, and invoicing is now a deliberate action (not something
-    // that should happen as a side effect of merely opening this drawer).
+    // get-or-create, and invoicing is a deliberate action, not something
+    // that should happen as a side effect of merely opening this drawer.
     if (payment.receipt_number) {
       loadReceipt()
     }
   }, [payment])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   async function loadReceipt() {
     try {
@@ -750,135 +712,110 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
     setLoading(true)
     try {
       await sendPaymentReminder(payment.id)
-      alert('Payment reminder sent successfully')
+      setToast('Reminder sent')
     } catch (err) {
       console.error('Failed to send reminder:', err)
+      setToast(err.userMessage || 'Failed to send reminder')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <>
-      {/* Backdrop + centering */}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
+      style={{ padding: 'var(--space-4)' }}
+      onClick={onClose}
+    >
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-sm p-4"
-        onClick={onClose}
+        className="modal"
+        style={{ display: 'flex', flexDirection: 'column', maxWidth: 480, width: '100%', maxHeight: '85vh', padding: 0 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="payment-drawer-title"
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal */}
-        <div
-          className="w-full max-w-[480px] max-h-[85vh] bg-white shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200"
-          style={{ borderRadius: '24px' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#F1F5F9] px-6 py-5 shrink-0">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'var(--space-5) var(--space-6)', borderBottom: 'var(--border-width) solid var(--hairline)', flex: 'none' }}>
           <div>
-            <h2 className="text-lg font-semibold text-content-primary">Payment Details</h2>
-            <p className="text-sm text-content-secondary mt-0.5">{payment.patient_name}</p>
+            <h2 id="payment-drawer-title" className="modal-title">Payment details</h2>
+            <p className="t-body-s" style={{ marginTop: 2 }}>{payment.patient_name}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="flex h-10 w-10 items-center justify-center rounded-[12px] text-content-muted hover:bg-lavender hover:text-content-primary transition-colors"
-          >
-            <X className="h-5 w-5" strokeWidth={1.5} />
+          <button type="button" className="btn btn-ghost btn-icon" aria-label="Close" onClick={onClose}>
+            <X size={18} strokeWidth={1.5} />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* Status Banner */}
-          <div className={`flex items-center gap-3 rounded-[14px] p-4 ${config.color}`}>
-            <Icon className="h-5 w-5" strokeWidth={1.5} />
-            <div>
-              <p className="font-semibold">{config.label}</p>
-              {payment.paid_at && <p className="text-xs opacity-75">Paid on {formatDateTime(payment.paid_at)}</p>}
-            </div>
+        <div style={{ flex: '1 1 auto', overflowY: 'auto', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+          <div>
+            <span className={statusMeta.cls}>{statusMeta.label}</span>
+            {payment.paid_at && <p className="t-caption" style={{ marginTop: 2 }}>Paid on {formatDateTime(payment.paid_at)}</p>}
           </div>
 
-          {/* Amount Card */}
-          <div className="rounded-[16px] border border-[#E8ECF4] overflow-hidden">
-            <div className="bg-slate-50/80 px-5 py-3 border-b border-[#F1F5F9]">
-              <h3 className="text-sm font-semibold text-content-primary">Amount Details</h3>
-            </div>
-            <div className="p-5 space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-content-secondary">Session Fee</span>
-                <span className="text-content-primary">{formatCurrency(payment.session_fee, payment.currency)}</span>
+          <div className="field-group">
+            <span className="t-h4 field-group-label">Amount</span>
+            <dl className="field-grid">
+              <div className="field-item">
+                <dt className="field-label">Session fee</dt>
+                <dd className="field-value field-value-num">{formatCurrency(payment.session_fee, payment.currency)}</dd>
               </div>
               {payment.discount_amount > 0 && (
-                <div className="flex justify-between text-sm text-success-text">
-                  <span>Discount {payment.discount_reason && `(${payment.discount_reason})`}</span>
-                  <span>-{formatCurrency(payment.discount_amount, payment.currency)}</span>
+                <div className="field-item">
+                  <dt className="field-label">Discount{payment.discount_reason ? ` (${payment.discount_reason})` : ''}</dt>
+                  <dd className="field-value field-value-num">-{formatCurrency(payment.discount_amount, payment.currency)}</dd>
                 </div>
               )}
               {payment.tax_amount > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-content-secondary">Tax ({payment.tax_percentage / 100}%)</span>
-                  <span className="text-content-primary">{formatCurrency(payment.tax_amount, payment.currency)}</span>
+                <div className="field-item">
+                  <dt className="field-label">Tax ({payment.tax_percentage / 100}%)</dt>
+                  <dd className="field-value field-value-num">{formatCurrency(payment.tax_amount, payment.currency)}</dd>
                 </div>
               )}
-              <div className="border-t border-[#F1F5F9] pt-3 flex justify-between">
-                <span className="font-semibold text-content-primary">Total</span>
-                <span className="text-xl font-semibold text-content-primary">{formatCurrency(payment.final_amount, payment.currency)}</span>
+              <div className="field-item">
+                <dt className="field-label">Total</dt>
+                <dd className="field-value field-value-num" style={{ fontWeight: 700 }}>{formatCurrency(payment.final_amount, payment.currency)}</dd>
               </div>
-            </div>
+            </dl>
           </div>
 
-          {/* Session Details */}
-          <div className="rounded-[16px] border border-[#E8ECF4] overflow-hidden">
-            <div className="bg-slate-50/80 px-5 py-3 border-b border-[#F1F5F9]">
-              <h3 className="text-sm font-semibold text-content-primary">Session Details</h3>
-            </div>
-            <div className="p-5 grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-content-muted mb-1">Date</p>
-                <p className="text-sm font-medium text-content-primary">
+          <div className="field-group">
+            <span className="t-h4 field-group-label">Session</span>
+            <dl className="field-grid">
+              <div className="field-item">
+                <dt className="field-label">Date</dt>
+                <dd className="field-value">
                   {payment.appointment_start_time
                     ? formatDateTime(payment.appointment_start_time)
                     : formatDate(payment.appointment_date)}
-                </p>
+                </dd>
               </div>
-              <div>
-                <p className="text-xs text-content-muted mb-1">Session Type</p>
-                <p className="text-sm font-medium text-content-primary">{sessionType.label}</p>
-              </div>
-              <div>
-                <p className="text-xs text-content-muted mb-1">Practitioner</p>
-                <p className="text-sm font-medium text-content-primary">{payment.practitioner_name}</p>
+              <div className="field-item">
+                <dt className="field-label">Practitioner</dt>
+                <dd className="field-value">{payment.practitioner_name}</dd>
               </div>
               {payment.payment_method && (
-                <div>
-                  <p className="text-xs text-content-muted mb-1">Payment Method</p>
-                  <p className="text-sm font-medium text-content-primary">{PAYMENT_METHODS[payment.payment_method] || payment.payment_method}</p>
+                <div className="field-item">
+                  <dt className="field-label">Payment method</dt>
+                  <dd className="field-value">{PAYMENT_METHODS[payment.payment_method] || payment.payment_method}</dd>
                 </div>
               )}
-            </div>
+            </dl>
           </div>
 
-          {/* Invoice */}
           {receipt && (
-            <div className="rounded-[16px] border border-[#E8ECF4] overflow-hidden">
-              <div className="bg-slate-50/80 px-5 py-3 border-b border-[#F1F5F9]">
-                <h3 className="text-sm font-semibold text-content-primary">Invoice</h3>
-              </div>
-              <div className="p-5 flex items-center justify-between">
+            <div className="field-group">
+              <span className="t-h4 field-group-label">Invoice</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
                 <div>
-                  <p className="font-mono text-sm font-medium text-content-primary">{receipt.receipt_number}</p>
-                  <p className="text-xs text-content-muted">Generated on {formatDateTime(receipt.generated_at)}</p>
+                  <p className="field-value" style={{ fontFamily: 'monospace' }}>{receipt.receipt_number}</p>
+                  <p className="t-caption">Generated on {formatDateTime(receipt.generated_at)}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <a
-                    href={getInvoicePdfPreviewUrl(payment.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-secondary !py-2 !px-4 !text-xs"
-                  >
-                    <Eye className="h-3.5 w-3.5" strokeWidth={1.5} />
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <a href={getInvoicePdfPreviewUrl(payment.id)} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
+                    <Eye size={14} strokeWidth={1.5} />
                     Preview
                   </a>
-                  <a href={getInvoicePdfUrl(payment.id)} className="btn-secondary !py-2 !px-4 !text-xs">
-                    <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  <a href={getInvoicePdfUrl(payment.id)} className="btn btn-secondary btn-sm">
+                    <Download size={14} strokeWidth={1.5} />
                     Download
                   </a>
                 </div>
@@ -886,66 +823,35 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
             </div>
           )}
 
-          {/* Timeline */}
-          <div className="rounded-[16px] border border-[#E8ECF4] overflow-hidden">
-            <div className="bg-slate-50/80 px-5 py-3 border-b border-[#F1F5F9]">
-              <h3 className="text-sm font-semibold text-content-primary">Timeline</h3>
-            </div>
-            <div className="p-5 space-y-4">
-              <TimelineItem 
-                icon={CreditCard}
-                title="Payment created"
-                time={formatDateTime(payment.created_at)}
-              />
+          <div className="field-group">
+            <span className="t-h4 field-group-label">Timeline</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <TimelineItem icon={CreditCard} title="Payment created" time={formatDateTime(payment.created_at)} />
               {payment.paid_at && (
-                <TimelineItem 
-                  icon={CheckCircle}
-                  title="Payment received"
-                  time={formatDateTime(payment.paid_at)}
-                  success
-                />
+                <TimelineItem icon={CheckCircle} title="Payment received" time={formatDateTime(payment.paid_at)} />
               )}
               {payment.refund_initiated_at && (
-                <TimelineItem 
-                  icon={RefreshCcw}
-                  title="Refund initiated"
-                  time={formatDateTime(payment.refund_initiated_at)}
-                />
+                <TimelineItem icon={RefreshCcw} title="Refund initiated" time={formatDateTime(payment.refund_initiated_at)} />
               )}
             </div>
           </div>
 
-          {/* Mark Paid Form */}
           {showMarkPaid && (
-            <div className="rounded-[16px] border border-primary bg-primary-light p-5">
-              <h3 className="text-sm font-semibold text-primary mb-4">Mark as Paid</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="label !text-xs !mb-1.5">Payment Method</label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="input-field !h-10"
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="bank_transfer">Bank Transfer</option>
-                    <option value="upi">UPI</option>
-                    <option value="card">Card</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleMarkPaid}
-                    disabled={loading}
-                    className="btn-primary !py-2.5"
-                  >
-                    {loading ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> : 'Confirm Payment'}
+            <div className="field-group">
+              <span className="t-h4 field-group-label">Mark as paid</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                <select className="select" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                  <option value="cash">Cash</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="upi">UPI</option>
+                  <option value="card">Card</option>
+                  <option value="other">Other</option>
+                </select>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <button type="button" className="btn btn-primary" disabled={loading} onClick={handleMarkPaid}>
+                    {loading ? <Loader2 size={16} strokeWidth={2} className="animate-spin" /> : 'Confirm payment'}
                   </button>
-                  <button
-                    onClick={() => setShowMarkPaid(false)}
-                    className="btn-secondary !py-2.5"
-                  >
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowMarkPaid(false)}>
                     Cancel
                   </button>
                 </div>
@@ -954,51 +860,48 @@ function PaymentDrawer({ payment, onClose, onUpdate }) {
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="shrink-0 border-t border-[#F1F5F9] px-6 py-5 space-y-3">
+        <div style={{ flex: 'none', borderTop: 'var(--border-width) solid var(--hairline)', padding: 'var(--space-5) var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {payment.status === 'pending' && !showMarkPaid && (
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowMarkPaid(true)}
-                className="flex-1 btn-primary !py-2.5"
-              >
-                <Banknote className="h-4 w-4" strokeWidth={1.5} />
-                Mark as Paid
+            <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+              <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => setShowMarkPaid(true)}>
+                <Banknote size={16} strokeWidth={1.5} />
+                Mark as paid
               </button>
-              <button
-                onClick={handleSendReminder}
-                disabled={loading}
-                className="flex-1 btn-secondary !py-2.5"
-              >
-                <Send className="h-4 w-4" strokeWidth={1.5} />
-                Send Reminder
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} disabled={loading} onClick={handleSendReminder}>
+                <Send size={16} strokeWidth={1.5} />
+                Send reminder
               </button>
             </div>
           )}
           <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ justifyContent: 'flex-start', paddingLeft: 0 }}
             onClick={() => navigate(`/patients/${payment.patient_id}`)}
-            className="w-full btn-ghost !justify-start !px-0 text-sm"
           >
-            <User className="h-4 w-4" strokeWidth={1.5} />
-            View Patient Profile
-            <ExternalLink className="h-3.5 w-3.5 ml-auto" strokeWidth={1.5} />
+            <User size={16} strokeWidth={1.5} />
+            View patient profile
+            <ExternalLink size={14} strokeWidth={1.5} style={{ marginLeft: 'auto' }} />
           </button>
         </div>
-        </div>
       </div>
-    </>
+
+      {toast && (
+        <div className="toast toast-wrap" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
+    </div>
   )
 }
 
-function TimelineItem({ icon: Icon, title, time, success = false }) {
+function TimelineItem({ icon: Icon, title, time }) {
   return (
-    <div className="flex items-start gap-3">
-      <div className={`flex h-8 w-8 items-center justify-center rounded-full ${success ? 'bg-success-bg' : 'bg-slate-100'}`}>
-        <Icon className={`h-4 w-4 ${success ? 'text-success-text' : 'text-content-muted'}`} strokeWidth={1.5} />
-      </div>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+      <span className="icon-badge"><Icon size={16} strokeWidth={1.5} /></span>
       <div>
-        <p className="text-sm font-medium text-content-primary">{title}</p>
-        <p className="text-xs text-content-muted">{time}</p>
+        <p className="field-value">{title}</p>
+        <p className="t-caption">{time}</p>
       </div>
     </div>
   )

@@ -38,6 +38,8 @@ export {
   useConfirmDialog,
 } from './ConfirmDialog'
 
+export { default as Modal } from './Modal'
+
 export {
   Badge,
   StatusBadge,

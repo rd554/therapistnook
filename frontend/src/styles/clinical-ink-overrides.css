@@ -1,0 +1,155 @@
+/* ==========================================================================
+   Clinical Ink — restyle overrides
+   --------------------------------------------------------------------------
+   tokens.css (Phase 0) ports the design system's OWN class vocabulary
+   (.card, .btn-primary, .nav-item, ...) so it's ready for new screens. But
+   the live app's markup is almost entirely bespoke BEM classes defined in
+   index.css (.dash-session-card, .workspace-header__btn--nav, ...) — the
+   JSX rarely uses tokens.css's class names at all. Renaming every call site
+   to match tokens.css would be a huge, purely mechanical rewrite for zero
+   visual gain (same intended look, different class name).
+
+   So this file takes the other approach: restyle the app's EXISTING class
+   definitions in place, scoped under `.clinical-ink`, to satisfy the design
+   system's rules (single accent hue, no green, no colored shadows, closed
+   palette) — without touching JSX structure or class names. JSX changes
+   below are limited to adding `className="clinical-ink"` to the screen/
+   layout root that should adopt this file.
+
+   tokens.css remains the source of truth for what a value SHOULD be (it's
+   the literal design-system spec); this file is where that spec gets
+   applied to the app's actual selectors. Add one block per screen as it's
+   migrated — an untouched screen's classes simply aren't listed here yet,
+   so it renders exactly as before.
+
+   Written against index.css as of the Phase 3+4 (chrome + Dashboard) pass,
+   2026-09-13.
+   ========================================================================== */
+
+/* ==========================================================================
+   Sidebar (frontend/src/layouts/Sidebar.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §B8) — see
+   Sidebar.jsx and styles/clinical-ink.css's .logo-row/.logo-tile/
+   .sidebar-footer* classes. Nav items render tokens.css's real .nav-item/
+   .is-active now (old .sidebar-nav-item--active + its :focus-visible
+   override are gone: tokens.css's own .nav-item.is-active and its global
+   *:focus-visible rule already cover both). The old .sidebar-profile avatar
+   placeholder is gone too — the footer now uses tokens.css's neutral
+   .avatar (background: var(--surface)), matching the prototype's own
+   choice for the practitioner's own account, not an --accent-tinted one.
+   The compound `.clinical-ink.sidebar, .clinical-ink .sidebar` box-shadow/
+   border-right rule that used to live here is gone as pure duplication:
+   tokens.css's own .sidebar rule already declares both.
+   Only the footer's hover feedback survives, since the prototype's
+   .sidebar-footer is static and doesn't need one.
+   ========================================================================== */
+
+.clinical-ink .sidebar-footer:hover { background: var(--surface-hover); }
+
+/* ==========================================================================
+   Workspace header (frontend/src/layouts/WorkspaceHeader.jsx) — global
+   ========================================================================== */
+
+/* Same same-element issue as .sidebar above: WorkspaceHeader.jsx's <header>
+   carries `clinical-ink` and `workspace-header` together. */
+.clinical-ink.workspace-header,
+.clinical-ink .workspace-header {
+  box-shadow: none;
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+/* .workspace-header__btn--nav/--soft/--primary rules removed: the nav
+   buttons now render as tokens.css's real .btn-secondary/.btn-primary
+   (WorkspaceHeader.jsx), and --soft/--primary have no call sites left
+   inside .clinical-ink's scope (see index.css's own comment at the
+   --primary/--nav deletion site). */
+
+/* Notification dot: alarm hue, not accent — matches the prototype's own
+   .notif-dot (design/prototype/prototype.css), which uses var(--error) for
+   the same "you have something unread" signal. Keeps this off the accent
+   budget instead of adding a second accent object to every screen. */
+.clinical-ink .workspace-header__notif-dot { background: var(--error); }
+
+.clinical-ink .workspace-header__avatar {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   Dashboard section chrome (shared by all four dashboard/* widgets)
+   .dash-section__badge/__action(:hover) deleted here: TherapistNote.jsx (the
+   last consumer of .dash-section__badge) now renders its date inline inside
+   .card-narrative's own .t-caption instead of a separate badge chip;
+   .dash-section__action already had no call sites left before this (dead
+   since Recent Patients' §7 rebuild).
+   ========================================================================== */
+
+/* index.css's own .btn-primary/.btn-primary-sm (Tailwind-composed, distinct
+   from tokens.css's real .btn-primary) used to need box-shadow overrides
+   here, back when WorkspaceHeader/TodaySchedule rendered those classes bare.
+   Both call sites now render tokens.css's actual `btn btn-primary` instead
+   (WorkspaceHeader, TodaySchedule), so there's nothing left inside
+   .clinical-ink's scope using index.css's versions — nothing to override. */
+
+/* ==========================================================================
+   Today's Schedule (components/dashboard/TodaySchedule.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §6) — see
+   TodaySchedule.jsx and styles/clinical-ink.css's .sched-* classes. Only the
+   two bespoke, prototype-unmodeled affordances survive here.
+   ========================================================================== */
+
+.clinical-ink .dash-session-card__icon-btn {
+  color: var(--icon);
+  border-color: var(--border);
+  background: var(--canvas);
+}
+.clinical-ink .dash-session-card__error { color: var(--error); }
+
+/* ==========================================================================
+   Therapist's note (components/dashboard/TherapistNote.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §C) — the
+   card itself is .card-narrative/.t-h3/.t-caption/.t-narrative. Only the
+   date-picker button + popover survive as bespoke overrides: neither has a
+   prototype equivalent (it's a static mockup with no editable note), so
+   they keep their old index.css structure and get colors here instead,
+   same pattern as .dash-session-card__icon-btn above.
+   ========================================================================== */
+
+.clinical-ink .dash-note-card__picker { color: var(--icon-muted); }
+.clinical-ink .dash-note-card__picker:hover {
+  background: var(--surface);
+  color: var(--icon);
+}
+.clinical-ink .dash-note-card__popover {
+  background: var(--canvas);
+  box-shadow: var(--ci-shadow-md);
+}
+.clinical-ink .dash-note-card__popover input[type="date"] {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+/* tokens.css's .t-narrative has no ::placeholder rule of its own (the
+   prototype never puts it on a form control) — without one this textarea's
+   placeholder falls back to the browser default (~54% opacity of the text
+   color), which reads as body text rather than a prompt. */
+.clinical-ink textarea.t-narrative::placeholder { color: var(--text-muted); }
+
+/* ==========================================================================
+   Recent Patients (components/dashboard/RecentPatients.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §7) — see
+   RecentPatients.jsx and styles/clinical-ink.css's .rp-* classes. The old
+   mode-dot, tinted card, and check/pill overrides below have no call sites
+   left (the .seg/.seg-option control tokens.css already ships is colorless
+   by design — "zero color" is the point, not something to override).
+   ========================================================================== */
+
+/* ==========================================================================
+   Payments (components/dashboard/PaymentsList.jsx)
+   Fully converted to tokens.css's own vocabulary (design system §8) — see
+   PaymentsList.jsx and styles/clinical-ink.css's .pay-* classes. Received
+   rows carry status via .status-quiet text only (no green fill, per
+   tokens.css's "success is text-only" rule); overdue rows get a white row
+   plus a .rule-error left stripe and .status-alert text instead of a
+   tinted card background.
+   ========================================================================== */

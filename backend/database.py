@@ -127,6 +127,8 @@ async def _run_sqlite_migrations(conn):
         await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_status", "last_test_status VARCHAR")
         await _add_column_if_missing_sqlite(conn, "whatsapp_configs", "last_test_error", "last_test_error VARCHAR")
         await _add_column_if_missing_sqlite(conn, "clinical_intelligence", "recent_changes", "recent_changes JSON")
+        await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "profession", "profession VARCHAR")
+        await _add_column_if_missing_sqlite(conn, "practitioner_profiles", "location_short", "location_short VARCHAR")
 
         if 'email_verified' not in columns:
             await conn.execute(text(
@@ -154,8 +156,161 @@ async def _run_sqlite_migrations(conn):
                 WHERE receipt_id IS NULL
                 AND id IN (SELECT payment_id FROM receipts)
             """))
+
+        try:
+            await _run_scheduling_merge_sqlite(conn)
+            await _run_email_backfill_sqlite(conn)
+            await _run_messaging_preferences_seed_sqlite(conn)
+        except Exception as e:
+            # Not part of the outer bare `except: pass` on purpose — if this
+            # fails, practitioner_availability may be left without the two
+            # new columns while models.py still declares them, which 500s
+            # every /api/availability call and the public booking path. That
+            # failure needs to be visible, not silent.
+            import traceback
+            print(f"Settings migration (scheduling merge / email backfill) failed: {e}")
+            traceback.print_exc()
     except Exception:
         pass
+
+
+async def _run_scheduling_merge_sqlite(conn):
+    """Settings rebuild: PractitionerAvailability becomes the one scheduling
+    record booking/Calendar/Settings all read. Moves the booking-window fields
+    over from the (global) AppointmentConfiguration singleton, and gives every
+    active practitioner missing an availability row one — seeded from that
+    singleton, since that's the values the booking engine already reads today
+    for practitioners it does have a row for. See settings-phase1-plan.md.
+    """
+    added_notice = await _add_column_if_missing_sqlite(
+        conn, "practitioner_availability", "min_booking_notice_hours",
+        "min_booking_notice_hours INTEGER DEFAULT 24",
+    )
+    added_advance = await _add_column_if_missing_sqlite(
+        conn, "practitioner_availability", "max_advance_booking_days",
+        "max_advance_booking_days INTEGER DEFAULT 30",
+    )
+    if added_notice or added_advance:
+        appt_config = (await conn.execute(text(
+            "SELECT min_booking_notice_hours, max_advance_booking_days FROM appointment_configurations LIMIT 1"
+        ))).fetchone()
+        if appt_config:
+            await conn.execute(text(
+                "UPDATE practitioner_availability SET min_booking_notice_hours = :notice, max_advance_booking_days = :advance"
+            ), {"notice": appt_config[0], "advance": appt_config[1]})
+
+    # Every practitioner without an availability row falls back to hardcoded
+    # defaults today (see booking_service.get_available_slots) rather than
+    # reading anything practitioner-specific. Give each one a real row, seeded
+    # from the appointment_configurations singleton where present, so the
+    # merged record actually has a value to read — public booking cannot
+    # create this row lazily (read-only path), so it has to exist by now.
+    missing = (await conn.execute(text("""
+        SELECT p.id FROM practitioners p
+        LEFT JOIN practitioner_availability pa ON pa.practitioner_id = p.id
+        WHERE pa.id IS NULL AND p.is_active = 1
+    """))).fetchall()
+    if missing:
+        appt_config = (await conn.execute(text(
+            "SELECT default_working_days, default_work_start_time, default_work_end_time, "
+            "default_break_start_time, default_break_end_time, default_duration_minutes, "
+            "buffer_time_minutes, min_booking_notice_hours, max_advance_booking_days "
+            "FROM appointment_configurations LIMIT 1"
+        ))).fetchone()
+        import json as _json
+        for (prac_id,) in missing:
+            if appt_config:
+                working_days, work_start, work_end, break_start, break_end, duration, buffer_min, notice, advance = appt_config
+            else:
+                working_days, work_start, work_end, break_start, break_end, duration, buffer_min, notice, advance = (
+                    "[0, 1, 2, 3, 4]", "09:00", "18:00", "13:00", "14:00", 50, 10, 24, 30,
+                )
+            print(f"Settings migration: creating practitioner_availability for {prac_id}, seeded from appointment_configurations")
+            await conn.execute(text("""
+                INSERT INTO practitioner_availability
+                    (id, practitioner_id, working_days, work_start_time, work_end_time,
+                     break_start_time, break_end_time, default_session_duration, buffer_minutes,
+                     timezone, min_booking_notice_hours, max_advance_booking_days, created_at, updated_at)
+                VALUES
+                    (:id, :prac_id, :working_days, :work_start, :work_end,
+                     :break_start, :break_end, :duration, :buffer_min,
+                     'Asia/Kolkata', :notice, :advance, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """), {
+                "id": __import__("uuid").uuid4().hex, "prac_id": prac_id,
+                "working_days": working_days if isinstance(working_days, str) else _json.dumps(working_days),
+                "work_start": work_start, "work_end": work_end,
+                "break_start": break_start, "break_end": break_end,
+                "duration": duration, "buffer_min": buffer_min,
+                "notice": notice, "advance": advance,
+            })
+
+
+async def _run_email_backfill_sqlite(conn):
+    """The toggle-does-nothing bug: EmailChannel sends using env SMTP_EMAIL/
+    SMTP_PASSWORD regardless of EmailConfiguration.is_enabled. Fix is to make
+    is_enabled authoritative going forward — but flipping it on a DB row with
+    is_enabled=0 today would silently stop mail on a live practice if done
+    carelessly. This only ever flips is_enabled True, once, and only when env
+    credentials already exist (so sending behavior is unchanged at the moment
+    this runs); it never copies the password into the DB. See
+    settings-phase1-plan.md amendment 2.
+    """
+    import os
+    if not (os.getenv("SMTP_EMAIL") and os.getenv("SMTP_PASSWORD")):
+        return
+    row = (await conn.execute(text(
+        "SELECT id, is_enabled FROM email_configurations LIMIT 1"
+    ))).fetchone()
+    if row and not row[1]:
+        await conn.execute(text(
+            "UPDATE email_configurations SET is_enabled = 1 WHERE id = :id"
+        ), {"id": row[0]})
+        print("Settings migration: enabled email_configurations.is_enabled (env SMTP credentials already present)")
+    elif not row:
+        await conn.execute(text(
+            "INSERT INTO email_configurations (id, provider, is_enabled, smtp_use_tls, created_at, updated_at) "
+            "VALUES (:id, 'smtp', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ), {"id": __import__("uuid").uuid4().hex})
+        print("Settings migration: created email_configurations row with is_enabled=1 (env SMTP credentials present)")
+
+
+async def _run_messaging_preferences_seed_sqlite(conn):
+    """Seed the messaging_preferences singleton (if it doesn't exist yet) from
+    the *current* email/WhatsApp channel enable flags, per spec ("Seed each
+    event from the current channel enable flags"). Deliberately runs here,
+    after _run_email_backfill_sqlite in the same migration pass, so
+    email_configurations.is_enabled is already resolved before this reads it
+    — settings_service.get_messaging_preferences() has an equivalent lazy
+    fallback for environments that skip migrations entirely, but the normal
+    path is this one, which removes any ordering race between the two.
+    """
+    existing = (await conn.execute(text("SELECT id FROM messaging_preferences LIMIT 1"))).fetchone()
+    if existing:
+        return
+    email_row = (await conn.execute(text("SELECT is_enabled FROM email_configurations LIMIT 1"))).fetchone()
+    email_enabled = 1 if (email_row and email_row[0]) else 0
+    whatsapp_row = (await conn.execute(text("SELECT is_enabled FROM whatsapp_configs LIMIT 1"))).fetchone()
+    whatsapp_enabled = 1 if (whatsapp_row and whatsapp_row[0]) else 0
+    await conn.execute(text("""
+        INSERT INTO messaging_preferences (
+            id, session_booked_email, session_booked_whatsapp,
+            reminder_email, reminder_whatsapp, reminder_offset_minutes,
+            session_rescheduled_email, session_rescheduled_whatsapp,
+            session_cancelled_email, session_cancelled_whatsapp,
+            payment_request_email, payment_request_whatsapp,
+            payment_received_email, payment_received_whatsapp,
+            created_at, updated_at
+        ) VALUES (
+            :id, :email, :wa,
+            :email, :wa, 1440,
+            :email, :wa,
+            :email, :wa,
+            :email, :wa,
+            :email, :wa,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+    """), {"id": __import__("uuid").uuid4().hex, "email": email_enabled, "wa": whatsapp_enabled})
+    print(f"Settings migration: seeded messaging_preferences (email={bool(email_enabled)}, whatsapp={bool(whatsapp_enabled)})")
 
 
 async def _run_postgres_migrations(conn):
@@ -228,6 +383,8 @@ async def _run_postgres_migrations(conn):
         await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_status", "last_test_status VARCHAR")
         await _add_column_if_missing_postgres(conn, "whatsapp_configs", "last_test_error", "last_test_error VARCHAR")
         await _add_column_if_missing_postgres(conn, "clinical_intelligence", "recent_changes", "recent_changes JSON")
+        await _add_column_if_missing_postgres(conn, "practitioner_profiles", "profession", "profession VARCHAR")
+        await _add_column_if_missing_postgres(conn, "practitioner_profiles", "location_short", "location_short VARCHAR")
 
         # Check if email_verified column exists
         result = await conn.execute(text("""
@@ -256,6 +413,133 @@ async def _run_postgres_migrations(conn):
                 WHERE receipt_id IS NULL
                 AND id IN (SELECT payment_id FROM receipts)
             """))
+
+        try:
+            await _run_scheduling_merge_postgres(conn)
+            await _run_email_backfill_postgres(conn)
+            await _run_messaging_preferences_seed_postgres(conn)
+        except Exception as e:
+            # Same rationale as the SQLite branch: if this fails,
+            # practitioner_availability may be left without the two new
+            # columns while models.py still declares them, which 500s every
+            # /api/availability call and the public booking path. Isolated
+            # from the rest of this function's migrations (which already
+            # succeeded by this point) so the failure is loud and specific
+            # rather than folded into the generic "Migration warning" below.
+            import traceback
+            print(f"Settings migration (scheduling merge / email backfill) failed: {e}")
+            traceback.print_exc()
     except Exception as e:
         print(f"Migration warning: {e}")
+
+
+async def _run_scheduling_merge_postgres(conn):
+    """See _run_scheduling_merge_sqlite — same migration, Postgres dialect."""
+    added_notice = await _add_column_if_missing_postgres(
+        conn, "practitioner_availability", "min_booking_notice_hours",
+        "min_booking_notice_hours INTEGER DEFAULT 24",
+    )
+    added_advance = await _add_column_if_missing_postgres(
+        conn, "practitioner_availability", "max_advance_booking_days",
+        "max_advance_booking_days INTEGER DEFAULT 30",
+    )
+    if added_notice or added_advance:
+        appt_config = (await conn.execute(text(
+            "SELECT min_booking_notice_hours, max_advance_booking_days FROM appointment_configurations LIMIT 1"
+        ))).fetchone()
+        if appt_config:
+            await conn.execute(text(
+                "UPDATE practitioner_availability SET min_booking_notice_hours = :notice, max_advance_booking_days = :advance"
+            ), {"notice": appt_config[0], "advance": appt_config[1]})
+
+    missing = (await conn.execute(text("""
+        SELECT p.id FROM practitioners p
+        LEFT JOIN practitioner_availability pa ON pa.practitioner_id = p.id
+        WHERE pa.id IS NULL AND p.is_active = TRUE
+    """))).fetchall()
+    if missing:
+        appt_config = (await conn.execute(text(
+            "SELECT default_working_days, default_work_start_time, default_work_end_time, "
+            "default_break_start_time, default_break_end_time, default_duration_minutes, "
+            "buffer_time_minutes, min_booking_notice_hours, max_advance_booking_days "
+            "FROM appointment_configurations LIMIT 1"
+        ))).fetchone()
+        import json as _json
+        for (prac_id,) in missing:
+            if appt_config:
+                working_days, work_start, work_end, break_start, break_end, duration, buffer_min, notice, advance = appt_config
+            else:
+                working_days, work_start, work_end, break_start, break_end, duration, buffer_min, notice, advance = (
+                    [0, 1, 2, 3, 4], "09:00", "18:00", "13:00", "14:00", 50, 10, 24, 30,
+                )
+            print(f"Settings migration: creating practitioner_availability for {prac_id}, seeded from appointment_configurations")
+            await conn.execute(text("""
+                INSERT INTO practitioner_availability
+                    (id, practitioner_id, working_days, work_start_time, work_end_time,
+                     break_start_time, break_end_time, default_session_duration, buffer_minutes,
+                     timezone, min_booking_notice_hours, max_advance_booking_days, created_at, updated_at)
+                VALUES
+                    (:id, :prac_id, CAST(:working_days AS JSON), :work_start, :work_end,
+                     :break_start, :break_end, :duration, :buffer_min,
+                     'Asia/Kolkata', :notice, :advance, now(), now())
+            """), {
+                "id": __import__("uuid").uuid4().hex, "prac_id": prac_id,
+                "working_days": _json.dumps(working_days) if not isinstance(working_days, str) else working_days,
+                "work_start": work_start, "work_end": work_end,
+                "break_start": break_start, "break_end": break_end,
+                "duration": duration, "buffer_min": buffer_min,
+                "notice": notice, "advance": advance,
+            })
+
+
+async def _run_email_backfill_postgres(conn):
+    """See _run_email_backfill_sqlite — same migration, Postgres dialect."""
+    import os
+    if not (os.getenv("SMTP_EMAIL") and os.getenv("SMTP_PASSWORD")):
+        return
+    row = (await conn.execute(text(
+        "SELECT id, is_enabled FROM email_configurations LIMIT 1"
+    ))).fetchone()
+    if row and not row[1]:
+        await conn.execute(text(
+            "UPDATE email_configurations SET is_enabled = TRUE WHERE id = :id"
+        ), {"id": row[0]})
+        print("Settings migration: enabled email_configurations.is_enabled (env SMTP credentials already present)")
+    elif not row:
+        await conn.execute(text(
+            "INSERT INTO email_configurations (id, provider, is_enabled, smtp_use_tls, created_at, updated_at) "
+            "VALUES (:id, 'smtp', TRUE, TRUE, now(), now())"
+        ), {"id": __import__("uuid").uuid4().hex})
+        print("Settings migration: created email_configurations row with is_enabled=TRUE (env SMTP credentials present)")
         pass
+
+
+async def _run_messaging_preferences_seed_postgres(conn):
+    """See _run_messaging_preferences_seed_sqlite — same migration, Postgres dialect."""
+    existing = (await conn.execute(text("SELECT id FROM messaging_preferences LIMIT 1"))).fetchone()
+    if existing:
+        return
+    email_row = (await conn.execute(text("SELECT is_enabled FROM email_configurations LIMIT 1"))).fetchone()
+    email_enabled = bool(email_row and email_row[0])
+    whatsapp_row = (await conn.execute(text("SELECT is_enabled FROM whatsapp_configs LIMIT 1"))).fetchone()
+    whatsapp_enabled = bool(whatsapp_row and whatsapp_row[0])
+    await conn.execute(text("""
+        INSERT INTO messaging_preferences (
+            id, session_booked_email, session_booked_whatsapp,
+            reminder_email, reminder_whatsapp, reminder_offset_minutes,
+            session_rescheduled_email, session_rescheduled_whatsapp,
+            session_cancelled_email, session_cancelled_whatsapp,
+            payment_request_email, payment_request_whatsapp,
+            payment_received_email, payment_received_whatsapp,
+            created_at, updated_at
+        ) VALUES (
+            :id, :email, :wa,
+            :email, :wa, 1440,
+            :email, :wa,
+            :email, :wa,
+            :email, :wa,
+            :email, :wa,
+            now(), now()
+        )
+    """), {"id": __import__("uuid").uuid4().hex, "email": email_enabled, "wa": whatsapp_enabled})
+    print(f"Settings migration: seeded messaging_preferences (email={email_enabled}, whatsapp={whatsapp_enabled})")

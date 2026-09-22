@@ -3,14 +3,18 @@ Practice Analytics Service
 Provides aggregated analytics data for practitioners and administrators.
 """
 
+import calendar
+import logging
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, func, and_, or_, extract, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from models import (
-    Patient, Appointment, Payment, Assessment, Session, 
+    Patient, Appointment, Payment, Assessment, Session, Answer,
     Practitioner, TherapySession
 )
+
+log = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -980,4 +984,380 @@ async def get_home_dashboard_summary(
         "new_patients_this_month": new_patients,
         "attendance_rate": attendance_rate,
         "currency": "INR",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PRACTICE ANALYTICS SUMMARY — backs the redesigned PracticeAnalytics.jsx page
+#
+#  The returned dict is deliberately shaped to match that component's own
+#  `SAMPLE` export verbatim — camelCase keys, sparse "YYYY-MM"-keyed month
+#  dicts — rather than this file's usual snake_case. See
+#  PracticeAnalyticsSummaryResponse in schemas.py for the same note.
+#
+#  Two clocks are in play, on purpose:
+#   - "period" (year/month, from the query params) drives every figure
+#     that's inherently historical — sessions completed, revenue collected/
+#     billed, new patients, MMPI-2 sent/started/completed — and the
+#     trailing-12-month chart axes, which end at that month.
+#   - "today" (real wall-clock date) drives every figure that's a live
+#     balance or forward-looking — outstanding payments, upcoming sessions,
+#     the "needs attention" list. Those don't change meaning just because
+#     you're looking at a past month's report.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _month_bounds(year: int, month: int) -> tuple[date, date]:
+    """First and last calendar date of a given year/month."""
+    start = date(year, month, 1)
+    end = date(year, month, calendar.monthrange(year, month)[1])
+    return start, end
+
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
+    """Add `delta` months to a (year, month) pair, rolling the year over."""
+    idx = year * 12 + (month - 1) + delta
+    return idx // 12, idx % 12 + 1
+
+
+def _month_key(year: int, month: int) -> str:
+    return f"{year:04d}-{month:02d}"
+
+
+def _indian_grouping(n: int) -> str:
+    """"1,19,750"-style digit grouping (last 3 digits, then pairs) — matches
+    frontend/src/utils/format.js's Intl.NumberFormat('en-IN') output, which
+    Python's f"{n:,}" (Western 3-digit grouping) does not reproduce."""
+    sign = "-" if n < 0 else ""
+    s = str(abs(int(n)))
+    if len(s) <= 3:
+        return f"{sign}{s}"
+    last3, rest = s[-3:], s[:-3]
+    parts = []
+    while len(rest) > 2:
+        parts.insert(0, rest[-2:])
+        rest = rest[:-2]
+    if rest:
+        parts.insert(0, rest)
+    return f"{sign}{','.join(parts)},{last3}"
+
+
+def _format_inr(rupees: int) -> str:
+    return f"₹{_indian_grouping(rupees)}"
+
+
+async def get_practice_analytics_summary(
+    db: AsyncSession,
+    practitioner_id: Optional[str] = None,
+    is_admin: bool = False,
+    year: int = None,
+    month: int = None,
+) -> Dict[str, Any]:
+    """Everything PracticeAnalytics.jsx needs for one (year, month) view."""
+
+    today = date.today()
+    period_start, period_end = _month_bounds(year, month)
+    trailing_start_year, trailing_start_month = _shift_month(year, month, -11)
+    trailing_start, _ = _month_bounds(trailing_start_year, trailing_start_month)
+
+    patient_filter, appt_filter, payment_filter, session_filter = [], [], [], []
+    if not is_admin and practitioner_id:
+        patient_filter.append(Patient.practitioner_id == practitioner_id)
+        appt_filter.append(Appointment.practitioner_id == practitioner_id)
+        payment_filter.append(Payment.practitioner_id == practitioner_id)
+        session_filter.append(Session.practitioner_id == practitioner_id)
+
+    # A Session with no Answer rows yet and not marked completed — the only
+    # proxy available for "link sent, never opened" (Session has no
+    # opened_at/started_at column to check directly).
+    not_started_condition = and_(
+        Session.completed == False,
+        Session.id.notin_(select(Answer.session_id).distinct()),
+    )
+
+    # ---- sessions ---------------------------------------------------------
+    sessions_completed = (await db.execute(
+        select(func.count(Appointment.id)).where(and_(
+            Appointment.status == "completed",
+            Appointment.date >= period_start, Appointment.date <= period_end,
+            *appt_filter,
+        ))
+    )).scalar() or 0
+
+    seven_days_out = today + timedelta(days=6)
+    sessions_upcoming = (await db.execute(
+        select(func.count(Appointment.id)).where(and_(
+            Appointment.status == "scheduled",
+            Appointment.date >= today, Appointment.date <= seven_days_out,
+            *appt_filter,
+        ))
+    )).scalar() or 0
+
+    # ---- patients -----------------------------------------------------------
+    # `total` is every patient on record, regardless of status.
+    # get_active_inactive_counts() only partitions Patient.status == "active"
+    # rows into active/inactive by 30-day attendance recency (archived
+    # patients are excluded from that pool entirely by design — see its
+    # docstring), so `unclassified` naturally lands on the archived count.
+    # That's expected, not a bug — the warning below is routine visibility
+    # into that count, not an assertion that it should be 0.
+    patients_total = (await db.execute(
+        select(func.count(Patient.id)).where(and_(*patient_filter))
+    )).scalar() or 0
+
+    active_count, inactive_count = await get_active_inactive_counts(db, practitioner_id, is_admin)
+    unclassified = patients_total - active_count - inactive_count
+    if unclassified != 0:
+        log.warning(
+            "Practice analytics: %d patient(s) fell outside the active/inactive "
+            "partition (total=%d active=%d inactive=%d, practitioner_id=%s)",
+            unclassified, patients_total, active_count, inactive_count, practitioner_id,
+        )
+
+    patients_new_in_period = (await db.execute(
+        select(func.count(Patient.id)).where(and_(
+            func.date(Patient.created_at) >= period_start,
+            func.date(Patient.created_at) <= period_end,
+            *patient_filter,
+        ))
+    )).scalar() or 0
+
+    patients_added_trailing12 = (await db.execute(
+        select(func.count(Patient.id)).where(and_(
+            func.date(Patient.created_at) >= trailing_start,
+            func.date(Patient.created_at) <= period_end,
+            *patient_filter,
+        ))
+    )).scalar() or 0
+
+    # Lifetime averages, not period-scoped — mirrors get_patient_analytics's
+    # avg_sessions_per_patient/retention_rate, which ignore their own period
+    # argument for the same reason: "sessions per patient" measured against
+    # a single month undercounts every patient whose sessions span further
+    # back than that.
+    sessions_per_patient_sq = (
+        select(Appointment.patient_id, func.count(Appointment.id).label("n"))
+        .where(and_(Appointment.status == "completed", *appt_filter))
+        .group_by(Appointment.patient_id)
+        .subquery()
+    )
+    patients_sessions_per_patient = round(
+        (await db.execute(select(func.avg(sessions_per_patient_sq.c.n)))).scalar() or 0, 1
+    )
+    total_with_appts = (await db.execute(
+        select(func.count()).select_from(sessions_per_patient_sq)
+    )).scalar() or 0
+    returning_sq = (
+        select(Appointment.patient_id)
+        .where(and_(Appointment.status == "completed", *appt_filter))
+        .group_by(Appointment.patient_id)
+        .having(func.count(Appointment.id) >= 2)
+        .subquery()
+    )
+    returning_count = (await db.execute(select(func.count()).select_from(returning_sq))).scalar() or 0
+    patients_return_rate = round((returning_count / total_with_appts * 100) if total_with_appts else 0, 1)
+
+    # ---- revenue --------------------------------------------------------------
+    # Payment.session_fee/final_amount are stored in paise; every rupee figure
+    # below is divided by 100 at the boundary since format.js's formatINR
+    # does not do that division on the frontend.
+    collected_in_period = (await db.execute(
+        select(func.sum(Payment.final_amount)).where(and_(
+            Payment.status == "paid",
+            Payment.paid_at >= date_to_datetime(period_start),
+            Payment.paid_at <= date_to_datetime(period_end, end_of_day=True),
+            *payment_filter,
+        ))
+    )).scalar() or 0
+
+    collected_trailing12 = (await db.execute(
+        select(func.sum(Payment.final_amount)).where(and_(
+            Payment.status == "paid",
+            Payment.paid_at >= date_to_datetime(trailing_start),
+            Payment.paid_at <= date_to_datetime(period_end, end_of_day=True),
+            *payment_filter,
+        ))
+    )).scalar() or 0
+
+    # A live balance (all unpaid invoices, any date) — doesn't change meaning
+    # just because you're looking at a past month's report. Matches
+    # get_revenue_analytics's outstanding_payments, which is date-unscoped
+    # for the same reason.
+    outstanding_filter = [Payment.status == "pending", *payment_filter]
+    outstanding = (await db.execute(
+        select(func.sum(Payment.final_amount)).where(and_(*outstanding_filter))
+    )).scalar() or 0
+    unpaid_invoices = (await db.execute(
+        select(func.count(Payment.id)).where(and_(*outstanding_filter))
+    )).scalar() or 0
+
+    # Revenue-by-month buckets key off the underlying appointment's date
+    # (when the session happened/is scheduled) rather than Payment.created_at
+    # or paid_at, so a payment collected late still lands in the month of
+    # the session it was for.
+    revenue_by_month: Dict[str, Dict[str, int]] = {}
+    month_revenue_rows = await db.execute(
+        select(
+            extract("year", Appointment.date).label("year"),
+            extract("month", Appointment.date).label("month"),
+            Payment.status,
+            func.sum(Payment.final_amount).label("amount"),
+        )
+        .join(Appointment, Payment.appointment_id == Appointment.id)
+        .where(and_(
+            Appointment.date >= trailing_start, Appointment.date <= period_end,
+            Payment.status.in_(["paid", "pending"]),
+            *payment_filter,
+        ))
+        .group_by(extract("year", Appointment.date), extract("month", Appointment.date), Payment.status)
+    )
+    for row in month_revenue_rows:
+        key = _month_key(int(row.year), int(row.month))
+        bucket = revenue_by_month.setdefault(key, {"collected": 0, "outstanding": 0})
+        amount_rupees = int((row.amount or 0) / 100)
+        if row.status == "paid":
+            bucket["collected"] += amount_rupees
+        else:
+            bucket["outstanding"] += amount_rupees
+
+    billed_trailing12 = sum(b["collected"] + b["outstanding"] for b in revenue_by_month.values())
+
+    # ---- assessments (MMPI-2 Session records) ----------------------------------
+    period_session_filter = [
+        Session.created_at >= date_to_datetime(period_start),
+        Session.created_at <= date_to_datetime(period_end, end_of_day=True),
+        *session_filter,
+    ]
+    assessments_sent = (await db.execute(
+        select(func.count(Session.id)).where(and_(*period_session_filter))
+    )).scalar() or 0
+    assessments_completed = (await db.execute(
+        select(func.count(Session.id)).where(and_(*period_session_filter, Session.completed == True))
+    )).scalar() or 0
+    assessments_not_started = (await db.execute(
+        select(func.count(Session.id)).where(and_(*period_session_filter, not_started_condition))
+    )).scalar() or 0
+    assessments_in_progress = max(assessments_sent - assessments_completed - assessments_not_started, 0)
+
+    # ---- new patients by month (chart) -----------------------------------------
+    new_patients_by_month = {
+        _month_key(int(row.year), int(row.month)): {"count": row.count}
+        for row in await db.execute(
+            select(
+                extract("year", Patient.created_at).label("year"),
+                extract("month", Patient.created_at).label("month"),
+                func.count(Patient.id).label("count"),
+            )
+            .where(and_(
+                func.date(Patient.created_at) >= trailing_start,
+                func.date(Patient.created_at) <= period_end,
+                *patient_filter,
+            ))
+            .group_by(extract("year", Patient.created_at), extract("month", Patient.created_at))
+        )
+    }
+
+    # ---- needs attention (live, not period-scoped) -----------------------------
+    attention: List[Dict[str, Any]] = []
+    if unpaid_invoices > 0:
+        unpaid_patient_count = (await db.execute(
+            select(func.count(func.distinct(Payment.patient_id))).where(and_(*outstanding_filter))
+        )).scalar() or 0
+        attention.append({
+            "id": "unpaid",
+            "urgent": True,
+            "title": f"{_format_inr(int(outstanding / 100))} unpaid",
+            "detail": f"{unpaid_invoices} invoice{'s' if unpaid_invoices != 1 else ''} · {unpaid_patient_count} patient{'s' if unpaid_patient_count != 1 else ''}",
+            "action": "Send reminders",
+        })
+
+    live_not_started = (await db.execute(
+        select(func.count(Session.id)).where(and_(not_started_condition, *session_filter))
+    )).scalar() or 0
+    if live_not_started > 0:
+        attention.append({
+            "id": "not-started",
+            "urgent": True,
+            "title": f"{live_not_started} MMPI-2 test{'s' if live_not_started != 1 else ''} not started",
+            "detail": "Link sent, no answers recorded yet",
+            "action": "Resend links",
+        })
+
+    if sessions_upcoming > 0:
+        attention.append({
+            "id": "upcoming",
+            "urgent": False,
+            "title": f"{sessions_upcoming} session{'s' if sessions_upcoming != 1 else ''} upcoming",
+            "detail": "Next 7 days",
+            "action": "Open schedule",
+        })
+
+    # ---- export counts (owner only) --------------------------------------------
+    # Scoped to the selected period, like the CSVs they describe would be,
+    # except "patients" — a patient roster isn't an event log, so that one
+    # exports the full practice roster regardless of period.
+    export_counts = None
+    if is_admin:
+        export_appt_count = (await db.execute(
+            select(func.count(Appointment.id)).where(and_(
+                Appointment.date >= period_start, Appointment.date <= period_end
+            ))
+        )).scalar() or 0
+        export_payment_count = 0
+        export_unpaid_amount = 0
+        for row in await db.execute(
+            select(Payment.status, func.count(Payment.id).label("n"), func.sum(Payment.final_amount).label("amt"))
+            .join(Appointment, Payment.appointment_id == Appointment.id)
+            .where(and_(Appointment.date >= period_start, Appointment.date <= period_end))
+            .group_by(Payment.status)
+        ):
+            export_payment_count += row.n
+            if row.status == "pending":
+                export_unpaid_amount = int((row.amt or 0) / 100)
+        export_patient_count = (await db.execute(select(func.count(Patient.id)))).scalar() or 0
+        export_counts = {
+            "invoices": f"{export_payment_count} rows · {_format_inr(export_unpaid_amount)} unpaid",
+            "sessions": f"{export_appt_count} rows",
+            "patients": f"{export_patient_count} rows",
+            "assessments": f"{assessments_sent} rows",
+        }
+
+    # ---- all-time empty state ---------------------------------------------------
+    any_appt = (await db.execute(
+        select(func.count(Appointment.id)).where(and_(*appt_filter) if appt_filter else True)
+    )).scalar() or 0
+    any_payment = (await db.execute(
+        select(func.count(Payment.id)).where(and_(*payment_filter) if payment_filter else True)
+    )).scalar() or 0
+    empty_all_time = (any_appt == 0 and any_payment == 0)
+
+    return {
+        "sessions": {"completed": sessions_completed, "upcoming": sessions_upcoming},
+        "revenue": {
+            "collectedInPeriod": int(collected_in_period / 100),
+            "collectedTrailing12": int(collected_trailing12 / 100),
+            "billedTrailing12": billed_trailing12,
+            "outstanding": int(outstanding / 100),
+            "unpaidInvoices": unpaid_invoices,
+        },
+        "patients": {
+            "total": patients_total,
+            "active": active_count,
+            "inactive": inactive_count,
+            "unclassified": unclassified,
+            "newInPeriod": patients_new_in_period,
+            "addedTrailing12": patients_added_trailing12,
+            "sessionsPerPatient": patients_sessions_per_patient,
+            "returnRate": patients_return_rate,
+        },
+        "assessments": {
+            "sent": assessments_sent,
+            "notStarted": assessments_not_started,
+            "inProgress": assessments_in_progress,
+            "completed": assessments_completed,
+        },
+        "revenueByMonth": revenue_by_month,
+        "newPatientsByMonth": new_patients_by_month,
+        "exportCounts": export_counts,
+        "attention": attention,
+        "emptyAllTime": empty_all_time,
     }

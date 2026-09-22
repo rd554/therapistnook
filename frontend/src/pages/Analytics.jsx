@@ -1,618 +1,600 @@
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { BarChart3, Calendar, Download, Lock, RefreshCw } from 'lucide-react'
+import { MonthlyBarChart, SegmentBar } from '../components/analytics'
+import { getAnalyticsExportUrl, getPracticeAnalyticsSummary } from '../api/client'
 import {
-  BarChart3,
-  Users,
-  IndianRupee,
-  ClipboardList,
-  UserCog,
-  Loader2,
-  RefreshCw,
-  TrendingUp,
-  CheckCircle,
-  Clock,
-  UserPlus,
-  UserCheck,
-  UserMinus,
-  AlertCircle,
-  Target,
-} from 'lucide-react'
-import {
-  getAnalyticsOverview,
-  getPatientAnalytics,
-  getRevenueAnalytics,
-  getAssessmentAnalytics,
-  getPractitionerAnalytics,
-  getAnalyticsExportUrl,
-} from '../api/client'
-import { KPICard, DateFilter, BarChart, LineChart, PieChart, ExportButton } from '../components/analytics'
+  alignToMonths,
+  formatCount,
+  formatINR,
+  formatPeriod,
+  periodBounds,
+  periodLabel,
+  recentPeriods,
+  trailingMonths,
+} from '../utils/practiceAnalytics'
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-function formatCurrency(amount, showSymbol = true) {
-  const formatted = new Intl.NumberFormat('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount / 100)
-  return showSymbol ? `₹${formatted}` : formatted
+// The existing /api/analytics/export routes stay as they are (see main.py) —
+// this is the closest report_type each CSV row can reuse. They're
+// summary-metric CSVs, not the raw per-patient/session rows the export
+// menu's copy describes; building true row-level exporters is a separate
+// piece of backend work this pass didn't include.
+const REPORT_TYPE_BY_DATASET = {
+  invoices: 'revenue',
+  sessions: 'appointments',
+  patients: 'patients',
+  assessments: 'assessments',
 }
 
-function formatShortCurrency(amount) {
-  const value = amount / 100
-  if (value >= 100000) return `₹${(value / 100000).toFixed(1)}L`
-  if (value >= 1000) return `₹${(value / 1000).toFixed(1)}K`
-  return `₹${value.toFixed(0)}`
+function currentPeriod() {
+  const d = new Date()
+  return { year: d.getFullYear(), month: d.getMonth() + 1 }
 }
 
+/**
+ * Practice Analytics
+ *
+ * One page, one period control. Every figure outside the trend charts is
+ * scoped to `period`; the charts always show the trailing 12 months with the
+ * selected month highlighted, and say so in their headers.
+ */
 export default function Analytics() {
-  const [activeTab, setActiveTab] = useState('overview')
-  const [period, setPeriod] = useState('this_month')
-  const [startDate, setStartDate] = useState(null)
-  const [endDate, setEndDate] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  
-  const [overview, setOverview] = useState(null)
-  const [patients, setPatients] = useState(null)
-  const [revenue, setRevenue] = useState(null)
-  const [assessments, setAssessments] = useState(null)
-  const [practitioners, setPractitioners] = useState(null)
+  const navigate = useNavigate()
+  const [period, setPeriod] = useState(currentPeriod)
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const theme = useThemeColors()
 
-  const isAdmin = localStorage.getItem('mmpi_role') === 'owner'
-
-  const tabs = [
-    { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'patients', label: 'Patients', icon: Users },
-    { id: 'revenue', label: 'Revenue', icon: IndianRupee },
-    { id: 'assessments', label: 'Assessments', icon: ClipboardList },
-    ...(isAdmin ? [{ id: 'practitioners', label: 'Practitioners', icon: UserCog }] : []),
-  ]
-
-  useEffect(() => {
-    loadData()
+  const load = useCallback(async (p) => {
+    setData(null)
+    setError(null)
+    try {
+      const res = await getPracticeAnalyticsSummary(p)
+      setData(res)
+    } catch (err) {
+      setError(err.userMessage || 'Could not load analytics.')
+    }
   }, [])
 
   useEffect(() => {
-    if (activeTab !== 'overview') {
-      loadTabData(activeTab)
-    }
-  }, [activeTab, period, startDate, endDate])
+    load(period)
+  }, [period, load])
 
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      const overviewData = await getAnalyticsOverview()
-      setOverview(overviewData)
-    } catch (err) {
-      console.error('Failed to load analytics:', err)
-    } finally {
-      setLoading(false)
-    }
+  const onAction = (item) => {
+    if (item.id === 'unpaid') navigate('/payments')
+    else if (item.id === 'not-started') navigate('/assessments')
+    else if (item.id === 'upcoming') navigate('/calendar')
   }
 
-  const loadTabData = async (tab) => {
-    setRefreshing(true)
-    const params = { period, startDate, endDate }
-    
-    try {
-      switch (tab) {
-        case 'patients':
-          setPatients(await getPatientAnalytics({ ...params, period: period === 'today' ? 'this_month' : period }))
-          break
-        case 'revenue':
-          setRevenue(await getRevenueAnalytics({ ...params, period: period === 'today' ? 'this_month' : period }))
-          break
-        case 'assessments':
-          setAssessments(await getAssessmentAnalytics({ ...params, period: period === 'today' ? 'this_month' : period }))
-          break
-        case 'practitioners':
-          if (isAdmin) {
-            setPractitioners(await getPractitionerAnalytics(params))
-          }
-          break
-      }
-    } catch (err) {
-      console.error(`Failed to load ${tab} data:`, err)
-    } finally {
-      setRefreshing(false)
-    }
-  }
-
-  const handleRefresh = () => {
-    if (activeTab === 'overview') {
-      loadData()
-    } else {
-      loadTabData(activeTab)
-    }
-  }
-
-  const handleExport = (format) => {
-    const reportType = activeTab === 'overview' ? 'overview' : activeTab
-    const url = getAnalyticsExportUrl(reportType, { period, startDate, endDate, format })
+  const onExport = ({ kind, dataset, period: p }) => {
+    if (kind !== 'csv') return
+    const reportType = REPORT_TYPE_BY_DATASET[dataset]
+    if (!reportType) return
+    const { start, end } = periodBounds(p)
+    const url = getAnalyticsExportUrl(reportType, {
+      period: 'custom',
+      startDate: start,
+      endDate: end,
+      format: 'csv',
+    })
     window.open(url, '_blank')
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
-      </div>
-    )
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Practice Analytics</h1>
-          <p className="text-sm text-gray-500">Insights and metrics for your practice</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <ExportButton onExport={handleExport} />
-        </div>
-      </div>
+    <div className="clinical-ink">
+      <div className="analytics-page">
+        <header className="analytics-header">
+          <div className="flex flex-col gap-0.5">
+            <h1 className="t-h1">Practice Analytics</h1>
+            <p className="t-caption">
+              Every number on this page follows the period selected on the right. Trends always show the
+              trailing 12 months.
+            </p>
+          </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px">
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          return (
+          <div className="analytics-header-controls">
+            <PeriodPicker period={period} onChange={setPeriod} />
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-                activeTab === tab.id
-                  ? 'border-primary-500 text-primary-600'
-                  : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-              }`}
+              type="button"
+              aria-label="Refresh data"
+              onClick={() => load(period)}
+              className="btn btn-secondary btn-icon"
             >
-              <Icon className="h-4 w-4" />
-              {tab.label}
+              <RefreshCw size={16} />
             </button>
-          )
-        })}
-      </div>
-
-      {/* Date Filter (except overview) */}
-      {activeTab !== 'overview' && (
-        <DateFilter
-          period={period}
-          onPeriodChange={setPeriod}
-          startDate={startDate}
-          endDate={endDate}
-          onDateRangeChange={(start, end) => {
-            setStartDate(start)
-            setEndDate(end)
-          }}
-        />
-      )}
-
-      {/* Tab Content */}
-      {refreshing && activeTab !== 'overview' ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-primary-500" />
-        </div>
-      ) : (
-        <>
-          {activeTab === 'overview' && overview && <OverviewTab data={overview} />}
-          {activeTab === 'patients' && patients && <PatientsTab data={patients} />}
-          {activeTab === 'revenue' && revenue && <RevenueTab data={revenue} />}
-          {activeTab === 'assessments' && assessments && <AssessmentsTab data={assessments} />}
-          {activeTab === 'practitioners' && practitioners && <PractitionersTab data={practitioners} />}
-        </>
-      )}
-    </div>
-  )
-}
-
-function OverviewTab({ data }) {
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <KPICard
-        title="Total Patients"
-        value={data.total_patients}
-        subtitle={`${data.active_patients} active`}
-        icon={Users}
-        color="primary"
-      />
-      <KPICard
-        title="New This Month"
-        value={data.new_patients_this_month}
-        subtitle={`${data.returning_patients} returning`}
-        icon={UserPlus}
-        color="green"
-      />
-      <KPICard
-        title="Sessions Completed"
-        value={data.sessions_completed}
-        subtitle={`${data.upcoming_appointments} upcoming`}
-        icon={CheckCircle}
-        color="blue"
-      />
-      <KPICard
-        title="Pending Payments"
-        value={data.pending_payments}
-        icon={AlertCircle}
-        color="amber"
-      />
-    </div>
-  )
-}
-
-function PatientsTab({ data }) {
-  const chartData = data.new_patients_by_month.map((m) => ({
-    label: `${MONTH_NAMES[m.month - 1]} ${m.year.toString().slice(-2)}`,
-    value: m.count,
-  }))
-
-  const pieData = [
-    { label: 'Active', value: data.active_patients },
-    { label: 'Inactive', value: data.inactive_patients },
-  ]
-
-  return (
-    <div className="space-y-6">
-      {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KPICard
-          title="Active Patients"
-          value={data.active_patients}
-          icon={UserCheck}
-          color="green"
-        />
-        <KPICard
-          title="Inactive Patients"
-          value={data.inactive_patients}
-          icon={UserMinus}
-          color="gray"
-        />
-        <KPICard
-          title="Avg Sessions/Patient"
-          value={data.avg_sessions_per_patient}
-          icon={Target}
-          color="blue"
-        />
-        <KPICard
-          title="Retention Rate"
-          value={`${data.retention_rate}%`}
-          icon={TrendingUp}
-          color="purple"
-        />
-      </div>
-
-      {/* Charts */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">New Patients by Month</h3>
-          <BarChart
-            data={chartData}
-            xKey="label"
-            yKey="value"
-            height={250}
-            color="#F3FAF5"
-            borderColor="#A8C7A1"
-          />
-        </div>
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">Patient Status Distribution</h3>
-          <div className="flex justify-center py-4">
-            <PieChart
-              data={pieData}
-              labelKey="label"
-              valueKey="value"
-              size={180}
-              colors={['#F3F0FE', '#FEF8E8']}
-              strokeColors={['#7C72E8', '#E8C66A']}
-            />
+            {data?.exportCounts && (
+              <ExportMenu period={period} counts={data.exportCounts} onExport={onExport} />
+            )}
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+        </header>
 
-function RevenueTab({ data }) {
-  const monthlyData = data.revenue_by_month.map((m) => ({
-    label: `${MONTH_NAMES[m.month - 1]}`,
-    value: m.amount,
-  }))
-
-  const methodData = Object.entries(data.revenue_by_method).map(([method, stats]) => ({
-    label: method.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
-    value: stats.amount,
-  })).filter(d => d.value > 0)
-
-  return (
-    <div className="space-y-6">
-      {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <KPICard
-          title="Monthly Revenue"
-          value={formatCurrency(data.monthly_revenue)}
-          icon={IndianRupee}
-          color="green"
-        />
-        <KPICard
-          title="Yearly Revenue"
-          value={formatCurrency(data.yearly_revenue)}
-          icon={TrendingUp}
-          color="blue"
-        />
-        <KPICard
-          title="Outstanding"
-          value={formatCurrency(data.outstanding_payments)}
-          icon={AlertCircle}
-          color="amber"
-        />
-      </div>
-
-      {/* Revenue details - using universal summary cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <KPICard
-          title="Total Revenue"
-          value={formatCurrency(data.total_revenue)}
-          subtitle="For selected period"
-          icon={IndianRupee}
-          color="green"
-        />
-        <KPICard
-          title="Avg Session Fee"
-          value={formatCurrency(data.avg_session_fee)}
-          subtitle="Per session"
-          icon={Target}
-          color="blue"
-        />
-        <KPICard
-          title="Total Refunds"
-          value={formatCurrency(data.total_refunds)}
-          subtitle="Refunded amount"
-          icon={AlertCircle}
-          color="amber"
-        />
-      </div>
-
-      {/* Charts */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">Revenue by Month</h3>
-          <BarChart
-            data={monthlyData}
-            xKey="label"
-            yKey="value"
-            height={250}
-            color="#F3FAF5"
-            borderColor="#A8C7A1"
-            formatValue={formatShortCurrency}
-          />
-        </div>
-        {methodData.length > 0 && (
-          <div className="card">
-            <h3 className="mb-4 text-sm font-semibold text-gray-800">Revenue by Payment Method</h3>
-            <div className="flex justify-center py-4">
-              <PieChart
-                data={methodData}
-                labelKey="label"
-                valueKey="value"
-                size={180}
-                formatValue={formatShortCurrency}
-                colors={['#F3F0FE', '#F3FAF5', '#FEF8E8', '#EEF5FF']}
-                strokeColors={['#7C72E8', '#A8C7A1', '#E8C66A', '#A7BED3']}
-              />
-            </div>
-          </div>
+        {error ? (
+          <div className="alert alert-error">{error}</div>
+        ) : data === null ? (
+          <AnalyticsSkeleton />
+        ) : (
+          <AnalyticsBody data={data} period={period} theme={theme} onAction={onAction} />
         )}
       </div>
     </div>
   )
 }
 
-function AssessmentsTab({ data }) {
-  const typeData = Object.entries(data.assessments_by_type).map(([type, stats]) => ({
-    label: type.toUpperCase(),
-    total: stats.total,
-    completed: stats.completed,
-  }))
+/* ---------- body ---------- */
 
-  const trendData = data.assessment_trend.map((t) => ({
-    label: `${MONTH_NAMES[t.month - 1]}`,
-    value: t.total,
-    completed: t.completed,
-  }))
+function AnalyticsBody({ data, period, theme, onAction }) {
+  const months = useMemo(() => trailingMonths(period), [period])
+  const selectedKey = months[months.length - 1]?.key
 
-  const statusData = [
-    { label: 'Completed', value: data.total_completed },
-    { label: 'Pending', value: data.pending },
-  ]
+  const revenueMonths = useMemo(
+    () => alignToMonths(months, data.revenueByMonth, { collected: 0, outstanding: 0 }),
+    [months, data.revenueByMonth]
+  )
+  const patientMonths = useMemo(
+    () => alignToMonths(months, data.newPatientsByMonth, { count: 0 }),
+    [months, data.newPatientsByMonth]
+  )
+
+  const revenueMax = niceMax(Math.max(...revenueMonths.map((m) => m.collected + m.outstanding), 1))
+  const patientMax = niceMax(Math.max(...patientMonths.map((m) => m.count), 1), [5, 10, 20, 50])
+
+  const thisMonth = periodLabel(period)
 
   return (
-    <div className="space-y-6">
-      {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KPICard
-          title="Total Sent"
-          value={data.total_sent}
-          icon={ClipboardList}
-          color="primary"
+    <>
+      <section className="analytics-kpis">
+        <Kpi
+          label="Sessions completed"
+          value={formatCount(data.sessions.completed)}
+          note={`${formatCount(data.sessions.upcoming)} upcoming this week`}
         />
-        <KPICard
-          title="Completed"
-          value={data.total_completed}
-          icon={CheckCircle}
-          color="green"
+        <Kpi
+          label={`Collected ${thisMonth}`}
+          value={formatINR(data.revenue.collectedInPeriod)}
+          note={`${formatINR(data.revenue.collectedTrailing12)} in the last 12 months`}
         />
-        <KPICard
-          title="Pending"
-          value={data.pending}
-          icon={Clock}
-          color="amber"
+        <Kpi
+          label="Outstanding today"
+          value={formatINR(data.revenue.outstanding)}
+          note={`Across ${formatCount(data.revenue.unpaidInvoices)} unpaid invoices`}
+          alert
         />
-        <KPICard
-          title="Completion Rate"
-          value={`${data.completion_rate}%`}
-          icon={Target}
-          color="blue"
+        <Kpi
+          label="Active patients"
+          value={formatCount(data.patients.active)}
+          note={`of ${formatCount(data.patients.total)} on record · ${formatCount(
+            data.patients.newInPeriod
+          )} new ${thisMonth}`}
         />
-      </div>
+      </section>
 
-      {/* Charts */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">Assessments by Type</h3>
-          <div className="space-y-3">
-            {typeData.map((item) => (
-              <div key={item.label} className="flex items-center gap-4">
-                <div className="w-20 text-sm font-medium text-gray-700">{item.label}</div>
-                <div className="flex-1">
-                  <div className="flex h-6 overflow-hidden rounded-full border" style={{ borderColor: '#A8C7A1' }}>
-                    <div
-                      className="transition-all"
-                      style={{ width: `${item.total > 0 ? (item.completed / item.total) * 100 : 0}%`, backgroundColor: '#F3FAF5' }}
-                    />
-                    <div
-                      className="bg-amber-300"
-                      style={{ width: `${item.total > 0 ? ((item.total - item.completed) / item.total) * 100 : 0}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="w-24 text-right text-sm text-gray-600">
-                  {item.completed}/{item.total}
-                </div>
+      {data.attention.length > 0 && (
+        <section className="card">
+          <div className="analytics-panel-head" style={{ marginBottom: 14 }}>
+            <h2 className="t-h3">Needs attention</h2>
+            <span className="t-caption">{data.attention.length} items</span>
+          </div>
+          {data.attention.map((item) => (
+            <AttentionRow key={item.id} item={item} onAction={onAction} />
+          ))}
+        </section>
+      )}
+
+      {data.emptyAllTime ? (
+        <div className="empty">
+          <BarChart3 size={28} strokeWidth={1.5} className="mx-auto mb-3" style={{ color: 'var(--icon-muted)' }} />
+          <h3 className="empty-title">No activity yet</h3>
+          <p className="empty-body">Analytics appear after your first session is recorded.</p>
+        </div>
+      ) : (
+        <>
+        <div className="analytics-panels">
+          <section className="card">
+            <div className="analytics-panel-head">
+              <h2 className="t-h3">Revenue</h2>
+              <div className="analytics-legend">
+                <Swatch color={theme.accent}>Collected</Swatch>
+                <Swatch color={theme.error}>Outstanding</Swatch>
               </div>
-            ))}
-          </div>
-        </div>
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">Completion Status</h3>
-          <div className="flex justify-center py-4">
-            <PieChart
-              data={statusData}
-              labelKey="label"
-              valueKey="value"
-              size={180}
-              colors={['#F5F3FE', '#FEF8E8']}
-              strokeColors={['#7C72E8', '#E8C66A']}
+            </div>
+            <div className="analytics-legend-mobile">
+              <Swatch color={theme.accent}>Collected</Swatch>
+              <Swatch color={theme.error}>Outstanding</Swatch>
+            </div>
+            <p className="t-caption">
+              Billed {formatINR(data.revenue.billedTrailing12)} · collected{' '}
+              {formatINR(data.revenue.collectedTrailing12)} · outstanding {formatINR(data.revenue.outstanding)}
+            </p>
+            <MonthlyBarChart
+              months={revenueMonths}
+              series={[
+                { key: 'collected', label: 'Collected', color: theme.accent },
+                { key: 'outstanding', label: 'Outstanding', color: theme.error },
+              ]}
+              max={revenueMax}
+              ticks={revenueTicks(revenueMax)}
+              selectedKey={selectedKey}
+              valueLabel={(row) =>
+                row.collected + row.outstanding > 0
+                  ? formatINR(row.collected + row.outstanding, { compact: true })
+                  : null
+              }
+              ariaLabel="Revenue by month over the trailing twelve months, split into collected and outstanding."
             />
-          </div>
-        </div>
-      </div>
+          </section>
 
-      {/* Trend */}
-      {trendData.length > 1 && (
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">Assessment Trend</h3>
-          <LineChart
-            data={trendData}
-            xKey="label"
-            yKey="value"
-            height={200}
-            color="#8b5cf6"
-          />
+          <section className="card analytics-side">
+            <h2 className="t-h3">MMPI-2 assessments</h2>
+            <p className="flex items-baseline gap-2" style={{ marginTop: 6 }}>
+              <span className="analytics-kpi-value">{formatCount(data.assessments.sent)}</span>
+              <span className="t-caption">sent {thisMonth}</span>
+            </p>
+            <SegmentBar
+              className="analytics-segment-bar"
+              segments={[
+                { key: 'notStarted', label: 'Not started', value: data.assessments.notStarted, color: theme.error },
+                { key: 'inProgress', label: 'In progress', value: data.assessments.inProgress, color: theme.accent },
+                { key: 'completed', label: 'Completed', value: data.assessments.completed, color: 'var(--border)' },
+              ]}
+            />
+            <ul className="analytics-legend-list">
+              <LegendRow color={theme.error} label="Not started" value={data.assessments.notStarted} />
+              <LegendRow color={theme.accent} label="In progress" value={data.assessments.inProgress} />
+              <LegendRow color="var(--border)" label="Completed" value={data.assessments.completed} last />
+            </ul>
+            <a href="/assessments" className="link" style={{ display: 'inline-block', marginTop: 8 }}>
+              Open assessment list
+            </a>
+          </section>
+        </div>
+
+        <div className="analytics-panels">
+          <section className="card">
+            <div className="analytics-panel-head">
+              <h2 className="t-h3">New patients</h2>
+              <span className="t-caption">Trailing 12 months</span>
+            </div>
+            <p className="t-caption">
+              {formatCount(data.patients.addedTrailing12)} added · {data.patients.sessionsPerPatient} sessions per
+              patient
+            </p>
+            <MonthlyBarChart
+              months={patientMonths}
+              series={[{ key: 'count', label: 'New patients', color: theme.accent }]}
+              max={patientMax}
+              ticks={countTicks(patientMax)}
+              selectedKey={selectedKey}
+              valueLabel={(row) => (row.count > 0 ? String(row.count) : null)}
+              ariaLabel="New patients by month over the trailing twelve months."
+            />
+          </section>
+
+          <section className="card analytics-side">
+            <h2 className="t-h3">Patient mix</h2>
+            <p className="analytics-mix-note">{formatCount(data.patients.total)} patients on record</p>
+            <SegmentBar
+              className="analytics-segment-bar"
+              segments={[
+                { key: 'active', label: 'Active', value: data.patients.active, color: theme.accent },
+                { key: 'inactive', label: 'Inactive', value: data.patients.inactive, color: 'var(--text-muted)' },
+                {
+                  key: 'unclassified',
+                  label: 'Unclassified',
+                  value: data.patients.unclassified,
+                  color: 'var(--surface)',
+                  dashed: true,
+                },
+              ]}
+            />
+            <ul className="analytics-legend-list">
+              <MixRow color={theme.accent} label="Active" value={data.patients.active} total={data.patients.total} />
+              <MixRow
+                color="var(--text-muted)"
+                label="Inactive"
+                value={data.patients.inactive}
+                total={data.patients.total}
+              />
+              <MixRow
+                color="var(--surface)"
+                dashed
+                label="Unclassified"
+                value={data.patients.unclassified}
+                total={data.patients.total}
+                last
+              />
+            </ul>
+            <div className="analytics-side-stats">
+              <Stat label="Sessions / patient" value={data.patients.sessionsPerPatient} />
+              <Stat label="Returned for a 2nd session" value={`${data.patients.returnRate}%`} />
+            </div>
+          </section>
+        </div>
+        </>
+      )}
+    </>
+  )
+}
+
+/* ---------- pieces ---------- */
+
+function Kpi({ label, value, note, alert = false }) {
+  return (
+    <div className={`analytics-kpi${alert ? ' is-alert' : ''}`}>
+      <span className="t-caption" style={{ fontWeight: 600 }}>
+        {label}
+      </span>
+      <div className="analytics-kpi-value">{value}</div>
+      <div className="t-caption">{note}</div>
+    </div>
+  )
+}
+
+function AttentionRow({ item, onAction }) {
+  return (
+    <div className="analytics-attention-row">
+      <div className="analytics-attention-main">
+        <span className="analytics-attention-title">{item.title}</span>
+        <span className="analytics-attention-detail">{item.detail}</span>
+      </div>
+      <button type="button" onClick={() => onAction?.(item)} className="btn btn-secondary">
+        {item.action}
+      </button>
+    </div>
+  )
+}
+
+function PeriodPicker({ period, onChange }) {
+  const options = useMemo(() => recentPeriods(currentPeriod(), 24), [])
+  const value = `${period.year}-${String(period.month).padStart(2, '0')}`
+
+  const handleChange = (e) => {
+    const [year, month] = e.target.value.split('-').map(Number)
+    onChange({ year, month })
+  }
+
+  return (
+    <div className="analytics-period">
+      <Calendar className="analytics-period-icon" aria-hidden="true" />
+      <select
+        aria-label="Select period"
+        className="analytics-period-select"
+        value={value}
+        onChange={handleChange}
+      >
+        {options.map((p) => {
+          const v = `${p.year}-${String(p.month).padStart(2, '0')}`
+          return (
+            <option key={v} value={v}>
+              {formatPeriod(p)}
+            </option>
+          )
+        })}
+      </select>
+    </div>
+  )
+}
+
+/**
+ * Dropdown on desktop, bottom sheet on phones. Same options either way —
+ * the difference is reach, not content.
+ */
+function ExportMenu({ period, counts, onExport }) {
+  const [open, setOpen] = useState(false)
+  const wrap = useRef(null)
+  const isPhone = useMediaQuery('(max-width: 1023px)')
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => e.key === 'Escape' && setOpen(false)
+    const onClick = (e) => {
+      if (!isPhone && wrap.current && !wrap.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onClick)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onClick)
+    }
+  }, [open, isPhone])
+
+  const pick = (kind, dataset) => {
+    setOpen(false)
+    onExport?.({ kind, dataset, period })
+  }
+
+  const csvRows = [
+    { key: 'invoices', label: 'Invoices', note: counts.invoices },
+    { key: 'sessions', label: 'Sessions', note: counts.sessions },
+    { key: 'patients', label: 'Patients', note: counts.patients },
+    { key: 'assessments', label: 'Assessments', note: counts.assessments },
+  ]
+
+  const body = (
+    <>
+      {/* No backend PDF generator exists yet — disabled rather than faked. */}
+      <button type="button" disabled className="analytics-export-pdf">
+        <span className="analytics-export-pdf-title">PDF summary</span>
+        <span className="analytics-export-pdf-note">Not available yet.</span>
+      </button>
+
+      <p className="analytics-export-label">Raw data (CSV)</p>
+      {csvRows.map((row) => (
+        <button key={row.key} type="button" onClick={() => pick('csv', row.key)} className="analytics-export-row">
+          <span>{row.label}</span>
+          <span className="analytics-export-row-note">{row.note}</span>
+        </button>
+      ))}
+
+      <p className="analytics-export-lock">
+        <Lock size={14} strokeWidth={1.8} aria-hidden="true" />
+        CSVs carry patient names and clinical identifiers. Downloads are logged.
+      </p>
+    </>
+  )
+
+  return (
+    <div ref={wrap} className="analytics-export">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Export"
+        onClick={() => setOpen((v) => !v)}
+        className="btn btn-primary"
+      >
+        <Download size={16} strokeWidth={1.9} aria-hidden="true" />
+        <span className="hidden lg:inline">Export</span>
+      </button>
+
+      {open && !isPhone && (
+        <div role="menu" className="analytics-export-panel">
+          <p className="analytics-export-meta">{formatPeriod(period)} · current filter</p>
+          {body}
+        </div>
+      )}
+
+      {open && isPhone && (
+        <div
+          className="analytics-export-sheet-backdrop"
+          onClick={(e) => e.target === e.currentTarget && setOpen(false)}
+        >
+          <div role="dialog" aria-label="Export" className="analytics-export-sheet">
+            <div className="analytics-export-sheet-handle" />
+            <div className="analytics-export-sheet-head">
+              <h2 className="t-h3">Export</h2>
+              <span className="t-caption">{formatPeriod(period)} · current filter</span>
+            </div>
+            {body}
+            <button type="button" onClick={() => setOpen(false)} className="btn btn-secondary">
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function PractitionersTab({ data }) {
-  if (!data?.practitioners?.length) {
-    return (
-      <div className="card py-12 text-center">
-        <UserCog className="mx-auto h-12 w-12 text-gray-300" />
-        <p className="mt-4 text-gray-500">No practitioner data available</p>
-      </div>
-    )
-  }
-
+function LegendRow({ color, label, value, last = false }) {
   return (
-    <div className="space-y-6">
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-sm font-medium text-gray-500">
-              <th className="pb-3 pr-4">Practitioner</th>
-              <th className="pb-3 pr-4 text-right">Patients</th>
-              <th className="pb-3 pr-4 text-right">Appointments</th>
-              <th className="pb-3 pr-4 text-right">Completed</th>
-              <th className="pb-3 pr-4 text-right">Revenue</th>
-              <th className="pb-3 pr-4 text-right">Attendance</th>
-              <th className="pb-3 text-right">Cancellation</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {data.practitioners.map((prac) => (
-              <tr key={prac.practitioner_id} className="text-sm">
-                <td className="py-3 pr-4">
-                  <div>
-                    <p className="font-medium text-gray-900">{prac.name}</p>
-                    <p className="text-xs text-gray-500">{prac.email}</p>
-                  </div>
-                </td>
-                <td className="py-3 pr-4 text-right text-gray-700">{prac.patients_managed}</td>
-                <td className="py-3 pr-4 text-right text-gray-700">{prac.appointments_total}</td>
-                <td className="py-3 pr-4 text-right text-gray-700">{prac.appointments_completed}</td>
-                <td className="py-3 pr-4 text-right font-medium text-green-600">
-                  {formatCurrency(prac.revenue)}
-                </td>
-                <td className="py-3 pr-4 text-right">
-                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                    prac.attendance_rate >= 80 ? 'bg-green-100 text-green-700' :
-                    prac.attendance_rate >= 60 ? 'bg-amber-100 text-amber-700' :
-                    'bg-red-100 text-red-700'
-                  }`}>
-                    {prac.attendance_rate}%
-                  </span>
-                </td>
-                <td className="py-3 text-right">
-                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                    prac.cancellation_rate <= 10 ? 'bg-green-100 text-green-700' :
-                    prac.cancellation_rate <= 20 ? 'bg-amber-100 text-amber-700' :
-                    'bg-red-100 text-red-700'
-                  }`}>
-                    {prac.cancellation_rate}%
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <li className={`analytics-legend-row${last ? ' is-last' : ''}`}>
+      <span className="analytics-legend-key">
+        <span className="analytics-legend-swatch" style={{ background: color }} />
+        {label}
+      </span>
+      <span className="analytics-legend-value">{value}</span>
+    </li>
+  )
+}
 
-      {/* Comparison Charts */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">Revenue by Practitioner</h3>
-          <BarChart
-            data={data.practitioners.map(p => ({ label: p.name.split(' ')[0], value: p.revenue }))}
-            xKey="label"
-            yKey="value"
-            height={200}
-            color="#F3FAF5"
-            borderColor="#A8C7A1"
-            formatValue={formatShortCurrency}
-          />
-        </div>
-        <div className="card">
-          <h3 className="mb-4 text-sm font-semibold text-gray-800">Appointments by Practitioner</h3>
-          <BarChart
-            data={data.practitioners.map(p => ({ label: p.name.split(' ')[0], value: p.appointments_completed }))}
-            xKey="label"
-            yKey="value"
-            height={200}
-            color="#EBE8FD"
-            borderColor="#7C72E8"
-          />
-        </div>
+function MixRow({ color, label, value, total, dashed = false, last = false }) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0
+  return (
+    <li className={`analytics-legend-row${last ? ' is-last' : ''}`}>
+      <span className="analytics-legend-key">
+        <span
+          className="analytics-legend-swatch"
+          style={{ background: color, border: dashed ? '1px dashed var(--border)' : undefined }}
+        />
+        {label}
+      </span>
+      <span className="t-caption" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <span className="analytics-legend-value" style={{ marginRight: 4 }}>
+          {value}
+        </span>
+        · {pct}%
+      </span>
+    </li>
+  )
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="analytics-side-stat">
+      <div className="t-caption">{label}</div>
+      <div className="t-h3" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {value}
       </div>
     </div>
   )
+}
+
+function Swatch({ color, children }) {
+  return (
+    <span className="analytics-swatch">
+      <span className="analytics-swatch-dot" style={{ background: color }} />
+      {children}
+    </span>
+  )
+}
+
+/* ---------- loading ---------- */
+
+function AnalyticsSkeleton() {
+  return (
+    <>
+      <section className="analytics-kpis">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="analytics-kpi">
+            <div className="analytics-skel" style={{ height: 12, width: '60%' }} />
+            <div className="analytics-skel" style={{ height: 28, width: '45%' }} />
+            <div className="analytics-skel" style={{ height: 12, width: '80%' }} />
+          </div>
+        ))}
+      </section>
+      <div className="analytics-panels">
+        <section className="card">
+          <div className="analytics-skel" style={{ height: 18, width: 140, marginBottom: 12 }} />
+          <div className="analytics-skel" style={{ height: 220, width: '100%' }} />
+        </section>
+        <section className="card analytics-side">
+          <div className="analytics-skel" style={{ height: 18, width: 160, marginBottom: 12 }} />
+          <div className="analytics-skel" style={{ height: 160, width: '100%' }} />
+        </section>
+      </div>
+    </>
+  )
+}
+
+/* ---------- helpers ---------- */
+
+// Reads --accent/--error off the document root so chart fills follow the
+// Clinical Ink tokens instead of a hardcoded hex, and stay correct if the
+// tokens ever change. tokens.css defines these on :root, not `.clinical-ink`,
+// so document.documentElement always has them regardless of scope.
+function useThemeColors() {
+  const [theme, setTheme] = useState({ accent: '#5A4AD1', error: '#A32E43' })
+  useEffect(() => {
+    const styles = getComputedStyle(document.documentElement)
+    const accent = styles.getPropertyValue('--accent').trim()
+    const err = styles.getPropertyValue('--error').trim()
+    setTheme({ accent: accent || '#5A4AD1', error: err || '#A32E43' })
+  }, [])
+  return theme
+}
+
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const onChange = () => setMatches(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [query])
+  return matches
+}
+
+function niceMax(value, steps) {
+  if (steps) return steps.find((s) => s >= value) ?? value
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)))
+  return Math.ceil(value / (magnitude / 2)) * (magnitude / 2)
+}
+
+function revenueTicks(max) {
+  return [0, max / 2, max].map((value) => ({ value, label: formatINR(value, { compact: true }) }))
+}
+
+function countTicks(max) {
+  return [0, max / 2, max].map((value) => ({ value, label: String(value) }))
 }

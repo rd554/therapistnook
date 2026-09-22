@@ -1,0 +1,639 @@
+/* ==========================================================================
+   Therapist Nook — Clinical Ink
+   Public profile block. Ported from the public-profile.css design spec,
+   scoped under .clinical-ink (every selector prefixed) to match this app's
+   convention — see the header comment in tokens.css for why bare selectors
+   aren't safe here (unlayered CSS beats Tailwind's utility layer on source
+   order alone, so an unscoped .pp-book or .pp-chip would leak outside the
+   public profile page into every other .clinical-ink-rooted page). Uses
+   existing tokens only; never redefines a token value and adds no new
+   colours.
+
+   Page: /p/:slug  — the link therapists paste into their Instagram bio.
+   Mobile is the primary layout; desktop adds a sticky right rail.
+
+   Reuses, does not redefine:
+     .btn-primary  .btn-secondary  .btn-ghost  .btn-icon  .link
+     .field  .input  .textarea  .toggle-group  .toggle-opt
+     .alert  .t-caption  and the -webkit-autofill override.
+
+   New here (all prefixed .pp-):
+     .pp-page  .pp-header  .pp-avatar  .pp-name  .pp-role  .pp-tagline  .pp-meta
+     .pp-layout  .pp-main  .pp-rail
+     .pp-section  .pp-section-title  .pp-body  .pp-chips  .pp-chip
+     .pp-quals  .pp-acc  .pp-acc-panel  .pp-contact
+     .pp-book  .pp-fee  .pp-slots  .pp-slot
+     .pp-crisis  .pp-footer  .pp-stickybar
+     .pp-sheet  .pp-sheet-scrim  .pp-sheet-handle  .pp-sheet-done
+   ========================================================================== */
+
+
+/* --------------------------------------------------------------------------
+   Page frame. White ground, no cover image, no gradient.
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 56px 24px 64px;
+  color: var(--text-primary);
+  background: var(--canvas);
+}
+
+@media (max-width: 1023px) {
+  .clinical-ink .pp-page {
+    max-width: 640px;
+    padding: 28px 20px calc(112px + env(safe-area-inset-bottom, 0px));
+    /* bottom padding leaves room for the sticky booking bar */
+  }
+}
+
+
+/* --------------------------------------------------------------------------
+   Header: photo, name, role line, tagline, credentials line.
+   The credentials line is the trust signal — years, languages, where,
+   and the RCI number. Plain text, no icons.
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.clinical-ink .pp-avatar {
+  flex-shrink: 0;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface);
+  border: var(--border-width, 1px) solid var(--border);
+}
+
+/* no photo uploaded: initials on --surface, never a generic person glyph */
+.clinical-ink .pp-avatar-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-secondary);
+}
+
+.clinical-ink .pp-name {
+  margin: 0;
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.clinical-ink .pp-role {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.clinical-ink .pp-tagline {
+  margin: 4px 0 0;
+  max-width: 60ch;
+  font-size: 17px;
+  line-height: 26px;
+  color: var(--text-primary);
+}
+
+.clinical-ink .pp-meta {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text-muted);
+}
+
+/* On desktop the role line sits inside .pp-meta; on mobile it moves under
+   the name and the tagline drops below the photo row. */
+.clinical-ink .pp-header-text > .pp-role { display: none; }
+
+@media (max-width: 1023px) {
+  .clinical-ink .pp-header { gap: 14px; }
+  .clinical-ink .pp-avatar { width: 76px; height: 76px; }
+  .clinical-ink .pp-avatar-initials { font-size: 24px; }
+  .clinical-ink .pp-name { font-size: 23px; line-height: 29px; }
+  .clinical-ink .pp-header-text > .pp-role { display: block; }
+  .clinical-ink .pp-header-text > .pp-tagline,
+  .clinical-ink .pp-header-text > .pp-meta { display: none; }
+  .clinical-ink .pp-header-below { display: block; }
+  .clinical-ink .pp-header-below .pp-tagline { margin-top: 16px; font-size: 16px; line-height: 25px; }
+  .clinical-ink .pp-header-below .pp-meta { margin-top: 10px; font-size: 12.5px; line-height: 18px; }
+}
+@media (min-width: 1024px) {
+  .clinical-ink .pp-header-below { display: none; }
+}
+
+
+/* --------------------------------------------------------------------------
+   Layout: main column + sticky rail on desktop, one column on mobile.
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 620px) 340px;
+  gap: 40px;
+  align-items: start;
+  margin-top: 36px;
+  padding-top: 36px;
+  border-top: var(--border-width, 1px) solid var(--hairline);
+}
+
+.clinical-ink .pp-rail {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 1023px) {
+  .clinical-ink .pp-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    margin-top: 20px;
+    padding-top: 0;
+    border-top: none;
+  }
+  /* on mobile the rail's booking card moves to the top of the flow
+     (render it twice with visibility classes, or reorder with order:) */
+  .clinical-ink .pp-rail { position: static; order: -1; }
+}
+
+
+/* --------------------------------------------------------------------------
+   Sections. A hairline between each; title is a small bold label, not a
+   big heading — the name is the only large type on the page.
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-section + .pp-section {
+  margin-top: 32px;
+  padding-top: 32px;
+  border-top: var(--border-width, 1px) solid var(--hairline);
+}
+
+.clinical-ink .pp-section-title {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.clinical-ink .pp-body {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 25px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 1023px) {
+  .clinical-ink .pp-section + .pp-section { margin-top: 24px; padding-top: 24px; }
+  .clinical-ink .pp-section-title { font-size: 13px; line-height: 18px; margin-bottom: 10px; }
+  .clinical-ink .pp-body { font-size: 14.5px; line-height: 23px; }
+}
+
+
+/* Chips: neutral outline. Not lavender — nine purple pills on one page
+   spend the whole accent budget on labels. */
+.clinical-ink .pp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.clinical-ink .pp-body + .pp-chips { margin-top: 18px; }
+
+.clinical-ink .pp-chip {
+  display: inline-block;
+  padding: 7px 13px;
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: 999px;
+  background: var(--canvas);
+  font-size: 13.5px;
+  line-height: 18px;
+  color: var(--text-primary);
+}
+
+
+/* Qualifications: ruled list, degree over institution · year. */
+.clinical-ink .pp-quals {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.clinical-ink .pp-quals li {
+  padding: 13px 0;
+  border-top: var(--border-width, 1px) solid var(--hairline);
+}
+.clinical-ink .pp-quals li:first-child { border-top: none; padding-top: 0; }
+.clinical-ink .pp-quals strong {
+  display: block;
+  font-size: 14.5px;
+  line-height: 21px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.clinical-ink .pp-quals span {
+  display: block;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text-muted);
+}
+
+
+/* --------------------------------------------------------------------------
+   Accordion — "Before your first session" and "Common questions".
+   <button class="pp-acc" aria-expanded="false" aria-controls="acc-1">
+     What to expect <svg …chevron…/>
+   </button>
+   <div class="pp-acc-panel" id="acc-1" hidden>…</div>
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-acc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 0;
+  border: none;
+  border-top: var(--border-width, 1px) solid var(--hairline);
+  background: none;
+  font-family: inherit;
+  font-size: 14.5px;
+  line-height: 21px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.clinical-ink .pp-acc-group > .pp-acc:first-child { border-top: none; }
+.clinical-ink .pp-acc-group { border-bottom: var(--border-width, 1px) solid var(--hairline); }
+
+.clinical-ink .pp-acc svg {
+  flex-shrink: 0;
+  color: var(--icon-muted);
+  transition: transform .15s ease;
+}
+.clinical-ink .pp-acc[aria-expanded="true"] svg { transform: rotate(180deg); }
+.clinical-ink .pp-acc:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); border-radius: 6px; }
+
+.clinical-ink .pp-acc-panel {
+  padding: 0 0 16px;
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 25px;
+  color: var(--text-secondary);
+}
+.clinical-ink .pp-acc-panel p { margin: 0; }
+.clinical-ink .pp-acc-panel p + p { margin-top: 10px; }
+
+@media (max-width: 1023px) {
+  .clinical-ink .pp-acc { min-height: 52px; font-size: 14px; line-height: 20px; }
+  .clinical-ink .pp-acc-panel { font-size: 14.5px; line-height: 23px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clinical-ink .pp-acc svg { transition: none; }
+}
+
+
+/* Contact rows: 18px stroke icon + value. Values are real links
+   (mailto:, tel:, maps, instagram) and each row is a 44px target. */
+.clinical-ink .pp-contact {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.clinical-ink .pp-contact li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 9px 0;
+  box-sizing: border-box;
+  font-size: 14.5px;
+  line-height: 21px;
+  color: var(--text-primary);
+}
+.clinical-ink .pp-contact svg { flex-shrink: 0; margin-top: 2px; color: var(--icon); }
+.clinical-ink .pp-contact a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.clinical-ink .pp-contact a:hover { text-decoration: underline; }
+
+
+/* --------------------------------------------------------------------------
+   Booking card: fee, optional fee note, the one primary button, next
+   available slots, hours line. In the rail on desktop, inline near the
+   top on mobile.
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-book {
+  padding: 20px;
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: 14px;
+  background: var(--canvas);
+}
+
+.clinical-ink .pp-fee {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.clinical-ink .pp-fee-amount {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.clinical-ink .pp-fee-unit,
+.clinical-ink .pp-fee-note,
+.clinical-ink .pp-hours {
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--text-muted);
+}
+.clinical-ink .pp-fee-note { margin: 6px 0 0; }
+.clinical-ink .pp-book > .btn-primary { width: 100%; min-height: 48px; margin-top: 16px; font-size: 15px; }
+
+.clinical-ink .pp-book-divider {
+  height: var(--border-width, 1px);
+  margin: 20px 0 16px;
+  background: var(--hairline);
+  border: none;
+}
+.clinical-ink .pp-slots-title {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 19px;
+  font-weight: 700;
+}
+.clinical-ink .pp-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.clinical-ink .pp-slot {
+  min-height: 44px;
+  padding: 0 12px;
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: 10px;
+  background: var(--canvas);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.clinical-ink .pp-slot:hover { background: var(--surface-hover); }
+.clinical-ink .pp-slot:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.clinical-ink .pp-hours { margin: 12px 0 0; }
+
+@media (max-width: 1023px) {
+  .clinical-ink .pp-book { padding: 16px; }
+  .clinical-ink .pp-fee-amount { font-size: 15px; line-height: 20px; font-weight: 700; letter-spacing: 0; }
+  .clinical-ink .pp-fee-unit, .clinical-ink .pp-fee-note, .clinical-ink .pp-hours { font-size: 12.5px; line-height: 18px; }
+  .clinical-ink .pp-book > .btn-primary { margin-top: 14px; }
+  /* slots become three equal buttons in a row, two-line labels */
+  .clinical-ink .pp-slots { flex-direction: row; }
+  .clinical-ink .pp-slot { flex: 1; min-width: 0; padding: 6px 8px; text-align: center; line-height: 18px; }
+}
+
+
+/* --------------------------------------------------------------------------
+   Crisis resources. Always on the profile — rail on desktop, above the
+   footer on mobile. Red is correct here: it is a safety flag.
+   Numbers are tel: links.
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-crisis {
+  padding: 16px 18px;
+  border: var(--border-width, 1px) solid var(--error-border);
+  border-radius: 14px;
+  background: var(--error-tint);
+}
+.clinical-ink .pp-crisis-title {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 19px;
+  font-weight: 700;
+  color: var(--error);
+}
+.clinical-ink .pp-crisis p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 21px;
+  color: var(--text-secondary);
+}
+.clinical-ink .pp-crisis ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 22px;
+  color: var(--text-secondary);
+}
+.clinical-ink .pp-crisis a {
+  display: inline-block;
+  min-height: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+.clinical-ink .pp-crisis a:hover { text-decoration: underline; }
+
+@media (max-width: 1023px) {
+  .clinical-ink .pp-crisis { margin-top: 24px; padding: 14px 16px; }
+  /* on mobile the list runs inline to stay compact */
+  .clinical-ink .pp-crisis ul { display: flex; flex-wrap: wrap; gap: 0 12px; }
+  .clinical-ink .pp-crisis a { min-height: 32px; line-height: 32px; }
+}
+
+
+.clinical-ink .pp-footer {
+  margin: 32px 0 0;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--text-muted);
+}
+.clinical-ink .pp-footer a { color: var(--text-muted); }
+
+
+/* --------------------------------------------------------------------------
+   Sticky booking bar — mobile only. Hidden until the booking card's
+   button scrolls out of view (IntersectionObserver toggles .is-visible).
+   Price on the left, the same primary button on the right.
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-stickybar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: none;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--canvas);
+  border-top: var(--border-width, 1px) solid var(--border);
+  transform: translateY(100%);
+  transition: transform .2s ease;
+}
+.clinical-ink .pp-stickybar.is-visible { transform: translateY(0); }
+.clinical-ink .pp-stickybar .btn-primary { flex: 1; min-height: 48px; font-size: 15px; }
+.clinical-ink .pp-stickybar-fee { min-width: 0; }
+.clinical-ink .pp-stickybar-fee strong { display: block; font-size: 14px; line-height: 20px; font-weight: 700; }
+.clinical-ink .pp-stickybar-fee span { display: block; font-size: 12px; line-height: 16px; color: var(--text-muted); }
+
+@media (max-width: 1023px) { .clinical-ink .pp-stickybar { display: flex; } }
+@media (prefers-reduced-motion: reduce) { .clinical-ink .pp-stickybar { transition: none; } }
+
+
+/* --------------------------------------------------------------------------
+   Booking sheet. Bottom sheet on mobile, centred dialog on desktop.
+   One screen: meeting mode, day, time, details, submit.
+   Mode/day/time use .toggle-group/.toggle-opt (graphite when selected).
+   -------------------------------------------------------------------------- */
+
+.clinical-ink .pp-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(21, 21, 27, .55);
+}
+
+.clinical-ink .pp-sheet {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  background: var(--canvas);
+  border-radius: 16px;
+  box-shadow: 0 20px 48px rgba(21, 21, 27, .18);
+}
+
+.clinical-ink .pp-sheet-handle { display: none; }
+
+.clinical-ink .pp-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.clinical-ink .pp-sheet-title {
+  margin: 0;
+  font-size: 19px;
+  line-height: 26px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.clinical-ink .pp-sheet-sub {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--text-muted);
+}
+
+.clinical-ink .pp-sheet-group-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  line-height: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* fixed grids so the options never wrap unevenly */
+.clinical-ink .pp-sheet .pp-mode  { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.clinical-ink .pp-sheet .pp-days  { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.clinical-ink .pp-sheet .pp-times { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.clinical-ink .pp-sheet .toggle-opt { min-height: 44px; padding: 4px 6px; line-height: 17px; font-size: 13px; }
+
+/* more days than fit: the day row scrolls sideways, snapping per day */
+.clinical-ink .pp-sheet .pp-days.is-scrolling {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.clinical-ink .pp-sheet .pp-days.is-scrolling .toggle-opt { flex: 0 0 62px; scroll-snap-align: start; }
+.clinical-ink .pp-sheet .pp-days.is-scrolling::-webkit-scrollbar { display: none; }
+
+.clinical-ink .pp-sheet-divider {
+  height: var(--border-width, 1px);
+  background: var(--hairline);
+  border: none;
+  margin: 0;
+}
+
+.clinical-ink .pp-sheet-fields { display: flex; flex-direction: column; gap: 12px; }
+.clinical-ink .pp-sheet-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.clinical-ink .pp-sheet .textarea { min-height: 70px; resize: vertical; }
+
+.clinical-ink .pp-sheet-submit { width: 100%; min-height: 48px; font-size: 15px; }
+.clinical-ink .pp-sheet-foot {
+  margin: -6px 0 0;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* confirmation state replaces the form inside the same sheet */
+.clinical-ink .pp-sheet-done {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.clinical-ink .pp-sheet-done h2 { margin: 0; font-size: 19px; line-height: 26px; font-weight: 800; }
+.clinical-ink .pp-sheet-done p { margin: 0; font-size: 14.5px; line-height: 23px; color: var(--text-secondary); }
+
+@media (max-width: 640px) {
+  .clinical-ink .pp-sheet-scrim { align-items: flex-end; padding: 0; }
+  .clinical-ink .pp-sheet {
+    max-width: none;
+    max-height: calc(100dvh - 32px);
+    padding: 10px 20px calc(24px + env(safe-area-inset-bottom, 0px));
+    border-radius: 20px 20px 0 0;
+    box-shadow: none;
+  }
+  .clinical-ink .pp-sheet-handle {
+    display: block;
+    align-self: center;
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+  }
+  /* keep the close button: scrim tap and swipe aren't available to
+     screen-reader or switch users */
+}

@@ -1,645 +1,546 @@
-import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { ChevronDown, Mail, Phone, MapPin, Instagram, FileText } from 'lucide-react'
 import {
-  User, MapPin, Mail, Phone, Instagram, Award, BookOpen, Languages,
-  Clock, Star, ChevronRight, FileText, Calendar, Stethoscope,
-  GraduationCap, BadgeCheck, Heart, ArrowRight, ExternalLink, X
-} from 'lucide-react'
-import {
-  getPublicProfile, getPublicResources, getPublicTestimonials, getPublicAvailability
+  getPublicProfile, getPublicOnboarding, getPublicResources, getPublicBookingSlots,
 } from '../api/client'
-import PublicBooking from '../components/PublicBooking'
+import BookingSheet from '../components/BookingSheet'
+import Modal from '../components/ui/Modal'
+import { CRISIS_RESOURCES } from '../constants/crisisResources'
 
-const THERAPY_APPROACH_LABELS = {
-  cognitive_behavioral: 'Cognitive Behavioral Therapy (CBT)',
-  psychodynamic: 'Psychodynamic Therapy',
-  humanistic: 'Humanistic Therapy',
-  integrative: 'Integrative Therapy',
-  mindfulness_based: 'Mindfulness-Based Therapy',
-  dialectical_behavior: 'Dialectical Behavior Therapy (DBT)',
-  solution_focused: 'Solution-Focused Therapy',
-  narrative: 'Narrative Therapy',
-  family_systems: 'Family Systems Therapy',
-  trauma_informed: 'Trauma-Informed Therapy',
-  acceptance_commitment: 'Acceptance and Commitment Therapy (ACT)',
-  interpersonal: 'Interpersonal Therapy',
-  gestalt: 'Gestalt Therapy',
-  emdr: 'EMDR',
-  art_therapy: 'Art Therapy',
-  play_therapy: 'Play Therapy',
-  other: 'Other',
-}
-
+// Sentence case everywhere per the design spec — these replace the old
+// Title Case maps that lived in this file.
 const SPECIALIZATION_LABELS = {
   anxiety: 'Anxiety',
   depression: 'Depression',
   trauma_ptsd: 'Trauma & PTSD',
-  relationship_issues: 'Relationship Issues',
-  grief_loss: 'Grief & Loss',
-  stress_management: 'Stress Management',
-  self_esteem: 'Self-Esteem',
-  anger_management: 'Anger Management',
+  relationship_issues: 'Relationship issues',
+  grief_loss: 'Grief & loss',
+  stress_management: 'Stress management',
+  self_esteem: 'Self-esteem',
+  anger_management: 'Anger management',
   ocd: 'OCD',
   addiction: 'Addiction',
-  eating_disorders: 'Eating Disorders',
-  bipolar_disorder: 'Bipolar Disorder',
-  personality_disorders: 'Personality Disorders',
+  eating_disorders: 'Eating disorders',
+  bipolar_disorder: 'Bipolar disorder',
+  personality_disorders: 'Personality disorders',
   schizophrenia: 'Schizophrenia',
-  child_adolescent: 'Child & Adolescent',
-  couples_therapy: 'Couples Therapy',
-  family_therapy: 'Family Therapy',
+  child_adolescent: 'Child & adolescent',
+  couples_therapy: 'Couples therapy',
+  family_therapy: 'Family therapy',
   lgbtq: 'LGBTQ+',
-  life_transitions: 'Life Transitions',
-  career_counseling: 'Career Counseling',
-  chronic_illness: 'Chronic Illness',
-  sleep_disorders: 'Sleep Disorders',
+  life_transitions: 'Life transitions',
+  career_counseling: 'Career counseling',
+  chronic_illness: 'Chronic illness',
+  sleep_disorders: 'Sleep disorders',
+  other: 'Other',
+}
+
+// Short forms for the About section — "Therapy" dropped, acronyms bare,
+// per spec item 108 ("Psychodynamic", "Mindfulness-based", "CBT"...).
+const APPROACH_CHIP_LABELS = {
+  cognitive_behavioral: 'CBT',
+  psychodynamic: 'Psychodynamic',
+  humanistic: 'Humanistic',
+  integrative: 'Integrative',
+  mindfulness_based: 'Mindfulness-based',
+  dialectical_behavior: 'DBT',
+  solution_focused: 'Solution-focused',
+  narrative: 'Narrative',
+  family_systems: 'Family systems',
+  trauma_informed: 'Trauma-informed',
+  acceptance_commitment: 'ACT',
+  interpersonal: 'Interpersonal',
+  gestalt: 'Gestalt',
+  emdr: 'EMDR',
+  art_therapy: 'Art',
+  play_therapy: 'Play',
   other: 'Other',
 }
 
 const RESOURCE_TYPE_LABELS = {
-  consent_form: 'Consent Form',
-  therapy_guidelines: 'Therapy Guidelines',
-  cancellation_policy: 'Cancellation Policy',
-  privacy_policy: 'Privacy Policy',
+  consent_form: 'Consent form',
+  therapy_guidelines: 'Therapy guidelines',
+  cancellation_policy: 'Cancellation policy',
+  privacy_policy: 'Privacy policy',
   faq: 'FAQ',
-  emergency_info: 'Emergency Information',
-  welcome_packet: 'Welcome Packet',
-  intake_instructions: 'Intake Instructions',
+  emergency_info: 'Emergency information',
+  welcome_packet: 'Welcome packet',
+  intake_instructions: 'Intake instructions',
   other: 'Other',
 }
 
 function formatCurrency(amount, currency = 'INR') {
-  if (!amount) return null
-  const value = amount / 100
+  if (amount == null) return null
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: currency,
+    currency,
     maximumFractionDigits: 0,
-  }).format(value)
+  }).format(amount / 100)
+}
+
+function formatSlotTime(iso) {
+  const s = new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })
+  return s.replace('AM', 'am').replace('PM', 'pm')
+}
+
+function formatSlotLabel(dateStr, iso) {
+  const d = new Date(`${dateStr}T00:00:00`)
+  const weekday = d.toLocaleDateString('en-IN', { weekday: 'short' })
+  return `${weekday} ${d.getDate()} · ${formatSlotTime(iso)}`
+}
+
+// Approximates "Monday to Friday, 9:00 AM – 6:00 PM" from the 14-day slot
+// window the booking endpoint returns. There's no endpoint that exposes the
+// underlying PractitionerAvailability weekly rule directly to the public
+// profile, so this is a best-effort summary of what's actually open in the
+// next two weeks rather than a literal readback of Scheduling settings.
+function buildHoursLine(days) {
+  const withSlots = (days || []).filter((d) => d.is_available && d.slots.length > 0)
+  if (withSlots.length === 0) return null
+  const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  const present = new Set(withSlots.map((d) => new Date(`${d.date}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'long' })))
+  const sorted = order.filter((w) => present.has(w))
+  const dayRange = sorted.length > 1 ? `${sorted[0]} to ${sorted[sorted.length - 1]}` : sorted[0]
+
+  let minMinutes = null
+  let maxMinutes = null
+  withSlots.forEach((d) => d.slots.forEach((s) => {
+    const start = new Date(s.start)
+    const end = new Date(s.end)
+    const startMin = start.getHours() * 60 + start.getMinutes()
+    const endMin = end.getHours() * 60 + end.getMinutes()
+    if (minMinutes === null || startMin < minMinutes) minMinutes = startMin
+    if (maxMinutes === null || endMin > maxMinutes) maxMinutes = endMin
+  }))
+  const fmt = (mins) => {
+    const d = new Date()
+    d.setHours(Math.floor(mins / 60), mins % 60, 0, 0)
+    return formatSlotTime(d.toISOString())
+  }
+  return `${dayRange}, ${fmt(minMinutes)} – ${fmt(maxMinutes)}.`
+}
+
+function setMetaTag(selector, attrs) {
+  let el = document.querySelector(selector)
+  if (!el) {
+    el = document.createElement('meta')
+    Object.entries(attrs).forEach(([k, v]) => { if (k !== 'content') el.setAttribute(k, v) })
+    document.head.appendChild(el)
+  }
+  if (attrs.content) el.setAttribute('content', attrs.content)
+}
+
+function AccordionItem({ id, title, open, onToggle, children }) {
+  return (
+    <div>
+      <button type="button" className="pp-acc" aria-expanded={open} aria-controls={id} onClick={onToggle}>
+        {title}
+        <ChevronDown size={16} strokeWidth={1.5} />
+      </button>
+      <div className="pp-acc-panel" id={id} hidden={!open}>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 export default function PublicProfile() {
   const { slug } = useParams()
   const [profile, setProfile] = useState(null)
+  const [onboarding, setOnboarding] = useState(null)
   const [resources, setResources] = useState([])
-  const [testimonials, setTestimonials] = useState([])
-  const [availability, setAvailability] = useState(null)
+  const [slotsData, setSlotsData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [activeTab, setActiveTab] = useState('about')
-  const [showBookingModal, setShowBookingModal] = useState(false)
+
+  const [sheetState, setSheetState] = useState(null) // null | { date, slot } | {}
+  const [readResource, setReadResource] = useState(null)
+  const [openPanels, setOpenPanels] = useState({ before: true, faq: null })
+  const [stickyVisible, setStickyVisible] = useState(false)
+
+  const mainRef = useRef(null)
+  const bookButtonRef = useRef(null)
 
   useEffect(() => {
-    loadProfile()
-  }, [slug])
-
-  async function loadProfile() {
-    try {
+    let cancelled = false
+    async function load() {
       setLoading(true)
       setError(null)
-      
-      const [profileData, resourcesData, testimonialsData, availabilityData] = await Promise.all([
-        getPublicProfile(slug),
-        getPublicResources(slug).catch(() => []),
-        getPublicTestimonials(slug).catch(() => []),
-        getPublicAvailability(slug, 7).catch(() => null),
-      ])
-      
-      setProfile(profileData)
-      setResources(resourcesData)
-      setTestimonials(testimonialsData)
-      setAvailability(availabilityData)
-    } catch (err) {
-      console.error('Failed to load profile:', err)
-      if (err.response?.status === 404) {
-        setError('Profile not found')
-      } else {
-        setError('Failed to load profile')
+      try {
+        const [profileData, onboardingData, resourcesData, slots] = await Promise.all([
+          getPublicProfile(slug),
+          getPublicOnboarding(slug).catch(() => null),
+          getPublicResources(slug).catch(() => []),
+          getPublicBookingSlots(slug, null, 14).catch(() => null),
+        ])
+        if (cancelled) return
+        setProfile(profileData)
+        setOnboarding(onboardingData)
+        setResources(resourcesData || [])
+        setSlotsData(slots)
+      } catch (err) {
+        if (cancelled) return
+        setError(err.response?.status === 404 ? 'Profile not found' : 'Failed to load profile')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-    } finally {
-      setLoading(false)
     }
-  }
+    load()
+    return () => { cancelled = true }
+  }, [slug])
+
+  // Best-effort client-side <title>/meta updates. This is NOT server-side
+  // rendering — the spec asks for name/tagline/booking button to be in the
+  // first HTML response for Instagram's in-app browser, which this Vite SPA
+  // (Vercel frontend, no prerender/SSR tooling) cannot do. Real crawlers and
+  // link-unfurlers will still see the static index.html defaults. Flagging
+  // this prominently rather than silently only fixing it for human visitors.
+  useEffect(() => {
+    if (!profile) return
+    const displayTitle = [profile.title, profile.display_name].filter(Boolean).join(' ')
+    const profession = profile.profession || 'Clinical psychologist'
+    document.title = displayTitle ? `${displayTitle} — ${profession}` : 'Therapist Nook'
+    setMetaTag('meta[name="description"]', { name: 'description', content: profile.tagline || '' })
+    setMetaTag('meta[property="og:title"]', { property: 'og:title', content: document.title })
+    setMetaTag('meta[property="og:description"]', { property: 'og:description', content: profile.tagline || '' })
+    setMetaTag('meta[property="og:type"]', { property: 'og:type', content: 'profile' })
+    setMetaTag('meta[property="og:url"]', { property: 'og:url', content: window.location.href })
+    // No server-side initials-image generator exists yet, so we only set
+    // og:image when a real photo is uploaded — never the old gradient, and
+    // never a broken URL.
+    if (profile.profile_photo_url) {
+      setMetaTag('meta[property="og:image"]', { property: 'og:image', content: profile.profile_photo_url })
+    }
+  }, [profile])
+
+  // /p/:slug/onboarding now redirects to /p/:slug#before-your-first-session.
+  // The accordion is already open by default, but a client-rendered page
+  // won't get the browser's native hash scroll on first paint, so do it
+  // ourselves once the section exists.
+  useEffect(() => {
+    if (!loading && window.location.hash === '#before-your-first-session') {
+      document.getElementById('before-your-first-session')?.scrollIntoView({ block: 'start' })
+    }
+  }, [loading])
+
+  useEffect(() => {
+    const button = bookButtonRef.current
+    if (!button) return undefined
+    const observer = new IntersectionObserver(([entry]) => setStickyVisible(!entry.isIntersecting), { threshold: 0 })
+    observer.observe(button)
+    return () => observer.disconnect()
+  }, [profile])
+
+  // Page behind the sheet is inert while it's open — set via ref rather
+  // than the `inert` JSX prop, which React 18 doesn't recognise as boolean.
+  useEffect(() => {
+    mainRef.current?.toggleAttribute('inert', !!sheetState)
+  }, [sheetState])
+
+  const openSheet = useCallback((date, slot) => setSheetState({ date, slot }), [])
+  const closeSheet = useCallback(() => setSheetState(null), [])
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
-        <div className="animate-pulse text-slate-400">Loading profile...</div>
-      </div>
-    )
+    return <div className="clinical-ink"><div className="pp-page"><p className="t-caption">Loading…</p></div></div>
   }
-
-  if (error) {
+  if (error || !profile) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-semibold text-slate-800 mb-2">Profile Not Found</h2>
-          <p className="text-slate-500">The profile you're looking for doesn't exist or isn't public.</p>
+      <div className="clinical-ink">
+        <div className="pp-page">
+          <p className="t-h3">{error || 'Profile not found'}</p>
         </div>
       </div>
     )
   }
 
-  if (!profile) return null
+  const profession = profile.profession || 'Clinical psychologist'
+  const initials = (profile.display_name || '?')
+    .trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()
+  const cityShort = profile.location_short ? profile.location_short.split(',').pop().trim() : null
+  const roleLine = [profession, cityShort].filter(Boolean).join(' · ')
+  const metaLine = [
+    profession,
+    profile.years_of_experience ? `${profile.years_of_experience} years' practice` : null,
+    profile.languages?.length ? profile.languages.map((l) => l.language).join(', ') : null,
+    profile.location_short || null,
+    profile.license_number || null,
+  ].filter(Boolean).join(' · ')
 
-  const availableDays = availability?.days?.filter(d => d.is_available) || []
+  const days = (slotsData?.days || []).filter((d) => d.is_available && d.slots.length > 0)
+  const flatSlots = []
+  days.forEach((d) => d.slots.forEach((s) => flatSlots.push({ ...s, date: d.date })))
+  const nextThree = flatSlots.slice(0, 3)
+  const hoursLine = buildHoursLine(slotsData?.days)
+  const practitionerName = [profile.title, profile.display_name].filter(Boolean).join(' ') || profile.slug
 
-  // Only surface tabs/sections the practitioner has actually filled in
-  const hasAbout = !!(
-    profile.bio || profile.specializations?.length || profile.therapy_approaches?.length ||
-    profile.areas_of_expertise?.length || profile.public_email || profile.public_phone ||
-    profile.clinic_address || profile.instagram_handle
-  )
+  const approachChips = (profile.therapy_approaches || []).map((a) => APPROACH_CHIP_LABELS[a] || a)
+
   const hasQualifications = !!(
     profile.qualifications?.length || profile.certifications?.length ||
     profile.license_number || profile.professional_memberships?.length
   )
-  const hasResources = resources.length > 0
-  const hasTestimonials = testimonials.length > 0
-  // Accept either a bare handle or a pasted profile URL
-  const instagramHandle = profile.instagram_handle
-    ?.trim()
-    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
-    .replace(/^@/, '')
-    .replace(/\/$/, '')
-
-  const tabs = [
-    hasAbout && { id: 'about', label: 'About', icon: User },
-    hasQualifications && { id: 'qualifications', label: 'Qualifications', icon: GraduationCap },
-    hasResources && { id: 'resources', label: 'Resources', icon: FileText },
-    { id: 'availability', label: 'Availability', icon: Calendar },
-    hasTestimonials && { id: 'testimonials', label: 'Testimonials', icon: Star },
+  const beforeItems = [
+    onboarding?.what_to_expect && { key: 'what', title: 'What to expect', body: onboarding.what_to_expect },
+    onboarding?.how_therapy_works && { key: 'how', title: 'How therapy works', body: onboarding.how_therapy_works },
+    onboarding?.preparation_guidelines && { key: 'prep', title: 'How to prepare', body: onboarding.preparation_guidelines },
+    onboarding?.consent_info && { key: 'consent', title: 'Consent & confidentiality', body: onboarding.consent_info },
   ].filter(Boolean)
-
-  // Fall back to the first tab that actually exists if the remembered tab was hidden
-  const currentTab = tabs.some(t => t.id === activeTab) ? activeTab : tabs[0]?.id
+  const faqItems = onboarding?.faq_content || []
+  const hasContact = !!(profile.public_email || profile.public_phone || profile.clinic_address || profile.instagram_handle || profile.website_url)
+  const instagramHandle = profile.instagram_handle
+    ?.trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/^@/, '').replace(/\/$/, '')
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Cover Image */}
-      <div className="relative h-48 md:h-64 bg-gradient-to-r from-primary-600 to-primary-700">
-        {profile.cover_image_url && (
-          <img
-            src={profile.cover_image_url}
-            alt="Cover"
-            className="w-full h-full object-cover"
-          />
+    <div className="clinical-ink">
+      <div className="pp-page" ref={mainRef}>
+        <header className="pp-header">
+          {profile.profile_photo_url ? (
+            <img className="pp-avatar" src={profile.profile_photo_url} alt={profile.display_name} />
+          ) : (
+            <div className="pp-avatar pp-avatar-initials" aria-hidden="true">{initials}</div>
+          )}
+          <div className="pp-header-text">
+            <h1 className="pp-name">{[profile.title, profile.display_name].filter(Boolean).join(' ')}</h1>
+            <p className="pp-role">{roleLine}</p>
+            {profile.tagline && <p className="pp-tagline">{profile.tagline}</p>}
+            {metaLine && <p className="pp-meta">{metaLine}</p>}
+          </div>
+        </header>
+
+        {(profile.tagline || metaLine) && (
+          <div className="pp-header-below">
+            {profile.tagline && <p className="pp-tagline">{profile.tagline}</p>}
+            {metaLine && <p className="pp-meta">{metaLine}</p>}
+          </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
-      </div>
 
-      <div className="max-w-5xl mx-auto px-4 -mt-16 relative z-10 pb-12">
-        {/* Profile Header */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <div className="flex flex-col md:flex-row md:items-end gap-4">
-            {/* Profile Photo */}
-            <div className="flex-shrink-0">
-              {profile.profile_photo_url ? (
-                <img
-                  src={profile.profile_photo_url}
-                  alt={profile.display_name}
-                  className="w-28 h-28 md:w-32 md:h-32 rounded-xl object-cover border-4 border-white shadow-lg"
-                />
-              ) : (
-                <div className="w-28 h-28 md:w-32 md:h-32 rounded-xl bg-primary-100 border-4 border-white shadow-lg flex items-center justify-center">
-                  <User className="w-12 h-12 text-primary-400" />
-                </div>
-              )}
-            </div>
+        <div className="pp-layout">
+          <main className="pp-main">
+            {profile.specializations?.length > 0 && (
+              <section className="pp-section">
+                <h2 className="pp-section-title">What I help with</h2>
+                <ul className="pp-chips">
+                  {profile.specializations.map((s) => (
+                    <li key={s} className="pp-chip">{SPECIALIZATION_LABELS[s] || s}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
-            {/* Profile Info */}
-            <div className="flex-1">
-              <h1 className="text-2xl md:text-3xl font-bold text-slate-800">
-                {profile.title && `${profile.title} `}{profile.display_name}
-              </h1>
-              {profile.tagline && (
-                <p className="text-slate-500 mt-1">{profile.tagline}</p>
-              )}
-              <div className="flex flex-wrap gap-4 mt-3 text-sm text-slate-500">
-                {profile.years_of_experience && (
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-4 h-4" />
-                    {profile.years_of_experience}+ years experience
-                  </span>
+            {(profile.bio || approachChips.length > 0) && (
+              <section className="pp-section">
+                <h2 className="pp-section-title">About</h2>
+                {profile.bio && <p className="pp-body" style={{ whiteSpace: 'pre-wrap' }}>{profile.bio}</p>}
+                {approachChips.length > 0 && (
+                  <ul className="pp-chips">
+                    {approachChips.map((label, i) => <li key={i} className="pp-chip">{label}</li>)}
+                  </ul>
                 )}
-                {profile.languages?.length > 0 && (
-                  <span className="flex items-center gap-1">
-                    <Languages className="w-4 h-4" />
-                    {profile.languages.map(l => l.language).join(', ')}
-                  </span>
-                )}
-              </div>
-            </div>
+              </section>
+            )}
 
-            {/* Fee & CTA */}
-            <div className="text-right mt-4 md:mt-0">
-              {profile.consultation_fee && (
-                <div className="mb-3">
-                  <span className="text-sm text-slate-500">Consultation Fee</span>
-                  <p className="text-2xl font-bold text-primary-600">
-                    {formatCurrency(profile.consultation_fee, profile.consultation_fee_currency)}
-                  </p>
-                  {profile.fee_notes && (
-                    <p className="text-xs text-slate-400">{profile.fee_notes}</p>
+            {hasQualifications && (
+              <section className="pp-section">
+                <h2 className="pp-section-title">Qualifications</h2>
+                <ul className="pp-quals">
+                  {profile.qualifications?.map((q, i) => (
+                    <li key={`q${i}`}>
+                      <strong>{q.degree}</strong>
+                      <span>{[q.institution, q.year].filter(Boolean).join(' · ')}</span>
+                    </li>
+                  ))}
+                  {profile.certifications?.map((c, i) => (
+                    <li key={`c${i}`}>
+                      <strong>{c.name}</strong>
+                      <span>{[c.issuer, c.year].filter(Boolean).join(' · ')}</span>
+                    </li>
+                  ))}
+                  {profile.license_number && (
+                    <li>
+                      <strong>Registered — RCI</strong>
+                      <span>{profile.license_number}</span>
+                    </li>
                   )}
+                  {profile.professional_memberships?.map((m, i) => (
+                    <li key={`m${i}`}>
+                      <strong>{m.organization}</strong>
+                      {m.membership_id && <span>{m.membership_id}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {beforeItems.length > 0 && (
+              <section className="pp-section" id="before-your-first-session">
+                <h2 className="pp-section-title">Before your first session</h2>
+                <div className="pp-acc-group">
+                  {beforeItems.map((item, i) => (
+                    <AccordionItem
+                      key={item.key}
+                      id={`before-${item.key}`}
+                      title={item.title}
+                      open={openPanels.before === true ? i === 0 : openPanels.before === item.key}
+                      onToggle={() => setOpenPanels((p) => ({ ...p, before: (p.before === item.key || (p.before === true && i === 0)) ? null : item.key }))}
+                    >
+                      <p style={{ whiteSpace: 'pre-wrap' }}>{item.body}</p>
+                    </AccordionItem>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {faqItems.length > 0 && (
+              <section className="pp-section">
+                <h2 className="pp-section-title">Common questions</h2>
+                <div className="pp-acc-group">
+                  {faqItems.map((item, i) => (
+                    <AccordionItem
+                      key={i}
+                      id={`faq-${i}`}
+                      title={item.question}
+                      open={openPanels.faq === i}
+                      onToggle={() => setOpenPanels((p) => ({ ...p, faq: p.faq === i ? null : i }))}
+                    >
+                      <p style={{ whiteSpace: 'pre-wrap' }}>{item.answer}</p>
+                    </AccordionItem>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {resources.length > 0 && (
+              <section className="pp-section">
+                <h2 className="pp-section-title">Documents</h2>
+                <ul className="pp-quals">
+                  {resources.map((r) => (
+                    <li key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <div>
+                        <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <FileText size={16} strokeWidth={1.5} />
+                          {r.title}
+                        </strong>
+                        <span>{RESOURCE_TYPE_LABELS[r.resource_type] || r.resource_type}</span>
+                      </div>
+                      {r.file_url ? (
+                        <a className="link" href={r.file_url} target="_blank" rel="noopener noreferrer">View</a>
+                      ) : r.content ? (
+                        <button type="button" className="link" onClick={() => setReadResource(r)}>Read</button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {hasContact && (
+              <section className="pp-section">
+                <h2 className="pp-section-title">Contact</h2>
+                <ul className="pp-contact">
+                  {profile.public_email && (
+                    <li><Mail size={18} strokeWidth={1.5} /><a href={`mailto:${profile.public_email}`}>{profile.public_email}</a></li>
+                  )}
+                  {profile.public_phone && (
+                    <li><Phone size={18} strokeWidth={1.5} /><a href={`tel:${profile.public_phone}`}>{profile.public_phone}</a></li>
+                  )}
+                  {profile.clinic_address && (
+                    <li>
+                      <MapPin size={18} strokeWidth={1.5} />
+                      <a href={`https://maps.google.com/?q=${encodeURIComponent(profile.clinic_address)}`} target="_blank" rel="noopener noreferrer">
+                        {profile.clinic_address}
+                      </a>
+                    </li>
+                  )}
+                  {instagramHandle && (
+                    <li>
+                      <Instagram size={18} strokeWidth={1.5} />
+                      <a href={`https://instagram.com/${instagramHandle}`} target="_blank" rel="noopener noreferrer">@{instagramHandle}</a>
+                    </li>
+                  )}
+                </ul>
+              </section>
+            )}
+          </main>
+
+          <aside className="pp-rail">
+            <div className="pp-book">
+              {profile.consultation_fee != null && (
+                <div className="pp-fee">
+                  <span className="pp-fee-amount">{formatCurrency(profile.consultation_fee, profile.consultation_fee_currency)}</span>
+                  <span className="pp-fee-unit">
+                    {slotsData?.session_types?.[0]?.duration_minutes ? `per ${slotsData.session_types[0].duration_minutes}-minute session` : 'per session'}
+                  </span>
                 </div>
               )}
-              <Link
-                to={`/p/${slug}/onboarding`}
-                className="inline-flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors"
-              >
-                Get Started
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-          </div>
-        </div>
+              {profile.fee_notes && <p className="pp-fee-note">{profile.fee_notes}</p>}
+              <p className="pp-fee-note">Your first session is a free introductory call, just to see if it's a good fit — nothing is charged when you book.</p>
 
-        {/* Navigation Tabs */}
-        <div className="bg-white rounded-xl shadow-lg mb-6">
-          <div className="flex border-b overflow-x-auto">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-6 py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  currentTab === tab.id
-                    ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <tab.icon className="w-4 h-4" />
-                {tab.label}
+              <button type="button" ref={bookButtonRef} className="btn btn-primary" onClick={() => openSheet(null, null)}>
+                Book a first session
               </button>
-            ))}
-          </div>
 
-          <div className="p-6">
-            {/* About Tab */}
-            {currentTab === 'about' && (
-              <div className="space-y-6">
-                {profile.bio && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">About Me</h3>
-                    <p className="text-slate-600 whitespace-pre-wrap">{profile.bio}</p>
-                  </div>
-                )}
+              <hr className="pp-book-divider" />
 
-                {profile.specializations?.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">Specializations</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {profile.specializations.map((spec, i) => (
-                        <span
-                          key={i}
-                          className="px-3 py-1.5 bg-primary-50 text-primary-700 rounded-full text-sm"
-                        >
-                          {SPECIALIZATION_LABELS[spec] || spec}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {profile.therapy_approaches?.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">Therapy Approaches</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {profile.therapy_approaches.map((approach, i) => (
-                        <span
-                          key={i}
-                          className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-full text-sm"
-                        >
-                          {THERAPY_APPROACH_LABELS[approach] || approach}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {profile.areas_of_expertise?.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">Areas of Expertise</h3>
-                    <ul className="grid md:grid-cols-2 gap-2">
-                      {profile.areas_of_expertise.map((area, i) => (
-                        <li key={i} className="flex items-center gap-2 text-slate-600">
-                          <BadgeCheck className="w-4 h-4 text-primary-500" />
-                          {area}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Contact Information */}
-                {(profile.public_email || profile.public_phone || profile.clinic_address || profile.instagram_handle) && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">Contact</h3>
-                    <div className="space-y-2">
-                      {profile.public_email && (
-                        <a
-                          href={`mailto:${profile.public_email}`}
-                          className="flex items-center gap-2 text-slate-600 hover:text-primary-600"
-                        >
-                          <Mail className="w-4 h-4" />
-                          {profile.public_email}
-                        </a>
-                      )}
-                      {profile.public_phone && (
-                        <a
-                          href={`tel:${profile.public_phone}`}
-                          className="flex items-center gap-2 text-slate-600 hover:text-primary-600"
-                        >
-                          <Phone className="w-4 h-4" />
-                          {profile.public_phone}
-                        </a>
-                      )}
-                      {profile.clinic_address && (
-                        <div className="flex items-start gap-2 text-slate-600">
-                          <MapPin className="w-4 h-4 mt-1" />
-                          <span className="whitespace-pre-wrap">{profile.clinic_address}</span>
-                        </div>
-                      )}
-                      {profile.instagram_handle && (
-                        <a
-                          href={`https://instagram.com/${instagramHandle}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-slate-600 hover:text-primary-600"
-                        >
-                          <Instagram className="w-4 h-4" />
-                          @{instagramHandle}
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Qualifications Tab */}
-            {currentTab === 'qualifications' && (
-              <div className="space-y-6">
-                {profile.qualifications?.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">Education</h3>
-                    <div className="space-y-3">
-                      {profile.qualifications.map((qual, i) => (
-                        <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
-                          <GraduationCap className="w-5 h-5 text-primary-500 mt-0.5" />
-                          <div>
-                            <p className="font-medium text-slate-800">{qual.degree}</p>
-                            <p className="text-sm text-slate-500">
-                              {qual.institution}
-                              {qual.year && ` • ${qual.year}`}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {profile.certifications?.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">Certifications</h3>
-                    <div className="space-y-3">
-                      {profile.certifications.map((cert, i) => (
-                        <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
-                          <Award className="w-5 h-5 text-amber-500 mt-0.5" />
-                          <div>
-                            <p className="font-medium text-slate-800">{cert.name}</p>
-                            <p className="text-sm text-slate-500">
-                              {cert.issuer}
-                              {cert.year && ` • ${cert.year}`}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {profile.license_number && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">License</h3>
-                    <p className="text-slate-600">{profile.license_number}</p>
-                  </div>
-                )}
-
-                {profile.professional_memberships?.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-800 mb-3">Professional Memberships</h3>
-                    <div className="space-y-2">
-                      {profile.professional_memberships.map((mem, i) => (
-                        <div key={i} className="flex items-center gap-2 text-slate-600">
-                          <BadgeCheck className="w-4 h-4 text-primary-500" />
-                          {mem.organization}
-                          {mem.membership_id && ` (${mem.membership_id})`}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-              </div>
-            )}
-
-            {/* Resources Tab */}
-            {currentTab === 'resources' && (
-              <div>
-                {resources.length > 0 ? (
-                  <div className="space-y-3">
-                    {resources.map((resource) => (
-                      <div
-                        key={resource.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-slate-50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3">
-                          <FileText className="w-5 h-5 text-primary-500" />
-                          <div>
-                            <p className="font-medium text-slate-800">{resource.title}</p>
-                            <p className="text-sm text-slate-500">
-                              {RESOURCE_TYPE_LABELS[resource.resource_type] || resource.resource_type}
-                            </p>
-                          </div>
-                        </div>
-                        {resource.file_url ? (
-                          <a
-                            href={resource.file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary-600 hover:text-primary-700 font-medium text-sm flex items-center gap-1"
-                          >
-                            Download
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        ) : resource.content ? (
-                          <button className="text-primary-600 hover:text-primary-700 font-medium text-sm">
-                            View
-                          </button>
-                        ) : null}
-                      </div>
+              {nextThree.length > 0 ? (
+                <>
+                  <p className="pp-slots-title">Next available</p>
+                  <div className="pp-slots">
+                    {nextThree.map((slot, i) => (
+                      <button key={i} type="button" className="pp-slot" onClick={() => openSheet(slot.date, slot)}>
+                        {formatSlotLabel(slot.date, slot.start)}
+                      </button>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-slate-500 text-center py-8">No resources available.</p>
-                )}
-              </div>
-            )}
+                  {hoursLine && <p className="pp-hours">{hoursLine}</p>}
+                </>
+              ) : (
+                <p className="pp-hours">No open times in the next month.</p>
+              )}
+            </div>
 
-            {/* Availability Tab */}
-            {currentTab === 'availability' && (
-              <div>
-                {availableDays.length > 0 ? (
-                  <div>
-                    <p className="text-slate-600 mb-4">
-                      Available slots for the next 7 days.
-                    </p>
-                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {availableDays.slice(0, 6).map((day) => (
-                        <div key={day.date} className="border rounded-lg p-4">
-                          <p className="font-medium text-slate-800 mb-2">
-                            {new Date(day.date).toLocaleDateString('en-US', {
-                              weekday: 'long',
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {day.slots.slice(0, 4).map((slot, i) => (
-                              <span
-                                key={i}
-                                className="px-2 py-1 bg-green-50 text-green-700 rounded text-sm"
-                              >
-                                {new Date(slot.start).toLocaleTimeString('en-US', {
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                })}
-                              </span>
-                            ))}
-                            {day.slots.length > 4 && (
-                              <span className="px-2 py-1 text-slate-500 text-sm">
-                                +{day.slots.length - 4} more
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <div className="mt-6 text-center">
-                      <button
-                        onClick={() => setShowBookingModal(true)}
-                        className="inline-flex items-center gap-2 bg-primary-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-primary-700 transition-colors"
-                      >
-                        <Calendar className="w-5 h-5" />
-                        Book an Introductory Call
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-slate-500 text-center py-8">
-                    No availability information at this time.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Testimonials Tab */}
-            {currentTab === 'testimonials' && (
-              <div className="space-y-4">
-                {testimonials.map((testimonial) => (
-                  <div key={testimonial.id} className="border rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary-100 flex items-center justify-center">
-                        <span className="text-primary-600 font-medium">
-                          {testimonial.display_name.charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-slate-800">
-                            {testimonial.display_name}
-                          </span>
-                          {testimonial.rating && (
-                            <div className="flex items-center gap-0.5">
-                              {[...Array(5)].map((_, i) => (
-                                <Star
-                                  key={i}
-                                  className={`w-4 h-4 ${
-                                    i < testimonial.rating
-                                      ? 'text-amber-400 fill-amber-400'
-                                      : 'text-slate-200'
-                                  }`}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-slate-600">{testimonial.feedback}</p>
-                      </div>
-                    </div>
-                  </div>
+            <div className="pp-crisis">
+              <p className="pp-crisis-title">If you need help now</p>
+              <p>Therapy appointments aren't emergencies.</p>
+              <ul>
+                {CRISIS_RESOURCES.map((r) => (
+                  <li key={r.label}>{r.label}: <a href={`tel:${r.tel}`}>{r.number}</a></li>
                 ))}
-              </div>
-            )}
-          </div>
+              </ul>
+            </div>
+          </aside>
         </div>
 
-        {/* Onboarding CTA */}
-        <div className="bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl shadow-lg p-6 text-white">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-xl font-semibold mb-1">Ready to Begin Your Journey?</h3>
-              <p className="text-primary-100">
-                Learn about the therapy process and prepare for your first session.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => setShowBookingModal(true)}
-                className="inline-flex items-center gap-2 bg-white text-primary-600 px-6 py-3 rounded-lg font-medium hover:bg-primary-50 transition-colors"
-              >
-                <Calendar className="w-4 h-4" />
-                Book an Introductory Call
-              </button>
-              <Link
-                to={`/p/${slug}/onboarding`}
-                className="inline-flex items-center gap-2 border border-white/30 text-white px-6 py-3 rounded-lg font-medium hover:bg-white/10 transition-colors"
-              >
-                Learn More
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-          </div>
-        </div>
+        <p className="pp-footer">
+          Profile hosted on <a href="https://therapistnook.com" rel="noopener noreferrer">Therapist Nook</a>.
+        </p>
       </div>
 
-      {/* Booking Modal */}
-      {showBookingModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto my-8">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">Book an Introductory Call</h2>
-              <button
-                onClick={() => setShowBookingModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
+      {!sheetState && (
+        <div className={`pp-stickybar${stickyVisible ? ' is-visible' : ''}`} aria-hidden={!stickyVisible} inert={!stickyVisible ? '' : undefined}>
+          {profile.consultation_fee != null && (
+            <div className="pp-stickybar-fee">
+              <strong>{formatCurrency(profile.consultation_fee, profile.consultation_fee_currency)}</strong>
+              <span>per session</span>
             </div>
-            <div className="p-6">
-              <PublicBooking
-                slug={slug}
-                practitionerName={profile.display_name || profile.slug}
-                onClose={() => setShowBookingModal(false)}
-              />
-            </div>
-          </div>
+          )}
+          <button type="button" className="btn btn-primary" onClick={() => openSheet(null, null)}>Book a first session</button>
         </div>
       )}
+
+      {sheetState && (
+        <BookingSheet
+          slug={slug}
+          practitionerName={practitionerName}
+          initialDate={sheetState.date}
+          initialSlot={sheetState.slot}
+          onClose={closeSheet}
+        />
+      )}
+
+      <Modal open={!!readResource} onClose={() => setReadResource(null)} title={readResource?.title}>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{readResource?.content}</p>
+      </Modal>
     </div>
   )
 }
