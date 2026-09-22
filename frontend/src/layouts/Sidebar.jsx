@@ -96,10 +96,8 @@ export default function Sidebar({
 
   const sidebarContent = (
     <>
-      {/* Logo tile (B8): 32px --accent square + "TN", replacing the purple
-          blob mark, which didn't read at sidebar scale. */}
       <div className="logo-row">
-        <div className="logo-tile">TN</div>
+        <img src="/logo.png" alt="" aria-hidden="true" className="logo-tile" />
         <span className="t-h3">Therapist Nook</span>
       </div>
 

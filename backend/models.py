@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Boolean, Text, Date, DateTime, JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.mutable import MutableList, MutableDict
 from database import Base
 
 
@@ -459,7 +460,7 @@ class ClinicalIntelligence(Base):
     version = Column(Integer, nullable=False, default=1)
     
     # Patient Summary - continuously updated overview
-    patient_summary = Column(JSON, nullable=True)
+    patient_summary = Column(MutableDict.as_mutable(JSON), nullable=True)
     # {
     #   text: str,
     #   last_updated: datetime,
@@ -467,7 +468,7 @@ class ClinicalIntelligence(Base):
     # }
     
     # Psychological Profile
-    psychological_profile = Column(JSON, nullable=True)
+    psychological_profile = Column(MutableDict.as_mutable(JSON), nullable=True)
     # {
     #   current_presentation: {text, confidence, sources},
     #   behavioral_observations: {text, confidence, sources},
@@ -478,7 +479,7 @@ class ClinicalIntelligence(Base):
     # }
     
     # Symptoms tracking
-    symptoms = Column(JSON, nullable=True)
+    symptoms = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   name: str,
     #   current_status: str,  # active, remission, resolved
@@ -491,7 +492,7 @@ class ClinicalIntelligence(Base):
     # }]
     
     # Diagnoses
-    diagnoses = Column(JSON, nullable=True)
+    diagnoses = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   name: str,
     #   status: str,  # current, historical, provisional, ruled_out
@@ -505,7 +506,7 @@ class ClinicalIntelligence(Base):
     # }]
     
     # Treatment Goals
-    treatment_goals = Column(JSON, nullable=True)
+    treatment_goals = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   goal: str,
     #   status: str,  # current, completed, ongoing, discontinued
@@ -518,7 +519,7 @@ class ClinicalIntelligence(Base):
     # }]
     
     # Important Relationships
-    relationships = Column(JSON, nullable=True)
+    relationships = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   person: str,  # e.g., "Mother", "Partner - Sarah"
     #   relationship_type: str,  # mother, father, partner, child, sibling, friend, employer, other
@@ -531,7 +532,7 @@ class ClinicalIntelligence(Base):
     # }]
     
     # Life Events
-    life_events = Column(JSON, nullable=True)
+    life_events = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   event: str,
     #   event_type: str,  # marriage, divorce, bereavement, trauma, job_change, relocation, hospitalization, medication_change, other
@@ -543,7 +544,7 @@ class ClinicalIntelligence(Base):
     # }]
     
     # Risk Factors
-    risk_factors = Column(JSON, nullable=True)
+    risk_factors = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   risk_type: str,  # suicide, self_harm, violence, substance_abuse, other
     #   status: str,  # current, historical, resolved
@@ -557,7 +558,7 @@ class ClinicalIntelligence(Base):
     # }]
     
     # Timeline - chronological events
-    timeline = Column(JSON, nullable=True)
+    timeline = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   date: datetime,
     #   event_type: str,  # clinical_history, assessment, session, report, life_event, risk_event, diagnosis, treatment
@@ -569,7 +570,7 @@ class ClinicalIntelligence(Base):
     # }]
     
     # Outstanding Questions
-    outstanding_questions = Column(JSON, nullable=True)
+    outstanding_questions = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{
     #   question: str,
     #   category: str,  # medication, family, sleep, trauma, other
@@ -588,7 +589,7 @@ class ClinicalIntelligence(Base):
     # updates - the majority path - would leave no record of what changed.
     # Powers the "What's changed since last visit" card. See
     # append_change_entry() in clinical_intelligence.py.
-    recent_changes = Column(JSON, nullable=True)
+    recent_changes = Column(MutableList.as_mutable(JSON), nullable=True)
     # [{id, section, operation, label, source_type, source_id, applied_at}]
 
     # Processing metadata
@@ -819,14 +820,21 @@ class PractitionerAvailability(Base):
     
     # Buffer time between appointments in minutes
     buffer_minutes = Column(Integer, nullable=False, default=10)
-    
+
     # Timezone
     timezone = Column(String, nullable=False, default="Asia/Kolkata")
-    
+
+    # Booking window — moved here from the (global) AppointmentConfiguration
+    # singleton as part of the Settings rebuild, since this table is the one
+    # booking/slot-generation/Calendar actually read. See settings.css/
+    # claude-code-prompt-settings.md Phase 1 item 1.
+    min_booking_notice_hours = Column(Integer, nullable=False, default=24)
+    max_advance_booking_days = Column(Integer, nullable=False, default=30)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+
     # Relationships
     practitioner = relationship("Practitioner", backref="availability")
 
@@ -1149,6 +1157,8 @@ class PractitionerProfile(Base):
     title = Column(String, nullable=True)  # Dr., Mr., Ms., etc.
     tagline = Column(String, nullable=True)  # Short professional tagline
     bio = Column(Text, nullable=True)  # Full professional biography
+    profession = Column(String, nullable=True)  # e.g. "Clinical psychologist" — shown under the name
+    location_short = Column(String, nullable=True)  # e.g. "Andheri West, Mumbai" — shown in the credentials line
     
     # Qualifications
     qualifications = Column(JSON, nullable=True)  # [{degree, institution, year}]
@@ -1603,6 +1613,55 @@ class WhatsAppConfig(Base):
 
     # Relationships
     practitioner = relationship("Practitioner", backref="whatsapp_config")
+
+
+# Patient-facing message events. Distinct from PractitionerNotificationPreferences
+# (which controls alerts TO the practitioner about their own practice, e.g.
+# "email me when a new booking comes in") — this table controls what PATIENTS
+# receive, on which channel, for the Settings rebuild's Messaging section.
+MESSAGE_EVENT_TYPES = [
+    "session_booked",
+    "reminder",
+    "session_rescheduled",
+    "session_cancelled",
+    "payment_request",
+    "payment_received",
+]
+
+
+class MessagingPreferences(Base):
+    """Which patient-facing messages send on which channel, plus reminder timing.
+
+    A global singleton, same scope as EmailConfiguration/PaymentGatewayConfiguration
+    — not per-practitioner. (WhatsAppConfig has a practitioner_id column but every
+    query against it today is unfiltered .limit(1), i.e. it's a de-facto singleton
+    too; this table matches that reality rather than the unused column.)
+    """
+    __tablename__ = "messaging_preferences"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+
+    session_booked_email = Column(Boolean, nullable=False, default=True)
+    session_booked_whatsapp = Column(Boolean, nullable=False, default=False)
+
+    reminder_email = Column(Boolean, nullable=False, default=True)
+    reminder_whatsapp = Column(Boolean, nullable=False, default=False)
+    reminder_offset_minutes = Column(Integer, nullable=False, default=1440)  # 24h, matches today's most-relied-on reminder
+
+    session_rescheduled_email = Column(Boolean, nullable=False, default=True)
+    session_rescheduled_whatsapp = Column(Boolean, nullable=False, default=False)
+
+    session_cancelled_email = Column(Boolean, nullable=False, default=True)
+    session_cancelled_whatsapp = Column(Boolean, nullable=False, default=False)
+
+    payment_request_email = Column(Boolean, nullable=False, default=True)
+    payment_request_whatsapp = Column(Boolean, nullable=False, default=False)
+
+    payment_received_email = Column(Boolean, nullable=False, default=True)
+    payment_received_whatsapp = Column(Boolean, nullable=False, default=False)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -129,6 +129,12 @@ Live stacks name over amount on the left, status over date on the right, with th
 
 Prototype: name and status left, amount and date right-aligned. Amount uses `.t-num` (received) or `.t-num-key` (overdue) with tabular figures, and the ₹ symbol renders at `--text-muted` while the digits take the row's colour. Received rows keep 500 weight in `--text-secondary`; overdue rows promote to 700 in `--text-primary`.
 
+### B6b. Icon buttons in the header
+
+Confirmed direction: the app bar uses icon buttons rather than labeled ones on mobile, and may on desktop too. `tokens.css` now carries `.btn-icon` (36px, 44px under `pointer: coarse`) and `.topbar-actions`.
+
+Rules: `aria-label` on every instance, `title=` for desktop tooltips, and only one icon button per screen may take `.btn-primary`. On the dashboard that one is "Schedule session", since there's no page-level action row competing with it. "Add patient" is `.btn-secondary .btn-icon`. Notification bell and avatar stay as they are — they're not buttons in the variant sense and take no fill.
+
 ### B7. Header date/time
 
 Live: calendar icon + "Sep 13, 2026", then a separate clock icon + "1:21 AM".

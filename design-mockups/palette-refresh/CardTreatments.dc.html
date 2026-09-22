@@ -1,0 +1,370 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+:root {
+  --primary: #7C72E8;
+  --primary-hover: #6D63D9;
+  --primary-light: #ECE8FC;
+  --primary-soft: #E4DFFB;
+  --primary-tint: #F1EEFC;
+  --app-bg: #FFFFFF;
+  --surface: #FFFFFF;
+  --slate-50: #F5F3FA;
+  --slate-100: #EBE7F5;
+  --slate-300: #C3BAD9;
+  --text-primary: #241F35;
+  --text-secondary: #5C5277;
+  --text-muted: #8B8098;
+  --border-light: #EBE7F5;
+  --online-accent: #3D6E99;
+  --online-bg: #D2E3F0;
+  --online-chip-bg: rgba(61, 110, 153, 0.26);
+  --online-chip-fg: #1B4360;
+  --offline-accent: #463F5C;
+  --offline-bg: #E9E6F0;
+  --offline-chip-bg: rgba(70, 63, 92, 0.16);
+  --offline-chip-fg: #2C273D;
+  --overdue-accent: #A23B5C;
+  --overdue-bg: #F5DCE5;
+  --overdue-text: #6B2038;
+  --received-bg: #F5F3FA;
+  --received-text: #241F35;
+  --slate-600: #5C5277;
+  --patient-plum-bg: #F0DCEF;
+  --patient-plum-fg: #75397A;
+  --shadow-card: 0 4px 16px rgba(58, 45, 92, 0.07);
+  --shadow-card-strong: 0 10px 26px rgba(58, 45, 92, 0.14);
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: #FFFFFF; color: var(--text-primary); }
+.page { width: 1320px; padding: 56px 64px 80px; }
+.page__title { font-size: 26px; font-weight: 800; margin: 0 0 6px; }
+.page__subtitle { font-size: 14.5px; color: var(--text-secondary); line-height: 1.6; max-width: 900px; margin: 0 0 44px; }
+
+.compare-section { margin-bottom: 56px; }
+.compare-section__label { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; }
+.compare-section__label h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-muted); margin: 0; }
+.compare-section__label span { font-size: 13px; color: var(--text-muted); }
+.compare-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.compare-grid--two { grid-template-columns: repeat(2, 1fr); }
+
+.opt { border: 1px dashed #DCD8EC; border-radius: 18px; padding: 20px; background: #FCFBFE; }
+.opt__tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--primary); background: var(--primary-light); padding: 3px 10px; border-radius: 999px; margin-bottom: 6px; }
+.opt__name { font-size: 14.5px; font-weight: 700; margin: 0 0 3px; }
+.opt__desc { font-size: 12.5px; color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
+
+/* ---- shared component bones, lifted from Main.dc.html ---- */
+.demo-recent-list { display: flex; flex-direction: column; gap: 10px; }
+.demo-recent-card { display: grid; grid-template-columns: minmax(0,0.9fr) minmax(0,0.7fr) minmax(0,1.3fr) 40px; align-items: center; gap: 8px; padding: 14px; height: 58px; border-radius: 16px; font-size: 13.5px; color: var(--text-secondary); }
+.demo-recent-card__appt { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text-primary); min-width: 0; }
+.demo-mode-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.demo-check { width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid var(--slate-300); background: #fff; display: flex; align-items: center; justify-content: center; margin-left: auto; }
+.demo-check.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+.demo-payment-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-radius: 20px; }
+.demo-payment-card__name { font-size: 14px; font-weight: 600; margin: 0; }
+.demo-payment-card__amount { font-size: 12.5px; margin: 2px 0 0; opacity: 0.7; }
+.demo-payment-card__status { font-size: 14px; font-weight: 700; margin: 0; text-align: right; }
+.demo-payment-card__date { font-size: 12px; margin: 0; text-align: right; opacity: 0.7; }
+
+/* A — solid lavender, reserved for one standout row */
+.fill-a-muted { background: #fff; border: 1px solid var(--border-light); box-shadow: var(--shadow-card); }
+.fill-a-muted .demo-recent-card__appt, .fill-a-muted .demo-payment-card__name { color: var(--text-primary); }
+.fill-a-hero { background: var(--primary); box-shadow: var(--shadow-card-strong); color: #fff; }
+.fill-a-hero .demo-recent-card__appt, .fill-a-hero .demo-payment-card__name { color: #fff; }
+.fill-a-hero .demo-payment-card__amount, .fill-a-hero .demo-payment-card__date { color: #fff; opacity: 0.75; }
+.fill-a-hero .demo-payment-card__status { color: #fff; }
+.fill-a-hero span, .fill-a-hero .demo-recent-card > span { color: rgba(255,255,255,0.8); }
+.fill-a-hero .demo-check { border-color: rgba(255,255,255,0.6); background: transparent; }
+.fill-a-hero .demo-check.on { background: #fff; border-color: #fff; color: var(--primary); }
+
+/* B — lavender tint fill, every row */
+.fill-b { background: var(--primary-tint); box-shadow: var(--shadow-card); }
+.fill-b .demo-recent-card__appt, .fill-b .demo-payment-card__name { color: var(--text-primary); }
+.fill-b .demo-payment-card__status { color: var(--primary-hover); }
+
+/* C — white card, hairline lavender border, stronger shadow, no fill */
+.fill-c { background: #fff; border: 1px solid var(--primary-soft); box-shadow: var(--shadow-card-strong); }
+.fill-c .demo-payment-card__status { color: var(--primary); }
+
+/* status accent variants kept identical across A/B/C to isolate the fill question */
+.st-overdue .demo-payment-card__status { color: var(--overdue-text) !important; }
+.fill-a-hero.st-overdue .demo-payment-card__status { color: #fff !important; }
+
+/* online/offline hue options */
+.demo-session-card { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-radius: 20px; box-shadow: var(--shadow-card); margin-bottom: 12px; }
+.demo-session-card__chip { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.demo-session-card__name { font-size: 14.5px; font-weight: 600; margin: 0; }
+.demo-session-card__meta { font-size: 12.5px; color: var(--text-secondary); margin: 2px 0 0; }
+
+.hue-current-online { background: var(--online-bg); }
+.hue-current-online .demo-session-card__chip { background: var(--online-chip-bg); color: var(--online-chip-fg); }
+.hue-current-offline { background: var(--offline-bg); }
+.hue-current-offline .demo-session-card__chip { background: var(--offline-chip-bg); color: var(--offline-chip-fg); }
+
+.hue-mono-online { background: var(--primary); }
+.hue-mono-online .demo-session-card__name, .hue-mono-online .demo-session-card__meta { color: #fff; }
+.hue-mono-online .demo-session-card__chip { background: rgba(255,255,255,0.22); color: #fff; }
+.hue-mono-offline { background: #fff; border: 1.5px solid var(--primary-soft); }
+.hue-mono-offline .demo-session-card__chip { background: var(--primary-light); color: var(--primary); }
+
+/* status/intake chip options */
+.chip-table { display: flex; flex-direction: column; gap: 8px; }
+.chip-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 11px 14px; background: var(--primary-tint); border-radius: 12px; align-items: center; }
+.chip-dash { font-size: 13px; color: var(--text-muted); }
+.chip-plain { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.chip-plain--check { display: inline-flex; align-items: center; gap: 5px; color: var(--primary); }
+.chip-plain--check svg { flex-shrink: 0; }
+.chip-pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.chip-pill--active { background: var(--primary-light); color: var(--primary); }
+.chip-pill--alarm { background: var(--overdue-bg); color: var(--overdue-text); }
+.chip-pill--archived { background: var(--slate-100); color: var(--slate-600); }
+.chip-pill--plum { background: var(--patient-plum-bg); color: var(--patient-plum-fg); }
+.chip-pill--hairline { background: #fff; border: 1px solid var(--primary-soft); color: var(--primary); padding: 2px 9px; }
+
+.opt__footnote { margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.decided-banner { display: flex; align-items: center; gap: 10px; background: var(--primary); color: #fff; padding: 12px 20px; border-radius: 14px; font-size: 13.5px; font-weight: 600; margin-bottom: 32px; }
+.decided-banner span.tag { background: rgba(255,255,255,0.22); padding: 2px 10px; border-radius: 999px; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  </style>
+</helmet>
+
+<div class="page">
+  <div class="decided-banner"><span class="tag">Decided</span> Recent Patients → Option B · Payments → Option B · Today's Schedule → Mono-lavender · Status/Intake chips → Option A (plain-text demotion). Applied across Dashboard (desktop + mobile + alt) and Patients (desktop + mobile) — see those artboards.</div>
+  <h1 class="page__title">Card Treatment Options — pick a direction</h1>
+  <p class="page__subtitle">Reference: the HealthPlus EHR on Behance you pointed to. It stays ~90% white with plain white cards and bare text lists — color only shows up as one saturated "featured" card, tinted icon badges, and solid buttons. Nothing here is green/yellow/teal; every option below stays inside lavender + white + the single berry-rose alarm color. Same Recent Patients row and Payment card, three fills.</p>
+
+  <div class="compare-section">
+    <div class="compare-section__label"><h2>Recent Patients row</h2><span>which fill replaces the grey card?</span></div>
+    <div class="compare-grid">
+      <div class="opt">
+        <span class="opt__tag">Option A</span>
+        <p class="opt__name">White rows, one solid-lavender highlight</p>
+        <p class="opt__desc">Routine rows go plain white + shadow. The one row that needs attention (e.g. today, or unconfirmed) gets a bold lavender fill with white text — like the blue "MRI Scan" card in the reference.</p>
+        <div class="demo-recent-list">
+          <div class="demo-recent-card fill-a-hero">
+            <span>Sep 10</span><span>4:00 PM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:#fff;"></span>Priya Sharma</div>
+            <div class="demo-check on"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg></div>
+          </div>
+          <div class="demo-recent-card fill-a-muted">
+            <span>Sep 10</span><span>2:30 PM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--offline-accent);"></span>Arjun Mehta</div>
+            <div class="demo-check"></div>
+          </div>
+          <div class="demo-recent-card fill-a-muted">
+            <span>Sep 9</span><span>11:00 AM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--online-accent);"></span>Sana Kapoor</div>
+            <div class="demo-check"></div>
+          </div>
+        </div>
+        <p class="opt__footnote">Most restrained. Color = signal ("this one needs you"), not decoration.</p>
+      </div>
+
+      <div class="opt">
+        <span class="opt__tag">Option B</span>
+        <p class="opt__name">Every row gets a visible lavender tint</p>
+        <p class="opt__desc">Same fill on every row — but the tint is strong enough to actually read as lavender, not grey (unlike the old slate-50). Consistent, no row singled out.</p>
+        <div class="demo-recent-list">
+          <div class="demo-recent-card fill-b">
+            <span>Sep 10</span><span>4:00 PM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--online-accent);"></span>Priya Sharma</div>
+            <div class="demo-check on"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg></div>
+          </div>
+          <div class="demo-recent-card fill-b">
+            <span>Sep 10</span><span>2:30 PM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--offline-accent);"></span>Arjun Mehta</div>
+            <div class="demo-check"></div>
+          </div>
+          <div class="demo-recent-card fill-b">
+            <span>Sep 9</span><span>11:00 AM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--online-accent);"></span>Sana Kapoor</div>
+            <div class="demo-check"></div>
+          </div>
+        </div>
+        <p class="opt__footnote">Warmest, most "colorful" page at a glance. Risk: a full list of tinted cards can start to feel heavy again.</p>
+      </div>
+
+      <div class="opt">
+        <span class="opt__tag">Option C</span>
+        <p class="opt__name">White card, hairline lavender border, no fill</p>
+        <p class="opt__desc">No tint anywhere. Cards separate from the white page purely via a crisp lavender-tinted border and a stronger shadow — closest to how the reference's plain list rows actually behave.</p>
+        <div class="demo-recent-list">
+          <div class="demo-recent-card fill-c">
+            <span>Sep 10</span><span>4:00 PM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--online-accent);"></span>Priya Sharma</div>
+            <div class="demo-check on"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg></div>
+          </div>
+          <div class="demo-recent-card fill-c">
+            <span>Sep 10</span><span>2:30 PM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--offline-accent);"></span>Arjun Mehta</div>
+            <div class="demo-check"></div>
+          </div>
+          <div class="demo-recent-card fill-c">
+            <span>Sep 9</span><span>11:00 AM</span>
+            <div class="demo-recent-card__appt"><span class="demo-mode-dot" style="background:var(--online-accent);"></span>Sana Kapoor</div>
+            <div class="demo-check"></div>
+          </div>
+        </div>
+        <p class="opt__footnote">Crispest, most "premium SaaS" feel. Least colorful of the three.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="compare-section">
+    <div class="compare-section__label"><h2>Payment card — Received</h2><span>same three fills, applied to the payments list</span></div>
+    <div class="compare-grid">
+      <div class="opt">
+        <span class="opt__tag">Option A</span>
+        <p class="opt__name">White, one hero card for what needs action</p>
+        <div class="demo-recent-list">
+          <div class="demo-payment-card fill-a-muted">
+            <div><p class="demo-payment-card__name">Priya Sharma</p><p class="demo-payment-card__amount">₹2,500</p></div>
+            <div><p class="demo-payment-card__status" style="color:var(--text-primary);">Received</p><p class="demo-payment-card__date">Today</p></div>
+          </div>
+          <div class="demo-payment-card fill-a-hero st-overdue">
+            <div><p class="demo-payment-card__name">Arjun Mehta</p><p class="demo-payment-card__amount">₹3,000</p></div>
+            <div><p class="demo-payment-card__status">Overdue</p><p class="demo-payment-card__date">Yesterday</p></div>
+          </div>
+          <div class="demo-payment-card fill-a-muted">
+            <div><p class="demo-payment-card__name">Sana Kapoor</p><p class="demo-payment-card__amount">₹2,000</p></div>
+            <div><p class="demo-payment-card__status" style="color:var(--text-primary);">Received</p><p class="demo-payment-card__date">Sep 8</p></div>
+          </div>
+        </div>
+        <p class="opt__footnote">Here the "hero" fill naturally lands on Overdue — the one that needs eyes. Received stays quiet white.</p>
+      </div>
+
+      <div class="opt">
+        <span class="opt__tag">Option B</span>
+        <p class="opt__name">Lavender tint for Received, rose tint for Overdue</p>
+        <div class="demo-recent-list">
+          <div class="demo-payment-card fill-b">
+            <div><p class="demo-payment-card__name">Priya Sharma</p><p class="demo-payment-card__amount">₹2,500</p></div>
+            <div><p class="demo-payment-card__status">Received</p><p class="demo-payment-card__date">Today</p></div>
+          </div>
+          <div class="demo-payment-card" style="background:var(--overdue-bg);">
+            <div><p class="demo-payment-card__name">Arjun Mehta</p><p class="demo-payment-card__amount">₹3,000</p></div>
+            <div><p class="demo-payment-card__status" style="color:var(--overdue-text);">Overdue</p><p class="demo-payment-card__date">Yesterday</p></div>
+          </div>
+          <div class="demo-payment-card fill-b">
+            <div><p class="demo-payment-card__name">Sana Kapoor</p><p class="demo-payment-card__amount">₹2,000</p></div>
+            <div><p class="demo-payment-card__status">Received</p><p class="demo-payment-card__date">Sep 8</p></div>
+          </div>
+        </div>
+        <p class="opt__footnote">Two visible hues doing real work: lavender = paid, rose = not. Both stay pastel-strength, not neon.</p>
+      </div>
+
+      <div class="opt">
+        <span class="opt__tag">Option C</span>
+        <p class="opt__name">White + hairline border, rose text only for Overdue</p>
+        <div class="demo-recent-list">
+          <div class="demo-payment-card fill-c">
+            <div><p class="demo-payment-card__name">Priya Sharma</p><p class="demo-payment-card__amount">₹2,500</p></div>
+            <div><p class="demo-payment-card__status">Received</p><p class="demo-payment-card__date">Today</p></div>
+          </div>
+          <div class="demo-payment-card fill-c">
+            <div><p class="demo-payment-card__name">Arjun Mehta</p><p class="demo-payment-card__amount">₹3,000</p></div>
+            <div><p class="demo-payment-card__status" style="color:var(--overdue-text);">Overdue</p><p class="demo-payment-card__date">Yesterday</p></div>
+          </div>
+          <div class="demo-payment-card fill-c">
+            <div><p class="demo-payment-card__name">Sana Kapoor</p><p class="demo-payment-card__amount">₹2,000</p></div>
+            <div><p class="demo-payment-card__status">Received</p><p class="demo-payment-card__date">Sep 8</p></div>
+          </div>
+        </div>
+        <p class="opt__footnote">Card fill never carries meaning; only the status word's color does. Quietest option.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="compare-section">
+    <div class="compare-section__label"><h2>Today's Schedule — Online / Offline</h2><span>keep steel-blue as a third hue, or fold it into lavender?</span></div>
+    <div class="compare-grid compare-grid--two">
+      <div class="opt">
+        <span class="opt__tag">Current</span>
+        <p class="opt__name">Steel blue (online) / ink (offline)</p>
+        <p class="opt__desc">What's live in the mockups today — a third hue alongside lavender and berry-rose.</p>
+        <div class="demo-session-card hue-current-online">
+          <div class="demo-session-card__chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"></rect><path d="M16 10l6-3v10l-6-3z"></path></svg></div>
+          <div><p class="demo-session-card__name">Priya Sharma</p><p class="demo-session-card__meta">10:00 AM · Online</p></div>
+        </div>
+        <div class="demo-session-card hue-current-offline">
+          <div class="demo-session-card__chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.3 7-11a7 7 0 10-14 0c0 4.7 7 11 7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg></div>
+          <div><p class="demo-session-card__name">Arjun Mehta</p><p class="demo-session-card__meta">11:30 AM · In-person</p></div>
+        </div>
+      </div>
+
+      <div class="opt">
+        <span class="opt__tag">Mono-lavender</span>
+        <p class="opt__name">Solid lavender (online) / white outline (offline)</p>
+        <p class="opt__desc">Drops the third hue entirely — two hues total in the whole app: lavender for everything routine, rose for the one alarm state. Closest to "lavender, white theme."</p>
+        <div class="demo-session-card hue-mono-online">
+          <div class="demo-session-card__chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"></rect><path d="M16 10l6-3v10l-6-3z"></path></svg></div>
+          <div><p class="demo-session-card__name">Priya Sharma</p><p class="demo-session-card__meta">10:00 AM · Online</p></div>
+        </div>
+        <div class="demo-session-card hue-mono-offline">
+          <div class="demo-session-card__chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.3 7-11a7 7 0 10-14 0c0 4.7 7 11 7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg></div>
+          <div><p class="demo-session-card__name">Arjun Mehta</p><p class="demo-session-card__meta">11:30 AM · In-person</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="compare-section">
+    <div class="compare-section__label"><h2>Status &amp; Intake chips</h2><span>new question: "Active" and "Completed" are both lavender pills and read as one indistinguishable color — same 6 rows, three fixes</span></div>
+    <div class="compare-grid">
+      <div class="opt">
+        <span class="opt__tag">Option A</span>
+        <p class="opt__name">Demote the defaults to plain text</p>
+        <p class="opt__desc">"Active" and "Completed" are true for almost every row — that's not information, so they stop being pills at all. Filled chips are saved for the exceptions: New Intake, Pending, Archived. This is also what actually closes the gap with the reference: fewer colored objects per screen, not a better palette.</p>
+        <div class="chip-table">
+          <div class="chip-row"><span class="chip-pill chip-pill--alarm">New Intake</span><span class="chip-dash">&mdash;</span></div>
+          <div class="chip-row"><span class="chip-plain">Active</span><span class="chip-plain chip-plain--check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg>Completed</span></div>
+          <div class="chip-row"><span class="chip-plain">Active</span><span class="chip-pill chip-pill--alarm">Pending</span></div>
+          <div class="chip-row"><span class="chip-plain">Active</span><span class="chip-plain chip-plain--check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg>Completed</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--archived">Archived</span><span class="chip-dash">&mdash;</span></div>
+          <div class="chip-row"><span class="chip-plain">Active</span><span class="chip-plain chip-plain--check"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L19 7"></path></svg>Completed</span></div>
+        </div>
+        <p class="opt__footnote">No new hue. The two purple pills stop colliding because one of them stops existing. Recommended.</p>
+      </div>
+
+      <div class="opt">
+        <span class="opt__tag">Option B</span>
+        <p class="opt__name">A second hue: plum for Completed</p>
+        <p class="opt__desc">Keeps every row as a pill, but gives Completed its own color instead of reusing Active's lavender. Uses plum — already in the palette for patient-identity avatars, survived every earlier rejection round, reads as neither green nor amber.</p>
+        <div class="chip-table">
+          <div class="chip-row"><span class="chip-pill chip-pill--alarm">New Intake</span><span class="chip-dash">&mdash;</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--plum">Completed</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--alarm">Pending</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--plum">Completed</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--archived">Archived</span><span class="chip-dash">&mdash;</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--plum">Completed</span></div>
+        </div>
+        <p class="opt__footnote">Fixes the collision, but reuses an identity color for a status meaning — a plum-avatar patient's row could momentarily read oddly. Still the most "colorful" of the three.</p>
+      </div>
+
+      <div class="opt">
+        <span class="opt__tag">Option C</span>
+        <p class="opt__name">Same hue, lighter weight: hairline for Completed</p>
+        <p class="opt__desc">Stays strictly mono-lavender — Active keeps its solid fill (the "current, ongoing" state), Completed drops to a white chip with a thin lavender border (the "settled, past" state). Distinguishable by weight, not color.</p>
+        <div class="chip-table">
+          <div class="chip-row"><span class="chip-pill chip-pill--alarm">New Intake</span><span class="chip-dash">&mdash;</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--hairline">Completed</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--alarm">Pending</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--hairline">Completed</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--archived">Archived</span><span class="chip-dash">&mdash;</span></div>
+          <div class="chip-row"><span class="chip-pill chip-pill--active">Active</span><span class="chip-pill chip-pill--hairline">Completed</span></div>
+        </div>
+        <p class="opt__footnote">No new hue, still fully readable at a glance. Middle ground between A and B.</p>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Search, Filter, FileText, Image, File, Download, Eye, Edit2, Trash2,
-  MoreVertical, Clock, User, Tag, ChevronDown, X, Loader2, ClipboardList,
-  History, CheckCircle, AlertCircle,
+  Search, ChevronDown, FileText, Image, File, ClipboardList,
+  MoreVertical, Eye, Download, Pencil, Trash2, X, Loader2, Upload,
 } from 'lucide-react'
 import {
   listDocumentsAndAssessments,
@@ -12,33 +11,26 @@ import {
   getDocumentDownloadUrl,
   deleteAssessment,
 } from '../api/client'
+import { formatDate } from '../utils/date'
 
 const CATEGORY_LABELS = {
-  psychological_assessment: 'Psychological Assessment',
-  mmpi2_assessment: 'MMPI-2 Assessment',
-  personality_assessment: 'Personality Assessment',
-  cognitive_assessment: 'Cognitive Assessment',
-  psychological_report: 'Psychological Report',
-  psychiatric_report: 'Psychiatric Report',
-  medical_report: 'Medical Report',
-  lab_report: 'Lab Report',
+  psychological_report: 'Psychological report',
+  psychiatric_report: 'Psychiatric report',
+  medical_report: 'Medical report',
+  lab_report: 'Lab report',
   prescription: 'Prescription',
-  referral_letter: 'Referral Letter',
-  consent_form: 'Consent Form',
-  progress_report: 'Progress Report',
+  referral_letter: 'Referral letter',
+  consent_form: 'Consent form',
+  progress_report: 'Progress report',
   other: 'Other',
 }
 
-const ASSESSMENT_TYPE_LABELS = {
-  mmpi2: 'MMPI-2',
-  phq9: 'PHQ-9',
-  gad7: 'GAD-7',
-  bdi2: 'BDI-II',
-  mcmi: 'MCMI',
-  big_five: 'Big Five',
-  cognitive: 'Cognitive',
-  custom: 'Custom',
-}
+const ASSESSMENT_STATUS_OPTIONS = [
+  { value: 'completed', label: 'Completed' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
 
 function getFileIcon(mimeType) {
   if (mimeType?.startsWith('image/')) return Image
@@ -53,50 +45,181 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
+function assessmentStatusMeta(status) {
+  switch (status) {
+    case 'completed':   return { label: 'Completed',   cls: 'status-quiet' }
+    case 'pending':     return { label: 'Pending',     cls: 'status-plain' }
+    case 'in_progress': return { label: 'In progress', cls: 'status-plain' }
+    case 'cancelled':   return { label: 'Cancelled',   cls: 'status-warn' }
+    default:            return { label: status || '',  cls: 'status-plain' }
+  }
 }
 
-export default function DocumentsList({ patientId, onPreview, onViewAssessment }) {
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [showFilters, setShowFilters] = useState(false)
-  const [editingItem, setEditingItem] = useState(null)
-  const [editForm, setEditForm] = useState({ display_name: '', notes: '' })
-  const [menuOpen, setMenuOpen] = useState(null)
-  // Screen coordinates for the currently-open row menu, captured from the
-  // trigger button at click time. The menu itself is portaled to <body> and
-  // positioned with `fixed` so it can never be clipped by the table's
-  // rounded-corner wrapper (or any other ancestor's overflow) - it isn't a
-  // DOM descendant of that wrapper anymore.
-  const [menuPos, setMenuPos] = useState(null)
+function documentStatusMeta(status) {
+  switch (status) {
+    case 'completed':          return { label: 'Completed',            cls: 'status-quiet' }
+    case 'pending':             return { label: 'Pending',              cls: 'status-plain' }
+    case 'processing':          return { label: 'Processing',           cls: 'status-plain' }
+    case 'failed':               return { label: 'Failed',               cls: 'status-warn', bold: true }
+    case 'unsupported_format':   return { label: 'Format not readable',  cls: 'status-warn', bold: true }
+    default:                     return { label: status || '',           cls: 'status-plain' }
+  }
+}
 
-  // A background scroll/resize would leave a portaled menu pointing at the
-  // wrong spot on screen, so just close it rather than track the button.
+// Assessment display names are stored as "<Type> — <Patient name>" (set at
+// creation time on the Assessments screen); strip the patient's own name
+// back off since it's redundant on a page that's already scoped to them.
+function assessmentDisplayName(name, patientName) {
+  if (!name || !patientName) return name
+  const suffix = ` — ${patientName}`
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name
+}
+
+// Kebab row-action menu, portaled to <body> and positioned `fixed` from the
+// trigger button's own coordinates — .card-flush (the section's outer card)
+// has overflow:hidden, which would clip an ordinary absolutely-positioned
+// .menu-popover for any row near the card's bottom or right edge.
+function RowMenu({ label, actions }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btnRef = useRef(null)
+
   useEffect(() => {
-    if (!menuOpen) return
-    const close = () => { setMenuOpen(null); setMenuPos(null) }
+    if (!open) return
+    const close = () => { setOpen(false); setPos(null) }
     window.addEventListener('scroll', close, true)
     window.addEventListener('resize', close)
     return () => {
       window.removeEventListener('scroll', close, true)
       window.removeEventListener('resize', close)
     }
-  }, [menuOpen])
+  }, [open])
+
+  const toggle = () => {
+    if (open) { setOpen(false); setPos(null); return }
+    const rect = btnRef.current.getBoundingClientRect()
+    setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    setOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className="btn btn-ghost btn-icon btn-icon-sm"
+        aria-label={`${label} actions`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <MoreVertical size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+      </button>
+      {open && pos && createPortal(
+        <>
+          <div className="fixed inset-0" style={{ zIndex: 99 }} onClick={() => { setOpen(false); setPos(null) }} />
+          <div
+            className="menu-popover"
+            style={{ position: 'fixed', top: pos.top, left: 'auto', right: pos.right, zIndex: 100 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {actions.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                className={`menu-item${a.destructive ? ' is-destructive' : ''}`}
+                onClick={() => { setOpen(false); setPos(null); a.onClick() }}
+              >
+                <a.icon size={14} strokeWidth={1.5} /> {a.label}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// Search + filter toolbar shared by both sections. `filterOptions` is a
+// list of { value, label }; passing none hides the filter button entirely.
+function Toolbar({ search, onSearchChange, searchPlaceholder, filterOptions, filterValue, onFilterChange }) {
+  const [filterOpen, setFilterOpen] = useState(false)
+  const filterRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (filterRef.current && !filterRef.current.contains(e.target)) setFilterOpen(false)
+    }
+    if (filterOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [filterOpen])
+
+  return (
+    <div className="table-toolbar">
+      <div className="input-search">
+        <Search size={16} strokeWidth={1.5} aria-hidden="true" />
+        <input
+          type="text"
+          className="input"
+          placeholder={searchPlaceholder}
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          aria-label={searchPlaceholder}
+        />
+      </div>
+      {filterOptions && (
+        <div ref={filterRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            aria-haspopup="true"
+            aria-expanded={filterOpen}
+            onClick={() => setFilterOpen((v) => !v)}
+          >
+            Filter
+            <ChevronDown size={16} strokeWidth={1.5} />
+          </button>
+          {filterOpen && (
+            <div className="menu-popover align-right">
+              {filterValue && (
+                <button type="button" className="menu-item" onClick={() => { onFilterChange(''); setFilterOpen(false) }}>
+                  Clear filter
+                </button>
+              )}
+              {filterOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className="menu-item"
+                  onClick={() => { onFilterChange(opt.value); setFilterOpen(false) }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function DocumentsList({ patientId, patient, onPreview, onViewAssessment, onUploadClick, refreshKey }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [assessSearch, setAssessSearch] = useState('')
+  const [assessStatus, setAssessStatus] = useState('')
+  const [docSearch, setDocSearch] = useState('')
+  const [docCategory, setDocCategory] = useState('')
+  const [editingItem, setEditingItem] = useState(null)
+  const [editForm, setEditForm] = useState({ display_name: '', notes: '' })
+  const [saving, setSaving] = useState(false)
 
   const load = async () => {
     try {
       setLoading(true)
-      const data = await listDocumentsAndAssessments(patientId, {
-        search: search || undefined,
-        category: categoryFilter || undefined,
-      })
+      const data = await listDocumentsAndAssessments(patientId)
       setItems(data)
     } catch (err) {
       console.error('Failed to load documents:', err)
@@ -107,34 +230,54 @@ export default function DocumentsList({ patientId, onPreview, onViewAssessment }
 
   useEffect(() => {
     load()
-  }, [patientId, categoryFilter])
+  }, [patientId, refreshKey])
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      load()
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [search])
+  const assessments = useMemo(() => {
+    const rows = items.filter((i) => i.type === 'assessment')
+    return rows.filter((i) => {
+      if (assessStatus && i.status !== assessStatus) return false
+      if (assessSearch && !i.name?.toLowerCase().includes(assessSearch.toLowerCase())) return false
+      return true
+    })
+  }, [items, assessSearch, assessStatus])
 
-  const handleDelete = async (item) => {
-    const typeLabel = item.type === 'assessment' ? 'assessment' : 'document'
-    if (!window.confirm(`Are you sure you want to delete this ${typeLabel}?`)) return
-    
+  const documents = useMemo(() => {
+    const rows = items.filter((i) => i.type === 'document')
+    return rows.filter((i) => {
+      if (docCategory && i.category !== docCategory) return false
+      if (docSearch && !i.name?.toLowerCase().includes(docSearch.toLowerCase())) return false
+      return true
+    })
+  }, [items, docSearch, docCategory])
+
+  const handleDeleteAssessment = async (item) => {
+    if (!window.confirm('Delete this assessment record?')) return
     try {
-      if (item.type === 'assessment') {
-        await deleteAssessment(patientId, item.id)
-      } else {
-        await deleteDocument(patientId, item.id)
-      }
+      await deleteAssessment(patientId, item.id)
       await load()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to delete')
+      window.alert(err.userMessage || err.response?.data?.detail || 'Failed to delete')
     }
   }
 
+  const handleDeleteDocument = async (item) => {
+    if (!window.confirm('Delete this document?')) return
+    try {
+      await deleteDocument(patientId, item.id)
+      await load()
+    } catch (err) {
+      window.alert(err.userMessage || err.response?.data?.detail || 'Failed to delete')
+    }
+  }
+
+  const openEdit = (item) => {
+    setEditingItem(item)
+    setEditForm({ display_name: item.name, notes: '' })
+  }
+
   const handleEditSave = async () => {
-    if (!editingItem) return
-    
+    if (!editingItem || saving) return
+    setSaving(true)
     try {
       await updateDocument(patientId, editingItem.id, {
         display_name: editForm.display_name,
@@ -143,309 +286,276 @@ export default function DocumentsList({ patientId, onPreview, onViewAssessment }
       setEditingItem(null)
       await load()
     } catch (err) {
-      alert(err.response?.data?.detail || 'Failed to update')
-    }
-  }
-
-  const openEdit = (item) => {
-    if (item.type === 'assessment') return
-    setEditingItem(item)
-    setEditForm({ display_name: item.name, notes: '' })
-    setMenuOpen(null)
-  }
-
-  const handleDownload = (item) => {
-    if (item.type === 'document') {
-      window.open(getDocumentDownloadUrl(patientId, item.id), '_blank')
-    }
-  }
-
-  const handleView = (item) => {
-    setMenuOpen(null)
-    if (item.type === 'assessment') {
-      onViewAssessment?.(item)
-    } else {
-      onPreview?.(item)
-    }
-  }
-
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'completed':
-        return <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"><CheckCircle className="h-3 w-3" />Completed</span>
-      case 'pending':
-        return <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700"><Clock className="h-3 w-3" />Pending</span>
-      case 'in_progress':
-        return <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700"><Loader2 className="h-3 w-3" />In Progress</span>
-      case 'failed':
-        return <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700"><AlertCircle className="h-3 w-3" />Failed</span>
-      case 'unsupported_format':
-        return (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
-            title="This file type can't be read for AI analysis. Re-upload as PDF or Word (.docx) to include it in Clinical Intelligence."
-          >
-            <AlertCircle className="h-3 w-3" />Format not readable
-          </span>
-        )
-      default:
-        return null
+      window.alert(err.userMessage || err.response?.data?.detail || 'Failed to update')
+    } finally {
+      setSaving(false)
     }
   }
 
   if (loading && items.length === 0) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-8) 0' }}>
+        <Loader2 size={24} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      {/* Search and Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            className="input-field pl-9"
-            placeholder="Search documents and assessments..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      {/* Assessments */}
+      <div className="card card-flush">
+        <div className="doc-section-head">
+          <h3 className="t-h3">Assessments</h3>
         </div>
-        
-        <div className="relative">
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`btn-secondary ${categoryFilter ? 'ring-2 ring-primary-300' : ''}`}
-          >
-            <Filter className="h-4 w-4" />
-            Filter
-            {categoryFilter && <span className="ml-1 rounded-full bg-primary-100 px-1.5 text-xs text-primary-700">1</span>}
-            <ChevronDown className="h-4 w-4" />
-          </button>
-          
-          {showFilters && (
-            <div className="absolute right-0 top-full z-10 mt-1 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-700">Category</span>
-                {categoryFilter && (
-                  <button
-                    onClick={() => setCategoryFilter('')}
-                    className="text-xs text-primary-600 hover:text-primary-700"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              <select
-                className="input-field text-sm"
-                value={categoryFilter}
-                onChange={(e) => {
-                  setCategoryFilter(e.target.value)
-                  setShowFilters(false)
-                }}
-              >
-                <option value="">All Categories</option>
-                {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Items Table */}
-      {items.length === 0 ? (
-        <div className="rounded-lg border border-gray-200 py-16 text-center">
-          <FileText className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-          <p className="text-gray-500">
-            {search || categoryFilter
-              ? 'No documents or assessments found matching your filters.'
-              : 'No documents or assessments yet.'}
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50 text-left">
-                <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Category</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">By</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Date</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Size</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Status</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => {
-                const Icon = item.type === 'assessment' ? ClipboardList : getFileIcon(item.file_type)
-                
-                return (
-                  <tr key={`${item.type}-${item.id}`} className="border-b border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Icon className="h-5 w-5 text-gray-400" />
-                        <div>
-                          <p className="font-medium text-gray-800 truncate max-w-[200px]">{item.name}</p>
-                          {item.version > 1 && (
-                            <span className="inline-flex items-center gap-0.5 text-xs text-gray-500">
-                              <History className="h-3 w-3" />
-                              v{item.version}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                        item.type === 'assessment'
-                          ? 'bg-purple-100 text-purple-700'
-                          : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {item.type === 'assessment' ? 'Assessment' : 'Document'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {item.assessment_type
-                        ? ASSESSMENT_TYPE_LABELS[item.assessment_type] || item.assessment_type
-                        : CATEGORY_LABELS[item.category] || item.category}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{item.uploaded_by_name}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(item.date)}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{formatFileSize(item.file_size)}</td>
-                    <td className="px-4 py-3">{getStatusBadge(item.status)}</td>
-                    <td className="px-4 py-3">
-                      <div className="relative">
-                        <button
-                          onClick={(e) => {
-                            if (menuOpen === item.id) {
-                              setMenuOpen(null)
-                              setMenuPos(null)
-                            } else {
-                              const rect = e.currentTarget.getBoundingClientRect()
-                              setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
-                              setMenuOpen(item.id)
-                            }
-                          }}
-                          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                        >
-                          <MoreVertical className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
+        <Toolbar
+          search={assessSearch}
+          onSearchChange={setAssessSearch}
+          searchPlaceholder="Search assessments"
+          filterOptions={ASSESSMENT_STATUS_OPTIONS}
+          filterValue={assessStatus}
+          onFilterChange={setAssessStatus}
+        />
+        {assessments.length === 0 ? (
+          <div className="empty">
+            <ClipboardList size={20} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} aria-hidden="true" />
+            <h3 className="empty-title">No assessments yet</h3>
+            <p className="empty-body">Completed and in-progress assessments for this patient will appear here.</p>
+          </div>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden sm:block">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Administered</th>
+                    <th>Status</th>
+                    <th></th>
                   </tr>
+                </thead>
+                <tbody>
+                  {assessments.map((item) => {
+                    const statusMeta = assessmentStatusMeta(item.status)
+                    const name = assessmentDisplayName(item.name, patient?.full_name)
+                    return (
+                      <tr key={item.id}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                            <span className="type-icon"><ClipboardList size={16} strokeWidth={1.5} /></span>
+                            <span className="doc-name">{name}</span>
+                          </div>
+                        </td>
+                        <td>{[formatDate(item.date), item.uploaded_by_name].filter(Boolean).join(' · ')}</td>
+                        <td><span className={statusMeta.cls}>{statusMeta.label}</span></td>
+                        <td style={{ textAlign: 'right' }}>
+                          <RowMenu
+                            label={name}
+                            actions={[
+                              { label: 'View', icon: Eye, onClick: () => onViewAssessment?.(item) },
+                              { label: 'Delete', icon: Trash2, destructive: true, onClick: () => handleDeleteAssessment(item) },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {/* Mobile cards */}
+            <div className="sm:hidden">
+              {assessments.map((item) => {
+                const statusMeta = assessmentStatusMeta(item.status)
+                const name = assessmentDisplayName(item.name, patient?.full_name)
+                return (
+                  <div className="doc-row" key={item.id}>
+                    <span className="type-icon"><ClipboardList size={16} strokeWidth={1.5} /></span>
+                    <div className="doc-main">
+                      <span className="doc-name">{name}</span>
+                      <span className="doc-meta">
+                        {['Administered ' + formatDate(item.date), item.uploaded_by_name].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                    <div className="doc-end">
+                      <span className={statusMeta.cls}>{statusMeta.label}</span>
+                      <RowMenu
+                        label={name}
+                        actions={[
+                          { label: 'View', icon: Eye, onClick: () => onViewAssessment?.(item) },
+                          { label: 'Delete', icon: Trash2, destructive: true, onClick: () => handleDeleteAssessment(item) },
+                        ]}
+                      />
+                    </div>
+                  </div>
                 )
               })}
-            </tbody>
-          </table>
-        </div>
-      )}
+            </div>
+          </>
+        )}
+      </div>
 
-      {/* Edit Modal */}
+      {/* Documents */}
+      <div className="card card-flush">
+        <div className="doc-section-head">
+          <h3 className="t-h3">Documents</h3>
+        </div>
+        <Toolbar
+          search={docSearch}
+          onSearchChange={setDocSearch}
+          searchPlaceholder="Search documents"
+          filterOptions={Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }))}
+          filterValue={docCategory}
+          onFilterChange={setDocCategory}
+        />
+        {documents.length === 0 ? (
+          <div className="empty">
+            <FileText size={20} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} aria-hidden="true" />
+            <h3 className="empty-title">No documents yet</h3>
+            <p className="empty-body">Uploaded documents for this patient will appear here.</p>
+            <button type="button" className="btn btn-primary" onClick={onUploadClick}>
+              <Upload size={16} strokeWidth={1.5} />
+              Upload document
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden sm:block">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>Uploaded</th>
+                    <th>Size</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {documents.map((item) => {
+                    const Icon = getFileIcon(item.file_type)
+                    const categoryLabel = CATEGORY_LABELS[item.category] || item.category
+                    const showCategory = categoryLabel && categoryLabel.toLowerCase() !== item.name?.toLowerCase()
+                    const statusMeta = item.status !== 'completed' ? documentStatusMeta(item.status) : null
+                    return (
+                      <tr key={item.id}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                            <span className="type-icon"><Icon size={16} strokeWidth={1.5} /></span>
+                            <span className="doc-name">{item.name}</span>
+                          </div>
+                        </td>
+                        <td>{showCategory ? categoryLabel : <span className="status-quiet">—</span>}</td>
+                        <td>
+                          {[formatDate(item.date), item.uploaded_by_name].filter(Boolean).join(' · ')}
+                          {statusMeta && <> · <span className={statusMeta.cls} style={statusMeta.bold ? { fontWeight: 600 } : undefined}>{statusMeta.label}</span></>}
+                        </td>
+                        <td>{formatFileSize(item.file_size)}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <RowMenu
+                            label={item.name}
+                            actions={[
+                              { label: 'View', icon: Eye, onClick: () => onPreview?.(item) },
+                              { label: 'Download', icon: Download, onClick: () => window.open(getDocumentDownloadUrl(patientId, item.id), '_blank') },
+                              { label: 'Edit', icon: Pencil, onClick: () => openEdit(item) },
+                              { label: 'Delete', icon: Trash2, destructive: true, onClick: () => handleDeleteDocument(item) },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {/* Mobile cards */}
+            <div className="sm:hidden">
+              {documents.map((item) => {
+                const Icon = getFileIcon(item.file_type)
+                const categoryLabel = CATEGORY_LABELS[item.category] || item.category
+                const showCategory = categoryLabel && categoryLabel.toLowerCase() !== item.name?.toLowerCase()
+                const statusMeta = item.status !== 'completed' ? documentStatusMeta(item.status) : null
+                return (
+                  <div className="doc-row" key={item.id}>
+                    <span className="type-icon"><Icon size={16} strokeWidth={1.5} /></span>
+                    <div className="doc-main">
+                      <span className="doc-name">{item.name}</span>
+                      <span className="doc-meta">
+                        {[showCategory ? categoryLabel : null, formatDate(item.date), formatFileSize(item.file_size)].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                    <div className="doc-end">
+                      {statusMeta && <span className={statusMeta.cls} style={statusMeta.bold ? { fontWeight: 600 } : undefined}>{statusMeta.label}</span>}
+                      <RowMenu
+                        label={item.name}
+                        actions={[
+                          { label: 'View', icon: Eye, onClick: () => onPreview?.(item) },
+                          { label: 'Download', icon: Download, onClick: () => window.open(getDocumentDownloadUrl(patientId, item.id), '_blank') },
+                          { label: 'Edit', icon: Pencil, onClick: () => openEdit(item) },
+                          { label: 'Delete', icon: Trash2, destructive: true, onClick: () => handleDeleteDocument(item) },
+                        ]}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Edit document modal */}
       {editingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-800">Edit Document</h3>
-              <button onClick={() => setEditingItem(null)} className="text-gray-400 hover:text-gray-600">
-                <X className="h-5 w-5" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" style={{ padding: 'var(--space-4)' }}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-doc-title"
+            onKeyDown={(e) => { if (e.key === 'Escape') setEditingItem(null) }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-5)' }}>
+              <h3 id="edit-doc-title" className="modal-title">Edit document</h3>
+              <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Close" onClick={() => setEditingItem(null)}>
+                <X size={16} strokeWidth={1.5} />
               </button>
             </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Display Name</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  value={editForm.display_name}
-                  onChange={(e) => setEditForm(f => ({ ...f, display_name: e.target.value }))}
-                />
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+              <div className="field-head">
+                <label htmlFor="edit_doc_name">Name</label>
               </div>
-              
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Notes</label>
-                <textarea
-                  className="input-field min-h-[80px]"
-                  value={editForm.notes}
-                  onChange={(e) => setEditForm(f => ({ ...f, notes: e.target.value }))}
-                  placeholder="Add notes..."
-                />
-              </div>
+              <input
+                id="edit_doc_name"
+                type="text"
+                className="input"
+                value={editForm.display_name}
+                onChange={(e) => setEditForm((f) => ({ ...f, display_name: e.target.value }))}
+              />
             </div>
-            
-            <div className="mt-4 flex gap-2">
-              <button onClick={handleEditSave} className="btn-primary">Save Changes</button>
-              <button onClick={() => setEditingItem(null)} className="btn-secondary">Cancel</button>
+            <div>
+              <div className="field-head">
+                <label htmlFor="edit_doc_notes">Notes</label>
+                <span className="field-optional">Optional</span>
+              </div>
+              <textarea
+                id="edit_doc_notes"
+                className="textarea"
+                value={editForm.notes}
+                onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                placeholder="Add notes…"
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEditingItem(null)} disabled={saving}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-primary" onClick={handleEditSave} disabled={saving}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
             </div>
           </div>
         </div>
-      )}
-
-      {/* Click outside to close menu */}
-      {menuOpen && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => { setMenuOpen(null); setMenuPos(null) }}
-        />
-      )}
-
-      {/* Row action menu - portaled to <body> and positioned `fixed` from the
-          trigger button's own coordinates so it renders on top of the page
-          instead of being clipped by the table wrapper's rounded corners. */}
-      {menuOpen && menuPos && createPortal(
-        (() => {
-          const item = items.find(i => i.id === menuOpen)
-          if (!item) return null
-          return (
-            <div
-              className="fixed z-50 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-              style={{ top: menuPos.top, right: menuPos.right }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                onClick={() => handleView(item)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <Eye className="h-4 w-4" />
-                View
-              </button>
-              {item.type === 'document' && (
-                <>
-                  <button
-                    onClick={() => handleDownload(item)}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download
-                  </button>
-                  <button
-                    onClick={() => openEdit(item)}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <Edit2 className="h-4 w-4" />
-                    Edit
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => handleDelete(item)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </button>
-            </div>
-          )
-        })(),
-        document.body
       )}
     </div>
   )

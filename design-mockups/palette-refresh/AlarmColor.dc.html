@@ -1,0 +1,162 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+:root {
+  --primary: #7C72E8;
+  --primary-hover: #6D63D9;
+  --primary-light: #ECE8FC;
+  --primary-soft: #E4DFFB;
+  --primary-tint: #F1EEFC;
+  --app-bg: #FFFFFF;
+  --surface: #FFFFFF;
+  --slate-100: #EBE7F5;
+  --slate-600: #5C5277;
+  --text-primary: #241F35;
+  --text-secondary: #5C5277;
+  --text-muted: #8B8098;
+  --border-light: #EBE7F5;
+  --shadow-card: 0 4px 16px rgba(58, 45, 92, 0.07);
+  --shadow-card-strong: 0 10px 26px rgba(58, 45, 92, 0.14);
+  /* current rose */
+  --rose-accent: #A23B5C;
+  --rose-bg: #F5DCE5;
+  --rose-text: #6B2038;
+  /* candidate 1: confident crimson — pushed closer to a true triadic red against lavender's 245° hue */
+  --crimson-accent: #C23050;
+  --crimson-bg: #FBDEE6;
+  --crimson-text: #7A1030;
+  /* candidate 2: clean true red — hue 0°, warmest possible contrast to lavender, nowhere near the amber zone */
+  --red-accent: #D6484A;
+  --red-bg: #FCE2E1;
+  --red-text: #8A1F1F;
+}
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; border: none; background: none; padding: 0; margin: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: #FFFFFF; color: var(--text-primary); }
+.page { width: 1320px; padding: 56px 64px 80px; }
+.page__title { font-size: 26px; font-weight: 800; margin: 0 0 6px; }
+.page__subtitle { font-size: 14.5px; color: var(--text-secondary); line-height: 1.6; max-width: 940px; margin: 0 0 44px; }
+
+.compare-section { margin-bottom: 56px; }
+.compare-section__label { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; }
+.compare-section__label h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-muted); margin: 0; }
+.compare-section__label span { font-size: 13px; color: var(--text-muted); }
+.compare-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.compare-grid--two { grid-template-columns: repeat(2, 1fr); }
+
+.opt { border: 1px dashed #DCD8EC; border-radius: 18px; padding: 20px; background: #FCFBFE; }
+.opt__tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--primary); background: var(--primary-light); padding: 3px 10px; border-radius: 999px; margin-bottom: 6px; }
+.opt__name { font-size: 14.5px; font-weight: 700; margin: 0 0 3px; }
+.opt__desc { font-size: 12.5px; color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
+.opt__footnote { margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.opt__swatch { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-family: monospace; color: var(--text-muted); margin-top: 10px; }
+.opt__swatch i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+
+/* demo bones */
+.demo-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-radius: 20px; margin-bottom: 10px; }
+.demo-card__name { font-size: 14px; font-weight: 600; margin: 0; }
+.demo-card__amount { font-size: 12.5px; margin: 2px 0 0; opacity: 0.7; }
+.demo-card__status { font-size: 14px; font-weight: 700; margin: 0; text-align: right; }
+.demo-card__date { font-size: 12px; margin: 0; text-align: right; opacity: 0.7; }
+
+.demo-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-radius: 12px; margin-bottom: 8px; }
+.demo-row--white { background: #fff; border: 1px solid var(--border-light); }
+.demo-row--tint { background: var(--primary-tint); }
+.demo-pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.demo-text-only { font-size: 13px; font-weight: 700; }
+
+/* fill treatments, driven by one hue via CSS vars set per-block */
+.hue-rose { --a: var(--rose-accent); --bg: var(--rose-bg); --t: var(--rose-text); }
+.hue-crimson { --a: var(--crimson-accent); --bg: var(--crimson-bg); --t: var(--crimson-text); }
+.hue-red { --a: var(--red-accent); --bg: var(--red-bg); --t: var(--red-text); }
+
+.fill-card { background: var(--bg); }
+.fill-card .demo-card__status { color: var(--t); }
+.fill-pill { background: var(--bg); color: var(--t); }
+.fill-text { color: var(--t); }
+.fill-solid { background: var(--a); color: #fff; }
+.fill-solid .demo-card__status, .fill-solid .demo-card__name, .fill-solid .demo-card__amount, .fill-solid .demo-card__date { color: #fff; }
+  </style>
+</helmet>
+
+<div class="page">
+  <h1 class="page__title">Alarm Color — is it the hue or the layering?</h1>
+  <p class="page__subtitle">You said the rose "isn't suiting with lavender here" — worth being precise about where "here" is. The rose has been on the Payments list (white card background) since round 3 with no complaint. What's new is seeing it as a pill sitting on top of a lavender-tinted row (Patients page) — two pastel fills stacked on each other. Section 1 isolates that. Section 2 shows real hue alternatives, each in its heaviest use (a full payment-card fill, not just a small chip) so a color that looks fine as a pill doesn't surprise you later as a card.</p>
+
+  <div class="compare-section">
+    <div class="compare-section__label"><h2>1 — Same rose, different contexts</h2><span>does the hue fail, or does pastel-on-pastel fail?</span></div>
+    <div class="compare-grid">
+      <div class="opt">
+        <span class="opt__tag">On white</span>
+        <p class="opt__name">Payments list — where this rose already shipped</p>
+        <div class="demo-row demo-row--white">
+          <span class="demo-text-only" style="color:var(--text-primary);">Arjun Mehta</span>
+          <span class="demo-pill fill-pill hue-rose">Overdue</span>
+        </div>
+        <p class="opt__footnote">This is the context nobody flagged.</p>
+      </div>
+      <div class="opt">
+        <span class="opt__tag">On lavender tint</span>
+        <p class="opt__name">Patients page — the pill you're reacting to</p>
+        <div class="demo-row demo-row--tint">
+          <span class="demo-text-only" style="color:var(--text-primary);">Arjun Mehta</span>
+          <span class="demo-pill fill-pill hue-rose">Pending</span>
+        </div>
+        <p class="opt__footnote">Same exact rose. Two pastel fills stacked — this is likely the actual clash, not the hue itself.</p>
+      </div>
+      <div class="opt">
+        <span class="opt__tag">Fix without changing hue</span>
+        <p class="opt__name">Rose as text only, no pill fill</p>
+        <div class="demo-row demo-row--tint">
+          <span class="demo-text-only" style="color:var(--text-primary);">Arjun Mehta</span>
+          <span class="demo-text-only fill-text hue-rose">Pending</span>
+        </div>
+        <p class="opt__footnote">Dropping the second fill (same move as Option A for status chips) can resolve this for free — worth ruling out before spending a new hue.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="compare-section">
+    <div class="compare-section__label"><h2>2 — If you still want a different hue</h2><span>green/amber are out; plum &amp; terracotta are already spoken for as patient-avatar colors — shown at full card weight, not just a pill</span></div>
+    <div class="compare-grid compare-grid--two">
+      <div class="opt">
+        <span class="opt__tag">Candidate 1</span>
+        <p class="opt__name">Confident crimson</p>
+        <p class="opt__desc">Same red-violet family as the current rose, pushed more saturated and darker so it reads as "alert," not "dusty." Sits close to lavender's true triadic partner, so the contrast is deliberate rather than accidental.</p>
+        <div class="demo-card fill-card hue-crimson">
+          <div><p class="demo-card__name">Arjun Mehta</p><p class="demo-card__amount">₹3,000</p></div>
+          <div><p class="demo-card__status">Overdue</p><p class="demo-card__date">Yesterday</p></div>
+        </div>
+        <div class="demo-row demo-row--tint">
+          <span class="demo-text-only" style="color:var(--text-primary);">Arjun Mehta</span>
+          <span class="demo-pill fill-pill hue-crimson">Pending</span>
+        </div>
+        <div class="opt__swatch"><i style="background:#C23050;"></i>#C23050 accent · #FBDEE6 tint</div>
+      </div>
+      <div class="opt">
+        <span class="opt__tag">Candidate 2</span>
+        <p class="opt__name">Clean true red</p>
+        <p class="opt__desc">Hue 0° — straightforwardly red, no pink or wine undertone at all. The most distinct from lavender of any option here; reads closer to a standard SaaS "destructive/alert" red.</p>
+        <div class="demo-card fill-card hue-red">
+          <div><p class="demo-card__name">Arjun Mehta</p><p class="demo-card__amount">₹3,000</p></div>
+          <div><p class="demo-card__status">Overdue</p><p class="demo-card__date">Yesterday</p></div>
+        </div>
+        <div class="demo-row demo-row--tint">
+          <span class="demo-text-only" style="color:var(--text-primary);">Arjun Mehta</span>
+          <span class="demo-pill fill-pill hue-red">Pending</span>
+        </div>
+        <div class="opt__swatch"><i style="background:#D6484A;"></i>#D6484A accent · #FCE2E1 tint</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

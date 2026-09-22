@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
-import { LogIn, UserPlus, Mail } from 'lucide-react'
+import { Eye, EyeOff, Mail, AlertCircle } from 'lucide-react'
 import { login, signup, resendVerification, getGoogleLoginUrl, getFeatureFlags } from '../api/client'
-import { Alert } from '../components/ui'
 
 const EMAIL_UNVERIFIED_MESSAGE = 'Please verify your email before logging in. Check your inbox for the verification link.'
 
@@ -14,6 +13,7 @@ export default function Login({ onLogin, onLogout }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [signupDone, setSignupDone] = useState(false)
@@ -26,6 +26,8 @@ export default function Login({ onLogin, onLogout }) {
     const cached = localStorage.getItem('mmpi_google_enabled')
     return cached === null ? null : cached === 'true'
   })
+
+  const formRef = useRef(null)
 
   useEffect(() => {
     if (searchParams.get('new') === '1' && onLogout) {
@@ -41,6 +43,15 @@ export default function Login({ onLogin, onLogout }) {
       })
       .catch(() => setGoogleEnabled((prev) => (prev === null ? false : prev)))
   }, [])
+
+  // Tab switching is a state change, not a route change — move focus into
+  // the newly-revealed form so keyboard/screen-reader users land somewhere
+  // useful instead of staying parked on the tab button.
+  useEffect(() => {
+    if (!signupDone) {
+      formRef.current?.querySelector('input')?.focus()
+    }
+  }, [mode, signupDone])
 
   const redirectAfterLogin = (data) => {
     if (data.must_change_password && data.role === 'practitioner') {
@@ -70,6 +81,8 @@ export default function Login({ onLogin, onLogout }) {
       onLogin(data)
       redirectAfterLogin(data)
     } catch (err) {
+      // Deliberately not clearing email/password here — a failed attempt
+      // shouldn't force the person to retype everything.
       setError(err.response?.data?.detail || 'Login failed')
     } finally {
       setLoading(false)
@@ -114,96 +127,83 @@ export default function Login({ onLogin, onLogout }) {
     }
   }
 
+  const hasFieldError = Boolean(error) && !signupDone
+
   return (
-    <div className="flex min-h-svh items-center justify-center p-4 short:p-2">
-      <div className="w-full max-w-md animate-fade-in">
-        <div className="card login-card">
-          {/* Header */}
-          <div className="mb-4 text-center short:mb-2 sm:mb-8">
-            <Link to="/">
-              <img
-                src="/logo.png"
-                alt="Therapistnook"
-                className="mx-auto mb-2 h-16 w-16 short:mb-1 short:h-10 short:w-10 sm:mb-4 sm:h-28 sm:w-28"
-              />
-            </Link>
-            <h1 className="text-h2 text-content-primary short:text-card-title">Therapistnook</h1>
-            <p className="mt-1 text-body text-content-secondary short:hidden sm:mt-2">
-              {mode === 'login' ? 'Sign in to your practitioner account' : 'Create your practitioner account'}
-            </p>
+    <div className="clinical-ink auth-page">
+      <div className="auth-card">
+        <div className="auth-head">
+          <img src="/logo.png" alt="" aria-hidden="true" className="auth-mark" />
+          <h1 className="t-h1">Therapist Nook</h1>
+          <p className="t-body-s" style={{ color: 'var(--text-muted)', marginTop: 6 }}>
+            {mode === 'login' ? 'Sign in to your practitioner account' : 'Create your practitioner account'}
+          </p>
+        </div>
+
+        <div className="auth-tabs" role="tablist" aria-label="Log in or sign up">
+          <button
+            type="button"
+            role="tab"
+            id="auth-tab-login"
+            aria-selected={mode === 'login'}
+            aria-controls="auth-panel"
+            className="seg-option"
+            onClick={() => switchMode('login')}
+          >
+            Log in
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="auth-tab-signup"
+            aria-selected={mode === 'signup'}
+            aria-controls="auth-panel"
+            className="seg-option"
+            onClick={() => switchMode('signup')}
+          >
+            Sign up
+          </button>
+        </div>
+
+        {error && (
+          <div className="alert alert-error" aria-live="polite" style={{ marginBottom: 'var(--space-5)' }}>
+            <AlertCircle size={16} strokeWidth={1.5} style={{ color: 'var(--error)', flex: 'none', marginTop: 2 }} aria-hidden="true" />
+            <div>
+              <p>{error}</p>
+              {error === EMAIL_UNVERIFIED_MESSAGE && (
+                <button type="button" className="link" onClick={handleResend} disabled={resending || !email} style={{ marginTop: 6, display: 'block' }}>
+                  {resending ? 'Resending…' : 'Resend verification email'}
+                </button>
+              )}
+            </div>
           </div>
+        )}
 
-          {/* Mode Tabs */}
-          <div className="mb-4 flex rounded-btn bg-surface-subtle p-1 short:mb-2 sm:mb-6">
-            <button
-              type="button"
-              onClick={() => switchMode('login')}
-              className={`flex-1 rounded-[12px] py-2 text-sm font-semibold transition ${
-                mode === 'login' ? 'bg-white text-content-primary shadow-sm' : 'text-content-muted'
-              }`}
-            >
-              Log In
-            </button>
-            <button
-              type="button"
-              onClick={() => switchMode('signup')}
-              className={`flex-1 rounded-[12px] py-2 text-sm font-semibold transition ${
-                mode === 'signup' ? 'bg-white text-content-primary shadow-sm' : 'text-content-muted'
-              }`}
-            >
-              Sign Up
-            </button>
+        {resent && (
+          <div className="alert alert-info" role="status" aria-live="polite" style={{ marginBottom: 'var(--space-5)' }}>
+            <p>If that email has an account, a new verification link is on its way.</p>
           </div>
+        )}
 
-          {/* Error Alert */}
-          {error && (
-            <div className="mb-6">
-              <Alert variant="error" onDismiss={() => setError('')}>
-                {error}
-                {error === EMAIL_UNVERIFIED_MESSAGE && (
-                  <button
-                    type="button"
-                    onClick={handleResend}
-                    disabled={resending || !email}
-                    className="mt-2 block text-sm font-semibold underline disabled:opacity-60"
-                  >
-                    {resending ? 'Resending…' : 'Resend verification email'}
-                  </button>
-                )}
-              </Alert>
-            </div>
-          )}
+        {searchParams.get('account_deleted') === 'true' && (
+          <div className="alert alert-info" role="status" style={{ marginBottom: 'var(--space-5)' }}>
+            <p>Your account has been deleted and you've been logged out.</p>
+          </div>
+        )}
 
-          {resent && (
-            <div className="mb-6">
-              <Alert variant="success">
-                If that email has an account, a new verification link is on its way.
-              </Alert>
-            </div>
-          )}
-
-          {searchParams.get('account_deleted') === 'true' && (
-            <div className="mb-6">
-              <Alert variant="success">
-                Your account has been deleted and you've been logged out.
-              </Alert>
-            </div>
-          )}
-
+        <div id="auth-panel" role="tabpanel" aria-labelledby={mode === 'login' ? 'auth-tab-login' : 'auth-tab-signup'}>
           {mode === 'signup' && signupDone ? (
-            <div className="space-y-4 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary-100">
-                <Mail className="h-6 w-6 text-primary-600" strokeWidth={1.75} />
+            <div style={{ textAlign: 'center' }}>
+              <div
+                className="icon-badge"
+                style={{ width: 56, height: 56, borderRadius: 'var(--radius-full)', margin: '0 auto var(--space-4)' }}
+              >
+                <Mail size={24} strokeWidth={1.5} aria-hidden="true" />
               </div>
-              <p className="text-body text-content-primary">
+              <p className="t-body">
                 Check <strong>{email}</strong> for a verification link to activate your account.
               </p>
-              <button
-                type="button"
-                onClick={handleResend}
-                disabled={resending}
-                className="text-sm font-semibold text-primary-600 underline disabled:opacity-60"
-              >
+              <button type="button" className="link" onClick={handleResend} disabled={resending} style={{ marginTop: 'var(--space-3)' }}>
                 {resending ? 'Resending…' : "Didn't get it? Resend"}
               </button>
             </div>
@@ -211,34 +211,27 @@ export default function Login({ onLogin, onLogout }) {
             <>
               {googleEnabled === null ? (
                 <>
-                  <div className="h-[42px] w-full animate-pulse rounded-btn bg-surface-subtle" />
-                  <div className="my-3 flex items-center gap-3 short:my-2 sm:my-5">
-                    <span className="h-px flex-1 bg-border-light" />
-                    <span className="text-caption text-content-muted">or</span>
-                    <span className="h-px flex-1 bg-border-light" />
-                  </div>
+                  <div className="btn btn-secondary" style={{ width: '100%', height: 40, visibility: 'hidden' }} aria-hidden="true" />
+                  <div className="auth-divider">or</div>
                 </>
               ) : googleEnabled ? (
                 <>
-                  <button type="button" onClick={handleGoogle} className="btn-secondary w-full">
+                  <button type="button" onClick={handleGoogle} className="btn btn-secondary" style={{ width: '100%', height: 40 }}>
                     <GoogleIcon />
                     {mode === 'login' ? 'Continue with Google' : 'Sign up with Google'}
                   </button>
-                  <div className="my-3 flex items-center gap-3 short:my-2 sm:my-5">
-                    <span className="h-px flex-1 bg-border-light" />
-                    <span className="text-caption text-content-muted">or</span>
-                    <span className="h-px flex-1 bg-border-light" />
-                  </div>
+                  <div className="auth-divider">or</div>
                 </>
               ) : null}
 
-              <form onSubmit={mode === 'login' ? handleLogin : handleSignup} className="space-y-3 short:space-y-2 sm:space-y-5">
+              <form ref={formRef} onSubmit={mode === 'login' ? handleLogin : handleSignup}>
                 {mode === 'signup' && (
-                  <div>
-                    <label className="label">Full Name</label>
+                  <div className="field">
+                    <label htmlFor="auth-name">Full name</label>
                     <input
+                      id="auth-name"
                       type="text"
-                      className="input-field"
+                      className="input"
                       placeholder="Dr. Jane Doe"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -247,50 +240,71 @@ export default function Login({ onLogin, onLogout }) {
                     />
                   </div>
                 )}
-                <div>
-                  <label className="label">Email</label>
+
+                <div className="field">
+                  <label htmlFor="auth-email">Email</label>
                   <input
+                    id="auth-email"
                     type="email"
-                    className="input-field"
+                    inputMode="email"
+                    className="input"
                     placeholder="you@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     autoComplete="email"
+                    aria-invalid={hasFieldError}
                   />
                 </div>
-                <div>
-                  <label className="label">Password</label>
-                  <input
-                    type="password"
-                    className="input-field"
-                    placeholder={mode === 'login' ? 'Enter your password' : 'At least 6 characters'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={mode === 'signup' ? 6 : undefined}
-                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  />
-                </div>
-                <button type="submit" className="btn-primary w-full" disabled={loading}>
-                  {loading ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      {mode === 'login' ? 'Signing in...' : 'Creating account...'}
-                    </>
-                  ) : mode === 'login' ? (
-                    <>
-                      <LogIn className="h-5 w-5" strokeWidth={1.5} />
-                      Sign In
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="h-5 w-5" strokeWidth={1.5} />
-                      Sign Up
-                    </>
+
+                <div className="field">
+                  <div className="field-row">
+                    <label htmlFor="auth-password" style={{ marginBottom: 0 }}>Password</label>
+                    {mode === 'login' && (
+                      <Link to="/forgot-password" className="link">Forgot password?</Link>
+                    )}
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      id="auth-password"
+                      type={showPassword ? 'text' : 'password'}
+                      className="input"
+                      style={{ paddingRight: 40 }}
+                      placeholder={mode === 'login' ? 'Enter your password' : 'At least 6 characters'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      minLength={mode === 'signup' ? 6 : undefined}
+                      autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                      aria-invalid={hasFieldError}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon btn-icon-sm"
+                      style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showPassword}
+                      onClick={() => setShowPassword((v) => !v)}
+                    >
+                      {showPassword ? <EyeOff size={16} strokeWidth={1.5} /> : <Eye size={16} strokeWidth={1.5} />}
+                    </button>
+                  </div>
+                  {mode === 'signup' && (
+                    <p className="t-caption" style={{ marginTop: 6 }}>At least 6 characters.</p>
                   )}
+                </div>
+
+                <button type="submit" className="btn btn-primary" style={{ width: '100%', height: 44 }} disabled={loading}>
+                  {loading
+                    ? (mode === 'login' ? 'Signing in…' : 'Creating account…')
+                    : (mode === 'login' ? 'Sign in' : 'Sign up')}
                 </button>
               </form>
+
+              <p className="auth-legal">
+                By continuing you agree to our <Link to="/terms">Terms of Service</Link> and{' '}
+                <Link to="/privacy">Privacy Policy</Link>.
+              </p>
             </>
           )}
         </div>

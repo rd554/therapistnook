@@ -1,32 +1,55 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  ChevronLeft, ChevronRight, Save, Check, Loader2, Clock, AlertCircle,
-  User, MessageSquare, History, Heart, Users, Briefcase, Home, Wine, Shield, FileText,
-  ChevronDown,
+  ArrowLeft, ChevronDown, ChevronRight, Check, Loader2, AlertCircle,
 } from 'lucide-react'
 import { getClinicalHistory, updateClinicalHistory } from '../api/client'
-import { PhoneInput } from './ui'
+import { splitPhone, joinPhone } from '../utils/phone'
+import { COUNTRY_CODES } from '../constants/countryCodes'
 
 const STEPS = [
-  { value: 1, label: 'Basic Information', icon: User },
-  { value: 2, label: 'Presenting Complaint', icon: MessageSquare },
-  { value: 3, label: 'History of Present Illness', icon: History },
-  { value: 4, label: 'Medical History', icon: Heart },
-  { value: 5, label: 'Family History', icon: Users },
-  { value: 6, label: 'Personal History', icon: Briefcase },
-  { value: 7, label: 'Relationship History', icon: Home },
-  { value: 8, label: 'Substance Use', icon: Wine },
-  { value: 9, label: 'Trauma History', icon: AlertCircle },
-  { value: 10, label: 'Risk Assessment', icon: Shield },
-  { value: 11, label: 'Therapist Notes', icon: FileText },
+  { value: 1, label: 'Basic information' },
+  { value: 2, label: 'Presenting complaint' },
+  { value: 3, label: 'History of present illness' },
+  { value: 4, label: 'Medical history' },
+  { value: 5, label: 'Family history' },
+  { value: 6, label: 'Personal history' },
+  { value: 7, label: 'Relationship history' },
+  { value: 8, label: 'Substance use' },
+  { value: 9, label: 'Trauma history' },
+  { value: 10, label: 'Risk assessment' },
+  { value: 11, label: 'Therapist notes' },
 ]
 
-export default function ClinicalHistoryWizard({ patientId, patient, onComplete }) {
+// Mirrors backend's _compute_age(dob) in main.py exactly, so the client-side
+// display never drifts from what the server would compute for the same DOB.
+function computeAge(dobString) {
+  if (!dobString) return null
+  const dob = new Date(dobString)
+  if (Number.isNaN(dob.getTime())) return null
+  const today = new Date()
+  let age = today.getFullYear() - dob.getFullYear()
+  const hasHadBirthdayThisYear =
+    today.getMonth() > dob.getMonth() ||
+    (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate())
+  if (!hasHadBirthdayThisYear) age -= 1
+  return age
+}
+
+// Mirrors PatientProfile.jsx's own copy — a two-line pure function, not
+// worth a shared utils import.
+function sentenceCase(label) {
+  if (!label) return ''
+  const lower = label.toLowerCase()
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
+}
+
+export default function ClinicalHistoryWizard({ patientId, patient, onComplete, sectionOptions, onSectionChange, onBack }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [lastSaved, setLastSaved] = useState(null)
   const [currentStep, setCurrentStep] = useState(1)
+  const [hasChanges, setHasChanges] = useState(false)
   const [data, setData] = useState({
     basic_info: {},
     presenting_complaint: {},
@@ -41,9 +64,18 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
     therapist_notes: '',
   })
   const [status, setStatus] = useState('not_started')
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [mobileSectionOpen, setMobileSectionOpen] = useState(false)
   const autoSaveTimeout = useRef(null)
-  const hasChanges = useRef(false)
+  const dataRef = useRef(data)
   const topRef = useRef(null)
+  const headingRef = useRef(null)
+  const sectionRef = useRef(null)
+  const mobileSectionRef = useRef(null)
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
 
   useEffect(() => {
     loadData()
@@ -59,6 +91,30 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
   useEffect(() => {
     topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [currentStep])
+
+  // Focus moves to the new step's heading on every step change — this is
+  // itself the step-change "announcement" for screen readers, so no
+  // separate live region is needed here. preventScroll avoids fighting the
+  // scrollIntoView effect above.
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true })
+  }, [currentStep])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (sectionRef.current && !sectionRef.current.contains(e.target)) setSectionOpen(false)
+    }
+    if (sectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [sectionOpen])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (mobileSectionRef.current && !mobileSectionRef.current.contains(e.target)) setMobileSectionOpen(false)
+    }
+    if (mobileSectionOpen) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mobileSectionOpen])
 
   const loadData = async () => {
     try {
@@ -94,10 +150,10 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
         ...newData,
       }
       if (newStatus) payload.status = newStatus
-      
+
       await updateClinicalHistory(patientId, payload)
       setLastSaved(new Date())
-      hasChanges.current = false
+      setHasChanges(false)
       if (newStatus) setStatus(newStatus)
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to save')
@@ -114,18 +170,18 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
         [field]: value,
       }
     }))
-    hasChanges.current = true
-    
+    setHasChanges(true)
+
     if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
     autoSaveTimeout.current = setTimeout(() => {
-      saveData({ [section]: { ...data[section], [field]: value } }, currentStep, null)
+      saveData({ [section]: dataRef.current[section] }, currentStep, null)
     }, 2000)
   }
 
   const handleNotesChange = (value) => {
     setData(prev => ({ ...prev, therapist_notes: value }))
-    hasChanges.current = true
-    
+    setHasChanges(true)
+
     if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
     autoSaveTimeout.current = setTimeout(() => {
       saveData({ therapist_notes: value }, currentStep, null)
@@ -133,7 +189,8 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
   }
 
   const handleNext = async () => {
-    if (currentStep < 11) {
+    if (currentStep < STEPS.length) {
+      if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
       const nextStep = currentStep + 1
       setCurrentStep(nextStep)
       await saveData(data, nextStep, status === 'not_started' ? 'in_progress' : null)
@@ -142,6 +199,7 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
 
   const handlePrev = async () => {
     if (currentStep > 1) {
+      if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
       const prevStep = currentStep - 1
       setCurrentStep(prevStep)
       await saveData(data, prevStep, null)
@@ -149,26 +207,24 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
   }
 
   const handleSaveDraft = async () => {
+    if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
     await saveData(data, currentStep, 'in_progress')
   }
 
   const handleComplete = async () => {
+    if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
     await saveData(data, currentStep, 'completed')
     if (onComplete) onComplete()
   }
 
+  // Steps can be completed out of order — the rail and dropdown both leave
+  // every step enabled rather than gating on currentStep.
   const goToStep = async (step) => {
     if (step !== currentStep) {
+      if (autoSaveTimeout.current) clearTimeout(autoSaveTimeout.current)
       setCurrentStep(step)
       await saveData(data, step, status === 'not_started' ? 'in_progress' : null)
     }
-  }
-
-  const getDropdownOptions = () => {
-    return STEPS.map(step => ({
-      ...step,
-      completed: step.value < currentStep || status === 'completed'
-    }))
   }
 
   const formatRelativeTime = (date) => {
@@ -188,136 +244,173 @@ export default function ClinicalHistoryWizard({ patientId, patient, onComplete }
     )
   }
 
-  if (error && !data.basic_info) {
-    return (
-      <div className="card text-center py-8">
-        <AlertCircle className="mx-auto h-12 w-12 text-error-text" />
-        <p className="mt-4 text-content-secondary">{error}</p>
-      </div>
-    )
-  }
-
   const StepComponent = getStepComponent(currentStep)
+  const currentSectionLabel = sentenceCase(
+    sectionOptions?.find(o => o.value === 'clinical-history')?.label || 'Clinical history'
+  )
+
+  const switcher = (ref, open, setOpen, fullWidth) => (
+    <div ref={ref} className={fullWidth ? 'grow' : undefined} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        style={fullWidth ? { width: '100%', justifyContent: 'space-between' } : undefined}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(v => !v)}
+      >
+        {currentSectionLabel}
+        <ChevronDown size={16} strokeWidth={1.5} />
+      </button>
+      {open && (
+        <div className={`menu-popover${fullWidth ? '' : ' align-right'}`} style={fullWidth ? { width: '100%' } : undefined}>
+          {(sectionOptions || []).map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              className="menu-item"
+              onClick={() => { onSectionChange?.(opt.value); setOpen(false) }}
+            >
+              {sentenceCase(opt.label)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  const saveLabel = saving ? 'Saving…' : lastSaved ? `Saved ${formatRelativeTime(lastSaved)}` : ''
 
   return (
-    <div ref={topRef} className="space-y-6 pt-2">
-      {/* Header: Title | Dropdown | Save Draft */}
-      <div className="flex items-center gap-4">
-        <h2 className="text-section-title text-content-primary">Clinical History</h2>
-
-        {/* Section Dropdown */}
-        <div className="relative" style={{ maxWidth: '200px' }}>
-          <select
-            value={currentStep}
-            onChange={(e) => goToStep(Number(e.target.value))}
-            className="input-field-sm section-dropdown-cream w-full pr-8 font-medium text-content-primary appearance-none cursor-pointer truncate"
-          >
-            {getDropdownOptions().map(step => (
-              <option key={step.value} value={step.value}>
-                {step.completed ? '✓ ' : ''}{step.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-content-muted pointer-events-none" />
-        </div>
-
-        <button
-          onClick={handleSaveDraft}
-          disabled={saving}
-          className="btn-secondary-sm ml-auto"
-        >
-          <Save className="h-3.5 w-3.5" />
-          Save Draft
-        </button>
-      </div>
-
-      {/* Progress Bar */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 flex-1">
-          <div className="h-2 flex-1 max-w-xs bg-slate-100 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-primary transition-all duration-300"
-              style={{ width: `${(currentStep / STEPS.length) * 100}%` }}
-            />
+    <div ref={topRef} className="clinical-ink max-w-[1120px]">
+      {/* Desktop patient header — identical shape to Overview/Sessions/Payments */}
+      <div className="hidden sm:block">
+        <div className="profile-head">
+          <div className="profile-id">
+            <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" title="Back to patients" onClick={onBack}>
+              <ArrowLeft size={18} strokeWidth={1.5} />
+            </button>
+            <div className="profile-name">
+              <h1 className="t-h1">{patient?.full_name}</h1>
+              <span className="t-body-s">
+                {patient?.age != null ? `${patient.age} yrs` : ''}
+                {patient?.age != null && patient?.gender ? ' · ' : ''}
+                {patient?.gender}
+              </span>
+            </div>
           </div>
-          <span className="text-sm text-content-secondary whitespace-nowrap">
-            Step {currentStep} of {STEPS.length}
-          </span>
-        </div>
-        <div className="flex items-center gap-3 text-sm">
-          {saving ? (
-            <span className="flex items-center gap-1.5 text-warning-text">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Saving...
-            </span>
-          ) : lastSaved && (
-            <span className="flex items-center gap-1.5 text-content-muted">
-              <Clock className="h-3.5 w-3.5" />
-              Saved {formatRelativeTime(lastSaved)}
-            </span>
-          )}
-          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-            status === 'completed' ? 'bg-success-bg text-success-text' :
-            status === 'in_progress' ? 'bg-warning-bg text-warning-text' :
-            'bg-slate-100 text-content-secondary'
-          }`}>
-            {status === 'completed' ? 'Completed' : status === 'in_progress' ? 'In Progress' : 'Not Started'}
-          </span>
+          <div className="profile-actions">
+            {switcher(sectionRef, sectionOpen, setSectionOpen, false)}
+          </div>
         </div>
       </div>
 
-      {/* Error Message */}
+      {/* Mobile patient header — name only, section switcher full width */}
+      <div className="flex sm:hidden flex-col" style={{ gap: 'var(--space-4)', marginBottom: 'var(--space-7)' }}>
+        <div className="profile-id">
+          <button type="button" className="btn btn-secondary btn-icon" aria-label="Back to patients" onClick={onBack}>
+            <ArrowLeft size={18} strokeWidth={1.5} />
+          </button>
+          <div className="profile-name">
+            <h1 className="t-h1" style={{ fontSize: '24px', lineHeight: '30px' }}>{patient?.full_name}</h1>
+          </div>
+        </div>
+        {switcher(mobileSectionRef, mobileSectionOpen, setMobileSectionOpen, true)}
+      </div>
+
+      <div className="wizard-head">
+        <h2 ref={headingRef} tabIndex={-1} className="t-h2">Clinical history</h2>
+        <select
+          className="select wizard-step-switcher"
+          value={currentStep}
+          onChange={(e) => goToStep(Number(e.target.value))}
+          aria-label="Clinical history step"
+        >
+          {STEPS.map(step => (
+            <option key={step.value} value={step.value}>{step.value}. {step.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div
+        className="wizard-progress"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={STEPS.length}
+        aria-valuenow={currentStep}
+        aria-valuetext={`Step ${currentStep} of ${STEPS.length}`}
+        aria-label="Clinical history progress"
+      >
+        <span className="progress">
+          <span className="progress-bar" style={{ width: `${(currentStep / STEPS.length) * 100}%` }} />
+        </span>
+        <span className="step-count">Step {currentStep} of {STEPS.length}</span>
+        <span className="step-saved" aria-live="polite">{saveLabel}</span>
+      </div>
+
       {error && (
-        <div className="rounded-xl border border-error bg-error-bg p-3 text-sm text-error-text">
-          {error}
+        <div className="alert alert-error" role="alert" style={{ marginBottom: 'var(--space-5)' }}>
+          <AlertCircle size={16} strokeWidth={1.5} style={{ color: 'var(--error)', flex: 'none', marginTop: 2 }} aria-hidden="true" />
+          <span>{error}</span>
         </div>
       )}
 
-      {/* Step Content */}
-      <div className="card">
-        <h3 className="text-card-title text-content-primary mb-6">
-          {STEPS[currentStep - 1].label}
-        </h3>
-        <StepComponent
-          data={data}
-          patient={patient}
-          onChange={handleFieldChange}
-          onNotesChange={handleNotesChange}
-        />
-      </div>
+      <div className="wizard-body">
+        <nav className="step-rail" aria-label="Clinical history steps">
+          {STEPS.map(step => {
+            const isCurrent = step.value === currentStep
+            const isDone = step.value < currentStep || status === 'completed'
+            return (
+              <button
+                key={step.value}
+                type="button"
+                className={`step-rail-item${isCurrent ? ' is-current' : ''}${isDone ? ' is-done' : ''}`}
+                aria-current={isCurrent ? 'step' : undefined}
+                onClick={() => goToStep(step.value)}
+              >
+                <span className="step-dot">{isDone ? <Check size={12} strokeWidth={2.5} /> : step.value}</span>
+                {step.label}
+              </button>
+            )
+          })}
+        </nav>
 
-      {/* Navigation */}
-      <div className="flex items-center justify-end gap-3">
-        {currentStep > 1 && (
-          <button
-            onClick={handlePrev}
-            disabled={saving}
-            className="btn-secondary"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Previous
-          </button>
-        )}
-        
-        {currentStep === STEPS.length ? (
-          <button
-            onClick={handleComplete}
-            disabled={saving}
-            className="btn-primary"
-          >
-            <Check className="h-4 w-4" />
-            Complete Intake
-          </button>
-        ) : (
-          <button
-            onClick={handleNext}
-            disabled={saving}
-            className="btn-primary"
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        )}
+        <div className="wizard-main">
+          <div className="card">
+            <h3 className="t-h3" style={{ marginBottom: 'var(--space-1)' }}>{STEPS[currentStep - 1].label}</h3>
+            {currentStep === 1 && (
+              <p className="t-body-s" style={{ marginBottom: 'var(--space-5)' }}>
+                Review and update basic patient information. Some fields are pre-filled from the patient record.
+              </p>
+            )}
+            <StepComponent
+              data={data}
+              patient={patient}
+              onChange={handleFieldChange}
+              onNotesChange={handleNotesChange}
+            />
+          </div>
+
+          <div className="form-actions">
+            {hasChanges && <span className="form-status t-caption">Unsaved changes</span>}
+            <button type="button" className="btn btn-secondary" onClick={handlePrev} disabled={saving || currentStep === 1}>
+              Back
+            </button>
+            <button type="button" className="btn btn-secondary wizard-save-draft" onClick={handleSaveDraft} disabled={saving}>
+              Save draft
+            </button>
+            {currentStep === STEPS.length ? (
+              <button type="button" className="btn btn-primary" onClick={handleComplete} disabled={saving}>
+                Finish
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" onClick={handleNext} disabled={saving}>
+                Next
+                <ChevronRight size={16} strokeWidth={1.5} />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -352,102 +445,171 @@ function FormField({ label, hint, required, children }) {
   )
 }
 
-function Step1BasicInfo({ data, patient, onChange }) {
+function Step1BasicInfo({ data, onChange }) {
   const info = data.basic_info || {}
-  
+  const { code: phoneCode, local: phoneLocal } = splitPhone(info.phone)
+  const age = computeAge(info.date_of_birth)
+
+  const handleDobChange = (dob) => {
+    onChange('basic_info', 'date_of_birth', dob)
+    const nextAge = computeAge(dob)
+    onChange('basic_info', 'age', nextAge)
+  }
+
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-gray-500">Review and update basic patient information. Some fields are pre-filled from the patient record.</p>
-      
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <FormField label="Full Name" required>
-          <input
-            type="text"
-            className="input-field"
-            value={info.full_name || ''}
-            onChange={(e) => onChange('basic_info', 'full_name', e.target.value)}
-            placeholder="Patient's full name"
-          />
-        </FormField>
-        
-        <FormField label="Date of Birth" required>
-          <input
-            type="date"
-            className="input-field"
-            value={info.date_of_birth || ''}
-            onChange={(e) => onChange('basic_info', 'date_of_birth', e.target.value)}
-          />
-        </FormField>
-        
-        <FormField label="Age">
-          <input
-            type="number"
-            className="input-field"
-            value={info.age || ''}
-            onChange={(e) => onChange('basic_info', 'age', e.target.value)}
-            placeholder="Age"
-          />
-        </FormField>
-        
-        <FormField label="Gender" required>
+    <div className="form-grid">
+      <div>
+        <div className="field-head">
+          <label htmlFor="ch_full_name">Full name</label>
+        </div>
+        <input
+          id="ch_full_name"
+          type="text"
+          className="input"
+          required
+          aria-required="true"
+          value={info.full_name || ''}
+          onChange={(e) => onChange('basic_info', 'full_name', e.target.value)}
+          placeholder="Patient's full name"
+        />
+      </div>
+
+      <div>
+        <div className="field-head">
+          <label htmlFor="ch_dob">Date of birth</label>
+        </div>
+        <input
+          id="ch_dob"
+          type="date"
+          className="input"
+          required
+          aria-required="true"
+          max={new Date().toISOString().split('T')[0]}
+          value={info.date_of_birth || ''}
+          onChange={(e) => handleDobChange(e.target.value)}
+        />
+      </div>
+
+      <div>
+        <div className="field-head">
+          <label id="ch_age_label">Age</label>
+        </div>
+        <div
+          className="field-static"
+          role="textbox"
+          aria-readonly="true"
+          aria-labelledby="ch_age_label"
+          tabIndex={0}
+        >
+          {age != null ? `${age} yrs` : '—'}
+        </div>
+      </div>
+
+      <div>
+        <div className="field-head">
+          <label htmlFor="ch_gender">Gender</label>
+        </div>
+        <select
+          id="ch_gender"
+          className="select"
+          required
+          aria-required="true"
+          value={info.gender || ''}
+          onChange={(e) => onChange('basic_info', 'gender', e.target.value)}
+        >
+          <option value="">Select gender</option>
+          <option value="Male">Male</option>
+          <option value="Female">Female</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+
+      <div>
+        <div className="field-head">
+          <label htmlFor="ch_phone_local">Phone</label>
+          <span className="field-optional">Optional</span>
+        </div>
+        <div className="input-group">
           <select
-            className="input-field"
-            value={info.gender || ''}
-            onChange={(e) => onChange('basic_info', 'gender', e.target.value)}
+            className="select"
+            aria-label="Country code"
+            value={phoneCode}
+            onChange={(e) => onChange('basic_info', 'phone', joinPhone(e.target.value, phoneLocal))}
           >
-            <option value="">Select gender</option>
-            <option value="Male">Male</option>
-            <option value="Female">Female</option>
-            <option value="Other">Other</option>
+            <option value="">—</option>
+            {COUNTRY_CODES.map(c => (
+              <option key={c.code} value={c.code}>{c.name} ({c.code})</option>
+            ))}
           </select>
-        </FormField>
-        
-        <FormField label="Phone">
-          <PhoneInput
-            value={info.phone || ''}
-            onChange={(phone) => onChange('basic_info', 'phone', phone)}
-          />
-        </FormField>
-        
-        <FormField label="Email">
           <input
-            type="email"
-            className="input-field"
-            value={info.email || ''}
-            onChange={(e) => onChange('basic_info', 'email', e.target.value)}
-            placeholder="patient@example.com"
+            id="ch_phone_local"
+            type="tel"
+            className="input"
+            placeholder="Phone number"
+            value={phoneLocal}
+            onChange={(e) => onChange('basic_info', 'phone', joinPhone(phoneCode, e.target.value))}
           />
-        </FormField>
-        
-        <FormField label="Address" hint="Full residential address">
-          <input
-            type="text"
-            className="input-field"
-            value={info.address || ''}
-            onChange={(e) => onChange('basic_info', 'address', e.target.value)}
-            placeholder="Street, City, State, PIN"
-          />
-        </FormField>
-        
-        <FormField label="Emergency Contact" hint="Name and phone number">
-          <input
-            type="text"
-            className="input-field"
-            value={info.emergency_contact || ''}
-            onChange={(e) => onChange('basic_info', 'emergency_contact', e.target.value)}
-            placeholder="Name - Phone"
-          />
-        </FormField>
-        
-        <FormField label="Referral Source">
-          <input
-            type="text"
-            className="input-field"
-            value={info.referral_source || ''}
-            onChange={(e) => onChange('basic_info', 'referral_source', e.target.value)}
-            placeholder="e.g., Dr. Smith, Self-referral"
-          />
-        </FormField>
+        </div>
+      </div>
+
+      <div>
+        <div className="field-head">
+          <label htmlFor="ch_email">Email</label>
+          <span className="field-optional">Optional</span>
+        </div>
+        <input
+          id="ch_email"
+          type="email"
+          className="input"
+          placeholder="patient@example.com"
+          value={info.email || ''}
+          onChange={(e) => onChange('basic_info', 'email', e.target.value)}
+        />
+      </div>
+
+      <div className="span-2">
+        <div className="field-head">
+          <label htmlFor="ch_address">Address</label>
+          <span className="field-optional">Optional</span>
+        </div>
+        <textarea
+          id="ch_address"
+          className="textarea"
+          rows={3}
+          placeholder="Street, city, state, PIN"
+          value={info.address || ''}
+          onChange={(e) => onChange('basic_info', 'address', e.target.value)}
+        />
+      </div>
+
+      <div>
+        <div className="field-head">
+          <label htmlFor="ch_emergency_contact">Emergency contact</label>
+          <span className="field-optional">Optional</span>
+        </div>
+        <input
+          id="ch_emergency_contact"
+          type="text"
+          className="input"
+          placeholder="Name – phone"
+          value={info.emergency_contact || ''}
+          onChange={(e) => onChange('basic_info', 'emergency_contact', e.target.value)}
+        />
+      </div>
+
+      <div>
+        <div className="field-head">
+          <label htmlFor="ch_referral_source">Referral source</label>
+          <span className="field-optional">Optional</span>
+        </div>
+        <input
+          id="ch_referral_source"
+          type="text"
+          className="input"
+          placeholder="e.g. Dr. Smith, self-referral"
+          value={info.referral_source || ''}
+          onChange={(e) => onChange('basic_info', 'referral_source', e.target.value)}
+        />
       </div>
     </div>
   )

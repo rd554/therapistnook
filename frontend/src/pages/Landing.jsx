@@ -1,32 +1,14 @@
 import { Link } from 'react-router-dom'
 import {
   Brain, CalendarClock, CreditCard, FileText, BarChart3, Sparkles,
-  Check, ArrowRight, ShieldCheck, Users,
+  Check, ArrowRight, ShieldCheck,
 } from 'lucide-react'
+import LandingWalkthrough from '../components/LandingWalkthrough'
 
-const TRUST_BADGES = [
-  'HTTPS Encrypted',
-  'Role-Based Access',
-  'Isolated Patient Data',
-  'Secure Cloud Hosting',
-  'Email Verified Signups',
-]
-// Repeated enough times so one lap is always wider than the viewport —
-// otherwise the loop shows a blank gap before it wraps back around.
-const TRUST_BADGES_LAP = Array(4).fill(TRUST_BADGES).flat()
-
-const SIDEBAR_ICONS = [Users, CalendarClock, FileText, Sparkles, BarChart3]
-const MOCKUP_STATS = [
-  { label: 'Patients', value: '128' },
-  { label: 'Sessions this week', value: '12' },
-  { label: 'Assessments scored', value: '34' },
-]
-const MOCKUP_CHART_BARS = [40, 65, 30, 80, 55, 90, 45]
-const MOCKUP_ACTIVITY = [
-  { dot: 'bg-primary-500', label: 'Assessment completed' },
-  { dot: 'bg-received', label: 'Clinical summary generated' },
-  { dot: 'bg-overdue', label: 'Session scheduled' },
-]
+// Three plain-text claims — no marquee, no accent check-circles. Picked the
+// three specific to handling clinical data (encryption, access control, data
+// isolation) over the more generic hosting/signup ones.
+const TRUST_CLAIMS = ['HTTPS Encrypted', 'Role-Based Access', 'Isolated Patient Data']
 
 const FEATURES = [
   {
@@ -83,9 +65,11 @@ export default function Landing() {
             >
               Log In
             </Link>
-            <Link to="/login?mode=signup" className="btn-primary !py-2 !px-5 text-sm max-sm:!px-3.5">
-              Sign Up
-            </Link>
+            <span className="clinical-ink inline-flex">
+              <Link to="/login?mode=signup" className="btn-primary !py-2 !px-5 text-sm max-sm:!px-3.5">
+                Sign Up
+              </Link>
+            </span>
           </div>
         </div>
       </header>
@@ -115,10 +99,12 @@ export default function Landing() {
               more time with patients
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3 md:justify-start lg:justify-start">
-              <Link to="/login?mode=signup" className="btn-primary text-base">
-                Create your free account
-                <ArrowRight className="h-4 w-4" strokeWidth={2} />
-              </Link>
+              <span className="clinical-ink inline-flex">
+                <Link to="/login?mode=signup" className="btn-primary text-base">
+                  Create your free account
+                  <ArrowRight className="h-4 w-4" strokeWidth={2} />
+                </Link>
+              </span>
               <a href="#pricing" className="btn-secondary text-base">
                 See pricing
               </a>
@@ -136,143 +122,13 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Product preview */}
-      <section id="product" className="border-t border-border-light bg-surface-subtle py-20">
-        <div className="mx-auto max-w-4xl px-6">
-          <div className="relative mx-auto max-w-4xl">
-            <div className="absolute -left-3 -top-4 z-10 hidden -rotate-3 items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-md sm:flex">
-              <CalendarClock className="h-3.5 w-3.5 text-primary-600" strokeWidth={2} />
-              Synced with Google Calendar
-            </div>
-            {/* Clinical Intelligence preview card */}
-            <div className="absolute -right-4 -top-6 z-10 hidden w-36 rotate-3 flex-col gap-1.5 rounded-xl border border-border-light bg-white p-2.5 shadow-lg sm:flex">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-primary-700">
-                <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
-                Clinical Intelligence
-              </div>
-              <div className="space-y-1">
-                <div className="h-1.5 w-full rounded-full bg-slate-100" />
-                <div className="h-1.5 w-4/5 rounded-full bg-slate-100" />
-              </div>
-            </div>
+      <LandingWalkthrough />
 
-            {/* Session notes preview card */}
-            <div className="absolute -right-8 top-1/2 z-10 hidden w-36 -translate-y-1/2 rotate-2 flex-col gap-1.5 rounded-xl border border-border-light bg-white p-2.5 shadow-lg sm:flex">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-primary-700">
-                <FileText className="h-3.5 w-3.5" strokeWidth={2} />
-                Session Notes
-              </div>
-              <div className="space-y-1">
-                <div className="h-1.5 w-full rounded-full bg-slate-100" />
-                <div className="h-1.5 w-4/5 rounded-full bg-slate-100" />
-              </div>
-            </div>
-
-            {/* Assessment scoring preview card */}
-            <div className="absolute -bottom-6 -left-4 z-10 hidden w-36 -rotate-3 flex-col gap-1.5 rounded-xl border border-border-light bg-white p-2.5 shadow-lg sm:flex">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-primary-700">
-                <Brain className="h-3.5 w-3.5" strokeWidth={2} />
-                Assessment Result
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full w-2/3 rounded-full bg-primary-500" />
-              </div>
-              <p className="text-caption text-content-muted">Scored in seconds</p>
-            </div>
-            <div className="absolute -bottom-4 -right-3 z-10 hidden rotate-3 items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-md sm:flex">
-              <ShieldCheck className="h-3.5 w-3.5 text-primary-600" strokeWidth={2} />
-              Secure patient records
-            </div>
-
-            <div className="overflow-hidden rounded-2xl border border-border-light bg-white shadow-xl">
-              <div className="flex items-center gap-1.5 border-b border-border-light bg-surface-subtle px-4 py-3">
-                <span className="h-2.5 w-2.5 rounded-full bg-red-300" />
-                <span className="h-2.5 w-2.5 rounded-full bg-yellow-300" />
-                <span className="h-2.5 w-2.5 rounded-full bg-green-300" />
-              </div>
-
-              <div className="flex text-left">
-                <div className="hidden w-14 shrink-0 flex-col items-center gap-3 border-r border-border-light bg-surface-subtle py-4 sm:flex">
-                  {SIDEBAR_ICONS.map((Icon, i) => (
-                    <div
-                      key={i}
-                      className={`flex h-8 w-8 items-center justify-center rounded-lg ${i === 0 ? 'bg-primary-100' : ''}`}
-                    >
-                      <Icon className={`h-4 w-4 ${i === 0 ? 'text-primary-600' : 'text-content-muted'}`} strokeWidth={1.75} />
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex-1 p-5 sm:p-6">
-                  <div className="grid grid-cols-3 gap-3">
-                    {MOCKUP_STATS.map((s) => (
-                      <div key={s.label} className="rounded-xl border border-border-light bg-surface-subtle p-3">
-                        <p className="text-lg font-bold text-content-primary">{s.value}</p>
-                        <p className="mt-0.5 text-caption text-content-muted">{s.label}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-5 flex h-20 items-end gap-2 rounded-xl border border-border-light bg-surface-subtle p-3">
-                    {MOCKUP_CHART_BARS.map((h, i) => (
-                      <div key={i} className="flex-1 rounded-t bg-primary-300" style={{ height: `${h}%` }} />
-                    ))}
-                  </div>
-
-                  <div className="mt-5 space-y-2">
-                    {MOCKUP_ACTIVITY.map((row) => (
-                      <div key={row.label} className="flex items-center gap-2.5 rounded-lg border border-border-light px-3 py-2">
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${row.dot}`} />
-                        <span className="text-secondary text-content-secondary">{row.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Mobile: the floating corner cards above are hidden below sm (no room to
-              float them outside the mockup), so restate the same highlights as a
-              static chip row instead of just dropping them. */}
-          <div className="mt-4 flex flex-wrap justify-center gap-2 sm:hidden">
-            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
-              <CalendarClock className="h-3.5 w-3.5 shrink-0 text-primary-600" strokeWidth={2} />
-              Synced with Google Calendar
-            </span>
-            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
-              <Sparkles className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-              Clinical Intelligence
-            </span>
-            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
-              <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-              Session Notes
-            </span>
-            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
-              <Brain className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-              Scored in seconds
-            </span>
-            <span className="flex items-center gap-1.5 rounded-full border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-sm">
-              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-primary-600" strokeWidth={2} />
-              Secure patient records
-            </span>
-          </div>
-        </div>
-      </section>
-
-      {/* Trust strip — continuous scrolling marquee */}
-      <div className="overflow-hidden border-y border-border-light bg-surface-subtle py-4">
-        <div className="flex w-max animate-marquee gap-10">
-          {[...TRUST_BADGES_LAP, ...TRUST_BADGES_LAP].map((label, i) => (
-            <span
-              key={i}
-              className="flex shrink-0 items-center gap-2 text-sm font-bold text-content-secondary"
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-600">
-                <Check className="h-3 w-3 text-white" strokeWidth={3} />
-              </span>
-              {label}
-            </span>
+      {/* Trust strip */}
+      <div className="clinical-ink border-y border-border-light bg-surface-subtle py-6">
+        <div className="trust-row">
+          {TRUST_CLAIMS.map((label) => (
+            <span key={label} className="trust-item">{label}</span>
           ))}
         </div>
       </div>
@@ -291,10 +147,10 @@ export default function Landing() {
           <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map(({ icon: Icon, title, text }) => (
               <div key={title} className="card-hover card">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-100">
-                  <Icon className="h-5 w-5 text-primary-600" strokeWidth={1.75} />
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface-subtle">
+                  <Icon className="h-5 w-5 text-content-primary" strokeWidth={1.75} />
                 </div>
-                <h3 className="mt-4 text-card-title text-primary-700">{title}</h3>
+                <h3 className="mt-4 text-card-title text-content-primary">{title}</h3>
                 <p className="mt-1.5 text-secondary text-content-secondary">{text}</p>
               </div>
             ))}
@@ -315,7 +171,7 @@ export default function Landing() {
           <div className="mt-12 grid gap-6 sm:grid-cols-2 sm:max-w-3xl sm:mx-auto">
             {/* EHR Plan */}
             <div className="card border-2 border-primary-200">
-              <span className="inline-flex rounded-badge bg-primary-100 px-3 py-1 text-xs font-semibold text-primary-700">
+              <span className="inline-flex rounded-badge bg-surface-subtle px-3 py-1 text-xs font-semibold text-content-primary">
                 Practice Workspace
               </span>
               <div className="mt-4 flex items-end gap-1.5">
@@ -335,7 +191,7 @@ export default function Landing() {
                   'Practice analytics',
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2 text-secondary text-content-secondary">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" strokeWidth={2} />
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-content-secondary" strokeWidth={2} />
                     {item}
                   </li>
                 ))}
@@ -344,7 +200,7 @@ export default function Landing() {
 
             {/* Assessment Link Plan */}
             <div className="card">
-              <span className="inline-flex rounded-badge bg-lavender-100 px-3 py-1 text-xs font-semibold text-primary-700">
+              <span className="inline-flex rounded-badge bg-surface-subtle px-3 py-1 text-xs font-semibold text-content-primary">
                 Clinical Assessment Link
               </span>
               <div className="mt-4 flex items-end gap-1.5">
@@ -363,7 +219,7 @@ export default function Landing() {
                   'Shareable link, no separate login for patients',
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2 text-secondary text-content-secondary">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" strokeWidth={2} />
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-content-secondary" strokeWidth={2} />
                     {item}
                   </li>
                 ))}
@@ -385,10 +241,12 @@ export default function Landing() {
           <p className="mt-3 text-body text-content-secondary">
             Create your practitioner account in under a minute.
           </p>
-          <Link to="/login?mode=signup" className="btn-primary mt-6 inline-flex text-base">
-            Sign Up Free
-            <ArrowRight className="h-4 w-4" strokeWidth={2} />
-          </Link>
+          <span className="clinical-ink inline-flex">
+            <Link to="/login?mode=signup" className="btn-primary mt-6 inline-flex text-base">
+              Sign Up Free
+              <ArrowRight className="h-4 w-4" strokeWidth={2} />
+            </Link>
+          </span>
         </div>
       </section>
 

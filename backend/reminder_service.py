@@ -1,12 +1,15 @@
 """
 Reminder Scheduling Service — Phase 5
 
-Handles scheduling and sending appointment reminders at:
-- 24 hours before
-- 2 hours before
-- 30 minutes before
+Schedules a single appointment reminder per booking, at the offset
+configured in Settings > Messaging (MessagingPreferences.reminder_offset_minutes,
+default 1440 = 24h). Also handles reminder cancellation when appointments
+are cancelled/rescheduled.
 
-Also handles reminder cancellation when appointments are cancelled/rescheduled.
+Prior to the Settings rebuild, this scheduled three fixed reminders per
+booking (24h / 2h / 30min before) with no way to configure or disable them
+individually. Collapsed to one configurable reminder; see
+schedule_reminders_for_booking / schedule_reminders_for_appointment.
 """
 
 import asyncio
@@ -19,7 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-# Reminder timing constants (in minutes before appointment)
+# Legacy reminder timing constants (in minutes before appointment). No longer
+# read by the scheduling functions below (those now use
+# MessagingPreferences.reminder_offset_minutes) — kept only because the
+# "reminder_24h"/"reminder_2h"/"reminder_30min" type strings are still valid
+# ScheduledReminder.reminder_type values for rows scheduled before this
+# change, and still have matching entries in notification_service.py's
+# DEFAULT_EMAIL_TEMPLATES/DEFAULT_WHATSAPP_MESSAGES for backward compat.
+# New reminders use reminder_type="reminder" instead (see REMINDER_TIMINGS
+# usage removed below).
 REMINDER_24H = 1440  # 24 hours
 REMINDER_2H = 120    # 2 hours
 REMINDER_30MIN = 30  # 30 minutes
@@ -45,43 +56,39 @@ class ReminderScheduler:
         appointment_time: datetime,
         patient_email: str,
         patient_phone: Optional[str],
-        settings: Optional[dict] = None,
     ) -> list[str]:
         """
-        Schedule all reminders for a booking request.
-        Returns list of created reminder IDs.
+        Schedule the reminder for a booking request, at the single offset
+        configured in Settings > Messaging (MessagingPreferences.reminder_offset_minutes),
+        on whichever channel(s) are enabled there for the "reminder" event.
+
+        Previously scheduled three fixed reminders (24h/2h/30min before) and
+        took a `settings` dict of enable flags that no caller actually
+        passed — dropped along with the collapse to one configurable
+        reminder as part of the Settings rebuild — see
+        settings-phase1-plan.md. ScheduledReminder rows created before this
+        change keep their original 24h/2h/30min offsets; this only changes
+        reminders scheduled from here on.
         """
         from models import ScheduledReminder, generate_uuid
-        
-        settings = settings or {}
-        enable_24h = settings.get("enable_24h_reminder", True)
-        enable_2h = settings.get("enable_2h_reminder", True)
-        enable_30min = settings.get("enable_30min_reminder", True)
-        email_reminders = settings.get("email_reminders", True)
-        whatsapp_reminders = settings.get("whatsapp_reminders", False)
-        
+        import settings_service
+
+        prefs = await settings_service.get_messaging_preferences(db)
+        offset_minutes = prefs.reminder_offset_minutes
+        email_reminders = prefs.reminder_email
+        whatsapp_reminders = prefs.reminder_whatsapp
+
         now = datetime.now(timezone.utc)
         created_ids = []
-        
-        reminders_config = []
-        if enable_24h:
-            reminders_config.append(("reminder_24h", REMINDER_24H))
-        if enable_2h:
-            reminders_config.append(("reminder_2h", REMINDER_2H))
-        if enable_30min:
-            reminders_config.append(("reminder_30min", REMINDER_30MIN))
-        
-        for reminder_type, minutes_before in reminders_config:
-            scheduled_for = appointment_time - timedelta(minutes=minutes_before)
-            
-            if scheduled_for <= now:
-                continue
-            
+
+        scheduled_for = appointment_time - timedelta(minutes=offset_minutes)
+
+        if scheduled_for > now:
             if email_reminders and patient_email:
                 reminder = ScheduledReminder(
                     id=generate_uuid(),
                     booking_request_id=booking_request_id,
-                    reminder_type=reminder_type,
+                    reminder_type="reminder",
                     channel="email",
                     recipient_type="patient",
                     recipient_email=patient_email,
@@ -90,12 +97,12 @@ class ReminderScheduler:
                 )
                 db.add(reminder)
                 created_ids.append(reminder.id)
-            
+
             if whatsapp_reminders and patient_phone:
                 reminder = ScheduledReminder(
                     id=generate_uuid(),
                     booking_request_id=booking_request_id,
-                    reminder_type=reminder_type,
+                    reminder_type="reminder",
                     channel="whatsapp",
                     recipient_type="patient",
                     recipient_phone=patient_phone,
@@ -104,9 +111,9 @@ class ReminderScheduler:
                 )
                 db.add(reminder)
                 created_ids.append(reminder.id)
-        
+
         await db.commit()
-        log.info(f"Scheduled {len(created_ids)} reminders for booking {booking_request_id}")
+        log.info(f"Scheduled {len(created_ids)} reminder(s) for booking {booking_request_id}")
         return created_ids
     
     async def schedule_reminders_for_appointment(
@@ -121,41 +128,35 @@ class ReminderScheduler:
         settings: Optional[dict] = None,
     ) -> list[str]:
         """
-        Schedule all reminders for an appointment (for existing patients).
+        Schedule the reminder for an appointment (for existing patients), at
+        the single configured offset — see schedule_reminders_for_booking's
+        docstring for the collapse-to-one-reminder rationale. Note: this
+        function currently has no callers anywhere in the codebase; kept
+        consistent with the booking-flow version rather than left stale.
         Returns list of created reminder IDs.
         """
         from models import ScheduledReminder, generate_uuid
-        
+        import settings_service
+
         settings = settings or {}
-        enable_24h = settings.get("enable_24h_reminder", True)
-        enable_2h = settings.get("enable_2h_reminder", True)
-        enable_30min = settings.get("enable_30min_reminder", True)
-        email_reminders = settings.get("email_reminders", True)
-        whatsapp_reminders = settings.get("whatsapp_reminders", False)
         notify_therapist = settings.get("notify_therapist", True)
-        
+
+        prefs = await settings_service.get_messaging_preferences(db)
+        offset_minutes = prefs.reminder_offset_minutes
+        email_reminders = prefs.reminder_email
+        whatsapp_reminders = prefs.reminder_whatsapp
+
         now = datetime.now(timezone.utc)
         created_ids = []
-        
-        reminders_config = []
-        if enable_24h:
-            reminders_config.append(("reminder_24h", REMINDER_24H))
-        if enable_2h:
-            reminders_config.append(("reminder_2h", REMINDER_2H))
-        if enable_30min:
-            reminders_config.append(("reminder_30min", REMINDER_30MIN))
-        
-        for reminder_type, minutes_before in reminders_config:
-            scheduled_for = appointment_time - timedelta(minutes=minutes_before)
-            
-            if scheduled_for <= now:
-                continue
-            
+
+        scheduled_for = appointment_time - timedelta(minutes=offset_minutes)
+
+        if scheduled_for > now:
             if email_reminders and patient_email:
                 reminder = ScheduledReminder(
                     id=generate_uuid(),
                     appointment_id=appointment_id,
-                    reminder_type=reminder_type,
+                    reminder_type="reminder",
                     channel="email",
                     recipient_type="patient",
                     recipient_email=patient_email,
@@ -164,12 +165,12 @@ class ReminderScheduler:
                 )
                 db.add(reminder)
                 created_ids.append(reminder.id)
-            
+
             if whatsapp_reminders and patient_phone:
                 reminder = ScheduledReminder(
                     id=generate_uuid(),
                     appointment_id=appointment_id,
-                    reminder_type=reminder_type,
+                    reminder_type="reminder",
                     channel="whatsapp",
                     recipient_type="patient",
                     recipient_phone=patient_phone,
@@ -178,12 +179,12 @@ class ReminderScheduler:
                 )
                 db.add(reminder)
                 created_ids.append(reminder.id)
-            
+
             if notify_therapist and therapist_email:
                 reminder = ScheduledReminder(
                     id=generate_uuid(),
                     appointment_id=appointment_id,
-                    reminder_type=reminder_type,
+                    reminder_type="reminder",
                     channel="email",
                     recipient_type="therapist",
                     recipient_email=therapist_email,
@@ -192,9 +193,9 @@ class ReminderScheduler:
                 )
                 db.add(reminder)
                 created_ids.append(reminder.id)
-        
+
         await db.commit()
-        log.info(f"Scheduled {len(created_ids)} reminders for appointment {appointment_id}")
+        log.info(f"Scheduled {len(created_ids)} reminder(s) for appointment {appointment_id}")
         return created_ids
     
     async def cancel_reminders_for_booking(
@@ -358,12 +359,31 @@ class ReminderScheduler:
                     }
                 
                 recipient = reminder.recipient_email or reminder.recipient_phone
-                
+
+                whatsapp_config = None
+                if reminder.channel == "whatsapp":
+                    from models import WhatsAppConfig
+                    wa_result = await db.execute(select(WhatsAppConfig).limit(1))
+                    wa_config = wa_result.scalar_one_or_none()
+                    if wa_config and wa_config.is_enabled:
+                        whatsapp_config = {
+                            "phone_number_id": wa_config.phone_number_id,
+                            "access_token": wa_config.access_token,
+                        }
+
+                # gate_event="reminder" applies to both the new single-offset
+                # rows (reminder_type == "reminder") and any older
+                # reminder_24h/2h/30min rows still in flight from before the
+                # collapse — they're all "reminder" for messaging-preferences
+                # purposes even though reminder_type still picks the template.
                 result = await notification_service.send_notification(
                     channel=reminder.channel,
                     recipient=recipient,
                     event_type=reminder.reminder_type,
                     placeholders=placeholders,
+                    whatsapp_config=whatsapp_config,
+                    db=db,
+                    gate_event="reminder",
                 )
                 
                 if result.success:

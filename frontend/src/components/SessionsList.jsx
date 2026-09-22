@@ -1,70 +1,163 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  Loader2, Calendar, Clock, Globe, Search, FileAudio, Eye, FileText,
-  Trash2, AlertCircle, CheckCircle, RefreshCw, Filter,
+  Loader2, FileText, MessageSquare, RefreshCw, Download, Trash2,
+  MoreVertical, X, AlertCircle, Upload,
 } from 'lucide-react'
-import { listTherapySessions, deleteTherapySession, processTherapySession } from '../api/client'
+import { listTherapySessions, deleteTherapySession, processTherapySession, getTranscriptDownloadUrl } from '../api/client'
+import { formatDateTime } from '../utils/date'
 
-const STATUS_STYLES = {
-  pending: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Pending' },
-  processing: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Processing' },
-  completed: { bg: 'bg-green-100', text: 'text-green-700', label: 'Completed' },
-  failed: { bg: 'bg-red-100', text: 'text-red-700', label: 'Failed' },
+// Ordered plain-text status scale (Clinical Ink's .status-quiet/.status-plain/
+// .status-warn convention) — matches the mapping just applied to Documents.
+// No colored pill chips, no icon inside the status text.
+function transcriptStatusMeta(status) {
+  switch (status) {
+    case 'completed':  return { label: 'Completed',  cls: 'status-quiet' }
+    case 'pending':     return { label: 'Pending',    cls: 'status-plain' }
+    case 'processing':  return { label: 'Processing', cls: 'status-plain' }
+    case 'failed':      return { label: 'Failed',     cls: 'status-warn', bold: true }
+    default:            return { label: status || '', cls: 'status-plain' }
+  }
 }
 
-const LANGUAGE_NAMES = {
-  en: 'English',
-  hi: 'Hindi',
-  es: 'Spanish',
-  fr: 'French',
-  de: 'German',
-  zh: 'Chinese',
-  ar: 'Arabic',
-  pt: 'Portuguese',
-  ru: 'Russian',
-  ja: 'Japanese',
-  ko: 'Korean',
+// Kebab row-action menu, portaled to <body> and positioned `fixed` from the
+// trigger button's own coordinates — .card-flush (the section's outer card)
+// has overflow:hidden, which would clip an ordinary absolutely-positioned
+// .menu-popover for any row near the card's bottom or right edge.
+function RowMenu({ label, actions }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btnRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => { setOpen(false); setPos(null) }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [open])
+
+  const toggle = () => {
+    if (open) { setOpen(false); setPos(null); return }
+    const rect = btnRef.current.getBoundingClientRect()
+    setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right })
+    setOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className="btn btn-ghost btn-icon btn-icon-sm"
+        aria-label={`${label} actions`}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <MoreVertical size={16} strokeWidth={1.5} style={{ color: 'var(--icon-muted)' }} />
+      </button>
+      {open && pos && createPortal(
+        <>
+          <div className="fixed inset-0" style={{ zIndex: 99 }} onClick={() => { setOpen(false); setPos(null) }} />
+          <div
+            className="menu-popover"
+            style={{ position: 'fixed', top: pos.top, left: 'auto', right: pos.right, zIndex: 100 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {actions.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                className={`menu-item${a.destructive ? ' is-destructive' : ''}`}
+                disabled={a.disabled}
+                style={a.disabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                onClick={() => { if (a.disabled) return; setOpen(false); setPos(null); a.onClick() }}
+              >
+                <a.icon size={14} strokeWidth={1.5} /> {a.label}
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  )
 }
 
-export default function SessionsList({ patientId, onViewSession }) {
+export default function SessionsList({ patientId, onViewSession, onUploadClick }) {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [searchDate, setSearchDate] = useState('')
-  const [filterLanguage, setFilterLanguage] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [deleting, setDeleting] = useState(null)
   const [processing, setProcessing] = useState(null)
+  const [pendingDelete, setPendingDelete] = useState(null)
+  const [liveMessage, setLiveMessage] = useState('')
+  const cancelBtnRef = useRef(null)
+  const lastFocusedRef = useRef(null)
 
   useEffect(() => {
     loadSessions()
-  }, [patientId, searchDate, filterLanguage])
+  }, [patientId, fromDate, toDate])
+
+  useEffect(() => {
+    if (pendingDelete) cancelBtnRef.current?.focus()
+  }, [pendingDelete])
+
+  useEffect(() => {
+    if (!pendingDelete) return
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !deleting) closeDeleteConfirm()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [pendingDelete, deleting])
 
   const loadSessions = async () => {
     try {
       setLoading(true)
+      setError('')
       const data = await listTherapySessions(patientId, {
-        startDate: searchDate || undefined,
-        language: filterLanguage || undefined,
+        startDate: fromDate || undefined,
+        endDate: toDate || undefined,
       })
       setSessions(data)
     } catch (err) {
-      setError('Failed to load sessions')
+      setError(err.userMessage || err.response?.data?.detail || 'Failed to load sessions')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleDelete = async (sessionId) => {
-    if (!window.confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
-      return
-    }
-    
-    setDeleting(sessionId)
+  const handleRefresh = async () => {
+    await loadSessions()
+    setLiveMessage('Sessions refreshed')
+  }
+
+  const openDeleteConfirm = (session) => {
+    lastFocusedRef.current = document.activeElement
+    setPendingDelete(session)
+  }
+
+  const closeDeleteConfirm = () => {
+    setPendingDelete(null)
+    lastFocusedRef.current?.focus?.()
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
+    setDeleting(pendingDelete.id)
     try {
-      await deleteTherapySession(patientId, sessionId)
-      setSessions(sessions.filter(s => s.id !== sessionId))
+      await deleteTherapySession(patientId, pendingDelete.id)
+      setSessions((prev) => prev.filter((s) => s.id !== pendingDelete.id))
+      closeDeleteConfirm()
     } catch (err) {
-      setError('Failed to delete session')
+      window.alert(err.userMessage || err.response?.data?.detail || 'Failed to delete session')
     } finally {
       setDeleting(null)
     }
@@ -76,205 +169,178 @@ export default function SessionsList({ patientId, onViewSession }) {
       await processTherapySession(patientId, sessionId)
       await loadSessions()
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to process session')
+      window.alert(err.userMessage || err.response?.data?.detail || 'Failed to reprocess session')
     } finally {
       setProcessing(null)
     }
   }
 
-  const formatDuration = (seconds) => {
-    if (!seconds) return '--'
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
-  const formatDate = (dateString) => {
-    const date = new Date(dateString)
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
-
-  const getLanguageName = (code) => {
-    return LANGUAGE_NAMES[code] || code?.toUpperCase() || 'Unknown'
-  }
-
-  // Get unique languages from sessions
-  const uniqueLanguages = [...new Set(sessions.filter(s => s.detected_language).map(s => s.detected_language))]
-
   if (loading && sessions.length === 0) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-primary-500" />
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-8) 0' }}>
+        <Loader2 size={24} className="animate-spin" style={{ color: 'var(--icon-muted)' }} />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="card card-flush">
+        <div className="empty">
+          <AlertCircle size={20} strokeWidth={1.5} style={{ color: 'var(--warning)', margin: '0 auto 12px' }} aria-hidden="true" />
+          <h3 className="empty-title">Couldn't load sessions</h3>
+          <p className="empty-body">{error}</p>
+          <button type="button" className="btn btn-secondary" onClick={loadSessions}>Try again</button>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="date"
-            value={searchDate}
-            onChange={(e) => setSearchDate(e.target.value)}
-            placeholder="Filter by date"
-            className="input-field pl-10"
-          />
+    <div className="card card-flush">
+      <div className="filter-bar">
+        <div className="field-inline field-inline-sm">
+          <label htmlFor="si_from_date">From</label>
+          <input id="si_from_date" type="date" className="input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
         </div>
-        
-        {uniqueLanguages.length > 1 && (
-          <div className="relative min-w-[150px]">
-            <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <select
-              value={filterLanguage}
-              onChange={(e) => setFilterLanguage(e.target.value)}
-              className="input-field appearance-none pl-10"
-            >
-              <option value="">All languages</option>
-              {uniqueLanguages.map(lang => (
-                <option key={lang} value={lang}>{getLanguageName(lang)}</option>
-              ))}
-            </select>
-          </div>
-        )}
-        
-        <button onClick={loadSessions} className="btn-secondary" title="Refresh">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        <div className="field-inline field-inline-sm">
+          <label htmlFor="si_to_date">To</label>
+          <input id="si_to_date" type="date" className="input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </div>
+        <div className="filter-spacer" />
+        <button type="button" className="btn btn-ghost btn-icon" aria-label="Refresh" title="Refresh" onClick={handleRefresh}>
+          <RefreshCw size={16} strokeWidth={1.5} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--icon-muted)' }} />
         </button>
       </div>
+      <span className="sr-only" role="status" aria-live="polite">{liveMessage}</span>
 
-      {/* Error */}
-      {error && (
-        <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-          <AlertCircle className="h-4 w-4" />
-          {error}
-          <button onClick={() => setError('')} className="ml-auto text-red-500 hover:text-red-700">
-            <span className="sr-only">Dismiss</span>×
+      {sessions.length === 0 ? (
+        <div className="empty">
+          <FileText size={20} strokeWidth={1.5} style={{ color: 'var(--icon-muted)', margin: '0 auto 12px' }} aria-hidden="true" />
+          <h3 className="empty-title">No transcripts yet</h3>
+          <p className="empty-body">Uploading a transcript generates a summary and SOAP notes for this session.</p>
+          <button type="button" className="btn btn-primary" onClick={onUploadClick}>
+            <Upload size={16} strokeWidth={1.5} />
+            Upload transcript
           </button>
         </div>
+      ) : (
+        <>
+          {/* Desktop table */}
+          <div className="hidden sm:block">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((session) => {
+                  const statusMeta = transcriptStatusMeta(session.processing_status)
+                  const dateLabel = formatDateTime(session.session_date)
+                  const canViewAnalysis = session.processing_status === 'completed'
+                  const canReprocess = session.processing_status !== 'processing'
+                  const actions = [
+                    { label: 'View transcript', icon: FileText, onClick: () => onViewSession?.(session, 'transcript') },
+                    ...(canViewAnalysis ? [{ label: 'View analysis', icon: MessageSquare, onClick: () => onViewSession?.(session, 'summary') }] : []),
+                    { label: 'Reprocess', icon: RefreshCw, disabled: !canReprocess || processing === session.id, onClick: () => handleProcess(session.id) },
+                    { label: 'Download', icon: Download, onClick: () => window.open(getTranscriptDownloadUrl(patientId, session.id), '_blank') },
+                    { label: 'Delete', icon: Trash2, destructive: true, disabled: deleting === session.id, onClick: () => openDeleteConfirm(session) },
+                  ]
+                  return (
+                    <tr
+                      key={session.id}
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`Therapy session, ${dateLabel}, ${statusMeta.label}`}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => onViewSession?.(session)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onViewSession?.(session) } }}
+                    >
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span className="doc-name">Therapy session</span>
+                          <span className="doc-meta">{dateLabel}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={statusMeta.cls} style={statusMeta.bold ? { fontWeight: 600 } : undefined}>{statusMeta.label}</span>
+                      </td>
+                      <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                        <RowMenu label={`Therapy session, ${dateLabel}`} actions={actions} />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="sm:hidden">
+            {sessions.map((session) => {
+              const statusMeta = transcriptStatusMeta(session.processing_status)
+              const dateLabel = formatDateTime(session.session_date)
+              const canViewAnalysis = session.processing_status === 'completed'
+              const canReprocess = session.processing_status !== 'processing'
+              const actions = [
+                { label: 'View transcript', icon: FileText, onClick: () => onViewSession?.(session, 'transcript') },
+                ...(canViewAnalysis ? [{ label: 'View analysis', icon: MessageSquare, onClick: () => onViewSession?.(session, 'summary') }] : []),
+                { label: 'Reprocess', icon: RefreshCw, disabled: !canReprocess || processing === session.id, onClick: () => handleProcess(session.id) },
+                { label: 'Download', icon: Download, onClick: () => window.open(getTranscriptDownloadUrl(patientId, session.id), '_blank') },
+                { label: 'Delete', icon: Trash2, destructive: true, disabled: deleting === session.id, onClick: () => openDeleteConfirm(session) },
+              ]
+              return (
+                <div
+                  className="doc-row"
+                  key={session.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Therapy session, ${dateLabel}, ${statusMeta.label}`}
+                  onClick={() => onViewSession?.(session)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onViewSession?.(session) } }}
+                >
+                  <div className="doc-main">
+                    <span className="doc-name">Therapy session</span>
+                    <span className="doc-meta">
+                      {dateLabel} ·{' '}
+                      <span className={statusMeta.cls} style={statusMeta.bold ? { fontWeight: 600 } : undefined}>{statusMeta.label}</span>
+                    </span>
+                  </div>
+                  <div className="doc-end" onClick={(e) => e.stopPropagation()}>
+                    <RowMenu label={`Therapy session, ${dateLabel}`} actions={actions} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
       )}
 
-      {/* Sessions Table */}
-      {sessions.length === 0 ? (
-        <div className="py-12 text-center">
-          <FileAudio className="mx-auto mb-3 h-12 w-12 text-gray-300" />
-          <p className="text-gray-500">No therapy sessions found.</p>
-          <p className="mt-1 text-sm text-gray-400">
-            Upload a session recording to get started.
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                <th className="pb-3 pr-4">Date</th>
-                <th className="pb-3 pr-4">Duration</th>
-                <th className="pb-3 pr-4">Language</th>
-                <th className="pb-3 pr-4">Status</th>
-                <th className="pb-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {sessions.map((session) => {
-                const status = STATUS_STYLES[session.processing_status] || STATUS_STYLES.pending
-                return (
-                  <tr key={session.id} className="group hover:bg-gray-50">
-                    <td className="py-3 pr-4">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-gray-400" />
-                        <span className="text-sm font-medium text-gray-900">
-                          {formatDate(session.session_date)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-gray-400" />
-                        <span className="text-sm text-gray-600">
-                          {formatDuration(session.audio_duration)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-gray-400" />
-                        <span className="text-sm text-gray-600">
-                          {getLanguageName(session.detected_language)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${status.bg} ${status.text}`}>
-                        {session.processing_status === 'processing' && (
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        )}
-                        {status.label}
-                      </span>
-                    </td>
-                    <td className="py-3 text-right">
-                      <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        {session.processing_status === 'completed' && (
-                          <>
-                            <button
-                              onClick={() => onViewSession?.(session)}
-                              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                              title="View details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => onViewSession?.(session, 'transcript')}
-                              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                              title="View transcript"
-                            >
-                              <FileText className="h-4 w-4" />
-                            </button>
-                          </>
-                        )}
-                        
-                        {(session.processing_status === 'pending' || session.processing_status === 'failed') && (
-                          <button
-                            onClick={() => handleProcess(session.id)}
-                            disabled={processing === session.id}
-                            className="rounded-lg p-1.5 text-primary-500 hover:bg-primary-50 disabled:opacity-50"
-                            title="Process session"
-                          >
-                            {processing === session.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <RefreshCw className="h-4 w-4" />
-                            )}
-                          </button>
-                        )}
-                        
-                        <button
-                          onClick={() => handleDelete(session.id)}
-                          disabled={deleting === session.id}
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                          title="Delete session"
-                        >
-                          {deleting === session.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+      {/* Delete confirmation */}
+      {pendingDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" style={{ padding: 'var(--space-4)' }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-session-title">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-5)' }}>
+              <h3 id="delete-session-title" className="modal-title">Delete session?</h3>
+              <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Close" onClick={closeDeleteConfirm} disabled={!!deleting}>
+                <X size={16} strokeWidth={1.5} />
+              </button>
+            </div>
+            <p className="t-body-s">
+              This permanently deletes the transcript, summary, and SOAP notes for the session on {formatDateTime(pendingDelete.session_date)}. This can't be undone.
+            </p>
+            <div className="modal-actions">
+              <button ref={cancelBtnRef} type="button" className="btn btn-secondary" onClick={closeDeleteConfirm} disabled={!!deleting}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" onClick={confirmDelete} disabled={!!deleting}>
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

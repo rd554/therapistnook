@@ -2,41 +2,50 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, ChevronRight, Loader2,
-  Clock, User, Video, Building, Search, X, CalendarPlus,
-  MoreVertical, Edit, Trash2, RefreshCw, XCircle, CheckCircle,
-  Stethoscope, ClipboardCheck, MessageSquare, AlertTriangle,
+  Video, Building, Search,
+  Edit, XCircle, AlertTriangle,
+  Stethoscope, ClipboardCheck, MessageSquare, RefreshCw,
   Copy, ExternalLink,
 } from 'lucide-react'
 import {
-  getCalendarEvents, getAppointment, createAppointment, updateAppointment, rescheduleAppointment,
-  cancelAppointment, deleteAppointment, listPatients,
+  getCalendarEvents, getAppointment, createAppointment, updateAppointment,
+  cancelAppointment, deleteAppointment, listPatients, getAvailability,
 } from '../api/client'
 import ScheduleModal from '../components/ScheduleModal'
 import AppointmentDetail from '../components/AppointmentDetail'
-import { EmptyState } from '../components/ui'
 
 const VIEWS = ['day', 'week', 'month']
 const VIEW_LABELS = { day: 'Day', week: 'Week', month: 'Month' }
 
-const STATUS_COLORS = {
-  scheduled: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-l-blue-500' },
-  completed: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-l-green-500' },
-  cancelled: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-l-red-500' },
-  no_show: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-l-orange-500' },
-  rescheduled: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-l-purple-500' },
-  pending: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-l-amber-500' },
+// Status decides the event's left rule and (for month view) its dot — never
+// session type. See tokens.css .cal-event / .is-noshow / .is-done / .is-cancelled.
+function eventStatusClass(status) {
+  if (status === 'no_show') return 'is-noshow'
+  if (status === 'completed') return 'is-done'
+  if (status === 'cancelled') return 'is-cancelled'
+  return '' // scheduled / pending / rescheduled default to the accent rule
 }
 
-const SESSION_TYPE_CONFIG = {
-  therapy_session: { label: 'Therapy', color: 'border-l-blue-500', icon: Stethoscope },
-  assessment_session: { label: 'Assessment', color: 'border-l-purple-500', icon: ClipboardCheck },
-  consultation: { label: 'Consultation', color: 'border-l-green-500', icon: MessageSquare },
-  follow_up: { label: 'Follow-up', color: 'border-l-amber-500', icon: RefreshCw },
-  emergency: { label: 'Emergency', color: 'border-l-red-500', icon: AlertTriangle },
+// Mirrors PatientProfile.jsx's status->{label,cls} pattern: plain text, no chips.
+const STATUS_META = {
+  scheduled: { label: 'Scheduled', cls: 'status-plain' },
+  completed: { label: 'Completed', cls: 'status-quiet' },
+  cancelled: { label: 'Cancelled', cls: 'status-quiet' },
+  no_show: { label: 'No show', cls: 'status-warn' },
+  rescheduled: { label: 'Rescheduled', cls: 'status-plain' },
+  pending: { label: 'Pending', cls: 'status-plain' },
+}
+
+const SESSION_TYPE_META = {
+  therapy_session: { label: 'Therapy', icon: Stethoscope },
+  assessment_session: { label: 'Assessment', icon: ClipboardCheck },
+  consultation: { label: 'Consultation', icon: MessageSquare },
+  follow_up: { label: 'Follow-up', icon: RefreshCw },
+  emergency: { label: 'Emergency', icon: AlertTriangle },
 }
 
 const STATUS_FILTER_OPTIONS = [
-  { value: '', label: 'All Status' },
+  { value: '', label: 'All status' },
   { value: 'scheduled', label: 'Scheduled' },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
@@ -44,12 +53,17 @@ const STATUS_FILTER_OPTIONS = [
   { value: 'pending', label: 'Pending' },
 ]
 
+const HOURS = Array.from({ length: 24 }, (_, i) => i)
+const HOUR_PX = 56
+
 function formatTime(date) {
   return new Date(date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
-function formatDate(date) {
-  return new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+function formatHourLabel(hour) {
+  if (hour === 0) return '12 AM'
+  if (hour === 12) return '12 PM'
+  return hour > 12 ? `${hour - 12} PM` : `${hour} AM`
 }
 
 function isSameDay(d1, d2) {
@@ -61,6 +75,10 @@ function isSameDay(d1, d2) {
 function isWeekend(date) {
   const day = date.getDay()
   return day === 0 || day === 6
+}
+
+function hourDecimal(date) {
+  return date.getHours() + date.getMinutes() / 60
 }
 
 function getWeekDates(date) {
@@ -113,7 +131,18 @@ function getDateRange(view, currentDate) {
   }
 }
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7)
+function parseTimeToDecimal(str) {
+  if (!str) return null
+  const [h, m] = str.split(':').map(Number)
+  if (Number.isNaN(h)) return null
+  return h + (Number.isNaN(m) ? 0 : m) / 60
+}
+
+// A hour-cell is off-hours if it doesn't overlap [practiceHours.start, practiceHours.end) at all.
+function isOffHoursCell(hour, practiceHours) {
+  if (!practiceHours) return false
+  return hour + 1 <= practiceHours.start || hour >= practiceHours.end
+}
 
 export default function Calendar() {
   const navigate = useNavigate()
@@ -131,7 +160,14 @@ export default function Calendar() {
   const [statusFilter, setStatusFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [contextMenu, setContextMenu] = useState(null)
-  const calendarRef = useRef(null)
+  const [practiceHours, setPracticeHours] = useState(null)
+  const [now, setNow] = useState(() => new Date())
+
+  // Now-line ticks once a minute — see .cal-now.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60000)
+    return () => clearInterval(id)
+  }, [])
 
   const loadEvents = async () => {
     setLoading(true)
@@ -157,12 +193,30 @@ export default function Calendar() {
     }
   }
 
+  // Practice hours (Settings > Availability) drive both the off-hours tint
+  // and the default scroll landing. Falls back to 08:00–18:00 if the call
+  // fails — the backend itself always returns a row (auto-created), so this
+  // is a defensive fallback, not the expected path.
+  const loadPracticeHours = async () => {
+    try {
+      const data = await getAvailability()
+      setPracticeHours({
+        start: parseTimeToDecimal(data.work_start_time) ?? 8,
+        end: parseTimeToDecimal(data.work_end_time) ?? 18,
+      })
+    } catch (err) {
+      console.error('Failed to load practice hours:', err)
+      setPracticeHours({ start: 8, end: 18 })
+    }
+  }
+
   useEffect(() => {
     loadEvents()
   }, [view, currentDate])
 
   useEffect(() => {
     loadPatients()
+    loadPracticeHours()
   }, [])
 
   // Keyboard shortcuts
@@ -170,7 +224,7 @@ export default function Calendar() {
     const handleKeyDown = (e) => {
       if (showScheduleModal || showDetailPanel || showEditModal) return
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      
+
       switch (e.key) {
         case 'ArrowLeft':
           navigateDate(-1)
@@ -217,7 +271,7 @@ export default function Calendar() {
     }
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
-      filtered = filtered.filter(e => 
+      filtered = filtered.filter(e =>
         e.patient_name?.toLowerCase().includes(q) ||
         e.title?.toLowerCase().includes(q) ||
         e.notes?.toLowerCase().includes(q)
@@ -323,8 +377,11 @@ export default function Calendar() {
     }
   }
 
+  // The confirmation step lives in AppointmentDetail (a styled .btn-danger
+  // dialog, mirroring PatientEdit's discard-changes modal) — this handler
+  // only runs once the user has already confirmed, so it no longer gates on
+  // window.confirm() itself.
   const handleDeleteAppointment = async (appointmentId) => {
-    if (!confirm('Are you sure you want to delete this appointment?')) return
     try {
       await deleteAppointment(appointmentId)
       await loadEvents()
@@ -353,150 +410,88 @@ export default function Calendar() {
     }
   }
 
-  const todayCount = useMemo(() => {
-    const today = new Date()
-    return events.filter(e => isSameDay(new Date(e.start), today)).length
-  }, [events])
-
   return (
-    <div className="space-y-5">
-      {/* Page Header */}
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-section-title text-content-primary">Calendar</h1>
+    <div className="clinical-ink space-y-5">
+      {/* Page header — title + the one .btn-primary this screen gets */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="t-h1">Calendar</h1>
         <button
+          type="button"
+          className="btn btn-primary"
           onClick={() => {
             setSelectedSlot(null)
             setShowScheduleModal(true)
           }}
-          className="btn-primary !px-5"
         >
-          <CalendarPlus className="h-4 w-4" strokeWidth={1.5} />
-          Schedule Session
+          Schedule session
         </button>
       </div>
 
-      {/* Unified Toolbar */}
-      <div className="bg-white rounded-[16px] border border-[#E8ECF4] px-4 py-3 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          {/* Left: Navigation */}
+      {/* Toolbar — stacks on mobile: nav, then search+filter, then view seg */}
+      <div className="card">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div className="flex items-center gap-1">
-            <button
-              onClick={goToToday}
-              className="rounded-[12px] px-4 py-2 text-sm font-medium text-content-primary hover:bg-lavender transition-colors"
-            >
-              Today
+            <button type="button" className="btn btn-ghost btn-sm" onClick={goToToday}>Today</button>
+            <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Previous" onClick={() => navigateDate(-1)}>
+              <ChevronLeft size={18} strokeWidth={1.5} />
             </button>
-            <div className="flex items-center">
-              <button
-                onClick={() => navigateDate(-1)}
-                className="rounded-[12px] p-2 text-content-secondary hover:bg-lavender hover:text-content-primary transition-colors"
-                aria-label="Previous"
-              >
-                <ChevronLeft className="h-5 w-5" strokeWidth={1.5} />
-              </button>
-              <button
-                onClick={() => navigateDate(1)}
-                className="rounded-[12px] p-2 text-content-secondary hover:bg-lavender hover:text-content-primary transition-colors"
-                aria-label="Next"
-              >
-                <ChevronRight className="h-5 w-5" strokeWidth={1.5} />
-              </button>
-            </div>
-            <span className="ml-2 text-lg font-semibold text-content-primary">{getHeaderText()}</span>
+            <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Next" onClick={() => navigateDate(1)}>
+              <ChevronRight size={18} strokeWidth={1.5} />
+            </button>
+            <span className="t-h3" style={{ marginLeft: 'var(--space-2)', whiteSpace: 'nowrap' }}>{getHeaderText()}</span>
           </div>
 
-          {/* Center/Right: Search, Filter, View Toggle */}
-          <div className="flex items-center gap-3">
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-content-muted" strokeWidth={1.5} />
+          <div className="flex items-center gap-2 sm:flex-1 sm:justify-end sm:min-w-0 sm:max-w-[420px]">
+            <div className="input-search">
+              <Search size={16} strokeWidth={1.5} />
               <input
-                type="text"
-                placeholder="Search patient name..."
+                type="search"
+                className="input"
+                placeholder="Search patient name"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-10 w-56 rounded-[12px] border border-[#E2E8F0] bg-white pl-10 pr-4 text-sm text-content-primary placeholder:text-content-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/10 transition-all"
+                aria-label="Search appointments"
               />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-content-muted hover:text-content-secondary"
-                >
-                  <X className="h-4 w-4" strokeWidth={1.5} />
-                </button>
-              )}
             </div>
-
-            {/* Status Filter */}
             <select
+              className="select select-sm"
+              style={{ width: 'auto', flex: 'none' }}
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-10 rounded-[12px] border border-[#E2E8F0] bg-white px-3 pr-8 text-sm font-medium text-content-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/10 appearance-none cursor-pointer transition-all"
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                backgroundPosition: 'right 8px center',
-                backgroundRepeat: 'no-repeat',
-                backgroundSize: '20px',
-              }}
+              aria-label="Filter by status"
             >
               {STATUS_FILTER_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
+          </div>
 
-            {/* View Toggle - Segmented Control */}
-            <div className="flex rounded-[12px] bg-[#F1F5F9] p-1">
-              {VIEWS.map((v) => (
-                <button
-                  key={v}
-                  onClick={() => handleViewChange(v)}
-                  className={`rounded-[10px] px-4 py-1.5 text-sm font-medium transition-all duration-150 ${
-                    view === v 
-                      ? 'bg-primary text-white shadow-sm' 
-                      : 'text-content-secondary hover:text-content-primary hover:bg-lavender/50'
-                  }`}
-                >
-                  {VIEW_LABELS[v]}
-                </button>
-              ))}
-            </div>
+          <div className="seg w-full sm:w-auto" role="group" aria-label="Calendar view">
+            {VIEWS.map((v) => (
+              <button
+                key={v}
+                type="button"
+                className="seg-option flex-1 sm:flex-none"
+                aria-pressed={view === v}
+                onClick={() => handleViewChange(v)}
+              >
+                {VIEW_LABELS[v]}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Calendar Grid */}
-      <div 
-        ref={calendarRef}
-        className="bg-white rounded-[20px] border border-[#E8ECF4] shadow-sm overflow-hidden"
-      >
-        {loading ? (
+      {/* Calendar body — grid always renders, even with zero events; an
+          empty grid communicates "nothing scheduled" on its own and stays
+          fully clickable/bookable (see live-vs-prototype-gaps notes). */}
+      <div className="card card-flush" style={{ position: 'relative' }}>
+        {loading && (
           <div className="flex items-center justify-center py-32">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" strokeWidth={1.5} />
+            <Loader2 className="animate-spin" size={28} strokeWidth={1.5} style={{ color: 'var(--accent)' }} />
           </div>
-        ) : filteredEvents.length === 0 && (searchQuery || statusFilter) ? (
-          <div className="py-20">
-            <EmptyState
-              icon="search"
-              title="No results found"
-              description={`No appointments match "${searchQuery || statusFilter}". Try adjusting your search or filters.`}
-              action={() => {
-                setSearchQuery('')
-                setStatusFilter('')
-              }}
-              actionLabel="Clear filters"
-            />
-          </div>
-        ) : events.length === 0 ? (
-          <div className="py-20">
-            <EmptyState
-              icon="calendar"
-              title="No appointments scheduled"
-              description="Your calendar is free. Schedule your first session to get started."
-              action={() => setShowScheduleModal(true)}
-              actionLabel="Schedule Session"
-            />
-          </div>
-        ) : view === 'month' ? (
+        )}
+        {!loading && view === 'month' && (
           <MonthView
             currentDate={currentDate}
             events={filteredEvents}
@@ -504,73 +499,84 @@ export default function Calendar() {
             onSlotClick={(date) => handleSlotClick(date, 9)}
             onContextMenu={handleContextMenu}
           />
-        ) : view === 'week' ? (
+        )}
+        {!loading && view === 'week' && (
           <WeekView
             currentDate={currentDate}
             events={filteredEvents}
-            onEventClick={handleEventClick}
+            now={now}
+            practiceHours={practiceHours}
             onSlotClick={handleSlotClick}
+            onEventClick={handleEventClick}
             onContextMenu={handleContextMenu}
           />
-        ) : (
+        )}
+        {!loading && view === 'day' && (
           <DayView
             currentDate={currentDate}
             events={filteredEvents}
-            onEventClick={handleEventClick}
+            now={now}
+            practiceHours={practiceHours}
             onSlotClick={handleSlotClick}
+            onEventClick={handleEventClick}
             onContextMenu={handleContextMenu}
           />
         )}
       </div>
 
-      {/* Context Menu */}
+      {/* Context menu */}
       {contextMenu && (
-        <div
-          className="fixed z-50 min-w-[180px] rounded-[14px] border border-[#E8ECF4] bg-white py-1.5 shadow-lg animate-in fade-in zoom-in-95 duration-150"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
+        <div className="card" style={{ position: 'fixed', zIndex: 50, minWidth: '190px', padding: 'var(--space-2)', left: contextMenu.x, top: contextMenu.y }}>
           <button
+            type="button"
+            className="btn btn-ghost btn-block"
+            style={{ justifyContent: 'flex-start' }}
             onClick={() => handleEditAppointment(contextMenu.event.id)}
-            className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
           >
-            <Edit className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-            Edit Appointment
+            <Edit size={16} strokeWidth={1.5} />
+            Edit appointment
           </button>
           <button
+            type="button"
+            className="btn btn-ghost btn-block"
+            style={{ justifyContent: 'flex-start' }}
             onClick={() => {
               navigator.clipboard.writeText(`${contextMenu.event.patient_name} - ${formatTime(contextMenu.event.start)}`)
               setContextMenu(null)
             }}
-            className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
           >
-            <Copy className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-            Copy Details
+            <Copy size={16} strokeWidth={1.5} />
+            Copy details
           </button>
           <button
+            type="button"
+            className="btn btn-ghost btn-block"
+            style={{ justifyContent: 'flex-start' }}
             onClick={() => {
               navigate(`/patients/${contextMenu.event.patient_id}`)
               setContextMenu(null)
             }}
-            className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-content-primary hover:bg-lavender transition-colors"
           >
-            <ExternalLink className="h-4 w-4 text-content-muted" strokeWidth={1.5} />
-            Open Patient
+            <ExternalLink size={16} strokeWidth={1.5} />
+            Open patient
           </button>
-          <div className="my-1.5 border-t border-[#F1F5F9]" />
+          <div style={{ margin: 'var(--space-2) 0', borderTop: 'var(--border-width) solid var(--hairline)' }} />
           <button
+            type="button"
+            className="btn btn-ghost btn-block"
+            style={{ justifyContent: 'flex-start', color: 'var(--error)' }}
             onClick={() => {
               handleCancelAppointment(contextMenu.event.id)
               setContextMenu(null)
             }}
-            className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-error-text hover:bg-error-bg transition-colors"
           >
-            <XCircle className="h-4 w-4" strokeWidth={1.5} />
-            Cancel Appointment
+            <XCircle size={16} strokeWidth={1.5} />
+            Cancel appointment
           </button>
         </div>
       )}
 
-      {/* Schedule Modal */}
+      {/* Schedule modal */}
       {showScheduleModal && (
         <ScheduleModal
           initialDate={selectedSlot?.date}
@@ -586,7 +592,7 @@ export default function Calendar() {
         />
       )}
 
-      {/* Appointment Detail Panel */}
+      {/* Appointment detail */}
       {showDetailPanel && selectedEvent && (
         <AppointmentDetail
           appointmentId={selectedEvent.id}
@@ -602,7 +608,7 @@ export default function Calendar() {
         />
       )}
 
-      {/* Edit Appointment Modal */}
+      {/* Edit appointment modal */}
       {showEditModal && editingAppointment && (
         <ScheduleModal
           editMode
@@ -619,247 +625,168 @@ export default function Calendar() {
   )
 }
 
-// Day View Component
-function DayView({ currentDate, events, onEventClick, onSlotClick, onContextMenu }) {
-  const dayEvents = events.filter(e => isSameDay(new Date(e.start), currentDate))
-  const now = new Date()
-  const isToday = isSameDay(currentDate, now)
-  const currentHourOffset = isToday ? (now.getHours() + now.getMinutes() / 60 - 7) * 72 : -1
+// Shared 24-hour grid for Day and Week views — one hour<->pixel mapping
+// (HOUR_PX, 0am-anchored) lives here and in EventBlock, nowhere else.
+function CalendarGrid({ days, events, now, practiceHours, onSlotClick, onEventClick, onContextMenu }) {
   const scrollRef = useRef(null)
-
-  // Open the grid scrolled to something relevant instead of the empty 7 AM slot:
-  // current time if viewing today, otherwise the day's earliest session.
-  useEffect(() => {
-    if (!scrollRef.current) return
-    const targetHour = isToday
-      ? now.getHours() + now.getMinutes() / 60
-      : dayEvents.length > 0
-        ? Math.min(...dayEvents.map(e => { const t = new Date(e.start); return t.getHours() + t.getMinutes() / 60 }))
-        : 9
-    scrollRef.current.scrollTop = Math.max(0, (targetHour - 7) * 72 - 72)
-  }, [currentDate])
-
-  if (dayEvents.length === 0) {
-    return (
-      <div className="py-20">
-        <EmptyState
-          icon="calendar"
-          title="No appointments today"
-          description="This day is free. Click any time slot to schedule a session."
-          action={() => onSlotClick(currentDate, 9)}
-          actionLabel="Schedule Session"
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div ref={scrollRef} className="flex h-[700px] overflow-auto">
-      {/* Time Column */}
-      <div className="sticky left-0 z-10 w-20 flex-shrink-0 border-r border-[#E8ECF4] bg-white">
-        <div className="h-14 border-b border-[#E8ECF4]" />
-        {HOURS.map((hour) => (
-          <div key={hour} className="h-[72px] border-b border-[#F1F5F9] pr-3 pt-0 text-right">
-            <span className="text-xs font-medium text-content-muted">
-              {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Day Column */}
-      <div className={`flex-1 ${isToday ? 'bg-indigo-50/30' : ''}`}>
-        <div className={`sticky top-0 z-10 flex h-14 flex-col items-center justify-center border-b border-[#E8ECF4] ${isToday ? 'bg-primary-light' : 'bg-slate-50/80'}`}>
-          <span className="text-xs font-medium text-content-muted">{currentDate.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-          <span className={`text-lg font-semibold ${isToday ? 'text-primary' : 'text-content-primary'}`}>{currentDate.getDate()}</span>
-        </div>
-        <div className="relative">
-          {HOURS.map((hour) => (
-            <div
-              key={hour}
-              className="h-[72px] border-b border-[#F1F5F9] cursor-pointer hover:bg-lavender/30 transition-colors"
-              onClick={() => onSlotClick(currentDate, hour)}
-            />
-          ))}
-          
-          {/* Current Time Indicator */}
-          {isToday && currentHourOffset >= 0 && currentHourOffset <= HOURS.length * 72 && (
-            <div
-              className="absolute left-0 right-0 z-20 flex items-center pointer-events-none"
-              style={{ top: `${currentHourOffset}px` }}
-            >
-              <div className="h-3 w-3 rounded-full bg-primary shadow-md" />
-              <div className="flex-1 h-[2px] bg-primary" />
-            </div>
-          )}
-          
-          {/* Events */}
-          {dayEvents.map((event) => (
-            <EventBlock 
-              key={event.id} 
-              event={event} 
-              onClick={() => onEventClick(event)} 
-              onContextMenu={(e) => onContextMenu(e, event)}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Week View Component
-function WeekView({ currentDate, events, onEventClick, onSlotClick, onContextMenu }) {
-  const weekDates = getWeekDates(currentDate)
   const today = new Date()
-  const now = new Date()
-  const currentHourOffset = (now.getHours() + now.getMinutes() / 60 - 7) * 72
-  const isCurrentWeek = weekDates.some(d => isSameDay(d, today))
-  const scrollRef = useRef(null)
+  const dayCount = days.length
+  const daysKey = days.map((d) => d.toDateString()).join(',')
 
-  // Open the grid scrolled to something relevant instead of the empty 7 AM slot:
-  // current time if this week includes today, otherwise the week's earliest session.
+  // Default scroll landing = earliest of (first appointment in view − 1h)
+  // and the practice's configured start time; 08:00 if neither applies.
   useEffect(() => {
     if (!scrollRef.current) return
-    const targetHour = isCurrentWeek
-      ? now.getHours() + now.getMinutes() / 60
-      : events.length > 0
-        ? Math.min(...events.map(e => { const t = new Date(e.start); return t.getHours() + t.getMinutes() / 60 }))
-        : 9
-    scrollRef.current.scrollTop = Math.max(0, (targetHour - 7) * 72 - 72)
-  }, [currentDate])
+    const rangeEvents = events.filter((e) => days.some((d) => isSameDay(new Date(e.start), d)))
+    const candidates = []
+    if (rangeEvents.length) {
+      candidates.push(Math.min(...rangeEvents.map((e) => hourDecimal(new Date(e.start)))) - 1)
+    }
+    if (practiceHours) candidates.push(practiceHours.start)
+    const targetHour = candidates.length ? Math.max(0, Math.min(...candidates)) : 8
+    scrollRef.current.scrollTop = targetHour * HOUR_PX
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [daysKey, practiceHours])
 
   return (
-    <div ref={scrollRef} className="flex h-[700px] overflow-auto">
-      {/* Time Column */}
-      <div className="sticky left-0 z-10 w-20 flex-shrink-0 border-r border-[#E8ECF4] bg-white">
-        <div className="h-14 border-b border-[#E8ECF4]" />
-        {HOURS.map((hour) => (
-          <div key={hour} className="h-[72px] border-b border-[#F1F5F9] pr-3 pt-0 text-right">
-            <span className="text-xs font-medium text-content-muted">
-              {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
-            </span>
+    <div className="cal-scroll" ref={scrollRef}>
+        <div className="cal-head" style={{ '--days': dayCount }}>
+          <div />
+          {days.map((d) => (
+            <div key={d.toISOString()} className={`cal-daycell${isSameDay(d, today) ? ' is-today' : ''}`}>
+              <span className="cal-dayname">{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+              <span className="cal-daynum">{d.getDate()}</span>
+            </div>
+          ))}
+        </div>
+        <div className="cal-grid" style={{ '--days': dayCount }}>
+          <div className="cal-timecol">
+            {HOURS.map((h) => (
+              <div key={h} className={`cal-hourlabel${isOffHoursCell(h, practiceHours) ? ' is-offhours' : ''}`}>
+                {formatHourLabel(h)}
+              </div>
+            ))}
           </div>
-        ))}
+          {days.map((d) => {
+            const dayEvents = events.filter((e) => isSameDay(new Date(e.start), d))
+            const showNow = isSameDay(d, today)
+            const nowTop = hourDecimal(now) * HOUR_PX
+
+            return (
+              <div key={d.toISOString()} className="cal-daycol">
+                {HOURS.map((h) => (
+                  <div
+                    key={h}
+                    className={`cal-cell${isOffHoursCell(h, practiceHours) ? ' is-offhours' : ''}`}
+                    onClick={() => onSlotClick(d, h)}
+                  />
+                ))}
+                {showNow && <div className="cal-now" style={{ top: `${nowTop}px` }} />}
+                {dayEvents.map((event) => (
+                  <EventBlock
+                    key={event.id}
+                    event={event}
+                    onClick={() => onEventClick(event)}
+                    onContextMenu={(e) => onContextMenu(e, event)}
+                  />
+                ))}
+              </div>
+            )
+          })}
+        </div>
       </div>
-
-      {/* Days */}
-      {weekDates.map((date, idx) => {
-        const dayEvents = events.filter(e => isSameDay(new Date(e.start), date))
-        const isToday = isSameDay(date, today)
-        const weekend = isWeekend(date)
-
-        return (
-          <div 
-            key={idx} 
-            className={`flex-1 min-w-[120px] border-r border-[#E8ECF4] last:border-r-0 ${
-              isToday ? 'bg-indigo-50/30' : weekend ? 'bg-slate-50/50' : ''
-            }`}
-          >
-            <div className={`sticky top-0 z-10 flex h-14 flex-col items-center justify-center border-b border-[#E8ECF4] ${
-              isToday ? 'bg-primary-light' : 'bg-slate-50/80'
-            }`}>
-              <span className="text-xs font-medium text-content-muted">{date.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-              <span className={`text-lg font-semibold ${isToday ? 'text-primary' : 'text-content-primary'}`}>{date.getDate()}</span>
-            </div>
-            <div className="relative">
-              {HOURS.map((hour) => (
-                <div
-                  key={hour}
-                  className="h-[72px] border-b border-[#F1F5F9] cursor-pointer hover:bg-lavender/30 transition-colors"
-                  onClick={() => onSlotClick(date, hour)}
-                />
-              ))}
-              
-              {/* Current Time Indicator */}
-              {isToday && currentHourOffset >= 0 && currentHourOffset <= HOURS.length * 72 && (
-                <div
-                  className="absolute left-0 right-0 z-20 flex items-center pointer-events-none"
-                  style={{ top: `${currentHourOffset}px` }}
-                >
-                  <div className="h-3 w-3 rounded-full bg-primary shadow-md" />
-                  <div className="flex-1 h-[2px] bg-primary" />
-                </div>
-              )}
-              
-              {dayEvents.map((event) => (
-                <EventBlock 
-                  key={event.id} 
-                  event={event} 
-                  onClick={() => onEventClick(event)} 
-                  onContextMenu={(e) => onContextMenu(e, event)}
-                  compact 
-                />
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
-// Month View Component
+function DayView({ currentDate, events, now, practiceHours, onSlotClick, onEventClick, onContextMenu }) {
+  return (
+    <CalendarGrid
+      days={[currentDate]}
+      events={events}
+      now={now}
+      practiceHours={practiceHours}
+      onSlotClick={onSlotClick}
+      onEventClick={onEventClick}
+      onContextMenu={onContextMenu}
+    />
+  )
+}
+
+function WeekView({ currentDate, events, now, practiceHours, onSlotClick, onEventClick, onContextMenu }) {
+  return (
+    <CalendarGrid
+      days={getWeekDates(currentDate)}
+      events={events}
+      now={now}
+      practiceHours={practiceHours}
+      onSlotClick={onSlotClick}
+      onEventClick={onEventClick}
+      onContextMenu={onContextMenu}
+    />
+  )
+}
+
+// Month view is unaffected by the 24-hour rule — still a 6x7 grid of dates.
 function MonthView({ currentDate, events, onEventClick, onSlotClick, onContextMenu }) {
   const monthDates = getMonthDates(currentDate)
   const today = new Date()
   const currentMonth = currentDate.getMonth()
 
-  const getEventsForDate = (date) => events.filter(e => isSameDay(new Date(e.start), date))
+  const getEventsForDate = (date) => events.filter((e) => isSameDay(new Date(e.start), date))
 
   return (
     <div>
-      {/* Week Days Header */}
-      <div className="grid grid-cols-7 border-b border-[#E8ECF4] bg-slate-50/80">
+      <div className="grid grid-cols-7" style={{ borderBottom: 'var(--border-width) solid var(--hairline)', background: 'var(--surface)' }}>
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-          <div key={day} className="px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-content-muted">
+          <div key={day} className="t-caption" style={{ padding: 'var(--space-3) var(--space-2)', textAlign: 'center' }}>
             {day}
           </div>
         ))}
       </div>
 
-      {/* Calendar Grid */}
       <div className="grid grid-cols-7">
         {monthDates.map((date, idx) => {
           const dayEvents = getEventsForDate(date)
           const isToday = isSameDay(date, today)
           const isCurrentMonth = date.getMonth() === currentMonth
-          const weekend = isWeekend(date)
 
           return (
             <div
               key={idx}
-              className={`min-h-[120px] border-b border-r border-[#F1F5F9] p-2 cursor-pointer transition-colors hover:bg-lavender/20 ${
-                !isCurrentMonth ? 'bg-slate-50/50' : weekend ? 'bg-slate-50/30' : ''
-              }`}
+              style={{
+                minHeight: '120px', padding: 'var(--space-2)', cursor: 'pointer',
+                borderTop: 'var(--border-width) solid var(--hairline)',
+                borderLeft: 'var(--border-width) solid var(--hairline)',
+                background: !isCurrentMonth ? 'var(--surface)' : 'transparent',
+              }}
               onClick={() => onSlotClick(date)}
             >
-              <div className={`mb-1.5 flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
-                isToday 
-                  ? 'bg-primary text-white shadow-sm' 
-                  : isCurrentMonth 
-                    ? 'text-content-primary' 
-                    : 'text-content-muted'
-              }`}>
+              <div
+                className="t-caption"
+                style={{
+                  display: 'flex', height: '26px', width: '26px', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: '50%', marginBottom: 'var(--space-2)', fontWeight: 600,
+                  background: isToday ? 'var(--selected)' : 'transparent',
+                  color: isToday ? 'var(--accent)' : isCurrentMonth ? 'var(--text-primary)' : 'var(--text-muted)',
+                }}
+              >
                 {date.getDate()}
               </div>
               <div className="space-y-1">
-                {dayEvents.slice(0, 3).map((event) => {
-                  const typeConfig = SESSION_TYPE_CONFIG[event.session_type] || SESSION_TYPE_CONFIG.therapy_session
-                  return (
-                    <div
-                      key={event.id}
-                      onClick={(e) => { e.stopPropagation(); onEventClick(event) }}
-                      onContextMenu={(e) => { e.stopPropagation(); onContextMenu(e, event) }}
-                      className={`truncate rounded-md border-l-[3px] bg-white px-2 py-1 text-xs font-medium cursor-pointer shadow-sm hover:shadow transition-shadow ${typeConfig.color}`}
-                    >
-                      <span className="text-content-muted">{formatTime(event.start)}</span>{' '}
-                      <span className="text-content-primary">{event.patient_name}</span>
-                    </div>
-                  )
-                })}
+                {dayEvents.slice(0, 3).map((event) => (
+                  <div
+                    key={event.id}
+                    className={`cal-event cal-event-mini ${eventStatusClass(event.status)}`.trim()}
+                    onClick={(e) => { e.stopPropagation(); onEventClick(event) }}
+                    onContextMenu={(e) => { e.stopPropagation(); onContextMenu(e, event) }}
+                  >
+                    <span className="cal-event-name">{event.patient_name}</span>
+                  </div>
+                ))}
                 {dayEvents.length > 3 && (
-                  <div className="text-xs font-medium text-primary px-2">+{dayEvents.length - 3} more</div>
+                  <div className="t-caption" style={{ padding: '0 var(--space-2)', color: 'var(--accent)' }}>
+                    +{dayEvents.length - 3} more
+                  </div>
                 )}
               </div>
             </div>
@@ -870,60 +797,28 @@ function MonthView({ currentDate, events, onEventClick, onSlotClick, onContextMe
   )
 }
 
-// Event Block Component
-function EventBlock({ event, onClick, onContextMenu, compact = false }) {
+function EventBlock({ event, onClick, onContextMenu }) {
   const startTime = new Date(event.start)
   const endTime = new Date(event.end)
-  const startHour = startTime.getHours() + startTime.getMinutes() / 60
   const duration = (endTime - startTime) / (1000 * 60 * 60)
-  const top = (startHour - 7) * 72
-  const height = Math.max(duration * 72, 32)
-  
-  const typeConfig = SESSION_TYPE_CONFIG[event.session_type] || SESSION_TYPE_CONFIG.therapy_session
-  const TypeIcon = typeConfig.icon
+  const top = hourDecimal(startTime) * HOUR_PX
+  const height = Math.max(duration * HOUR_PX, 24)
   const ModeIcon = event.session_mode === 'online' ? Video : Building
-
-  const showAvatar = !compact && height >= 48
-  const showTime = height >= 48
-  const showTypeRow = !compact && height >= 72
 
   return (
     <div
+      className={`cal-event ${eventStatusClass(event.status)}`.trim()}
+      style={{ top: `${top}px`, height: `${height}px` }}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className={`absolute left-1.5 right-1.5 rounded-[14px] border-l-[4px] bg-white px-3 py-2 cursor-pointer overflow-hidden transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 shadow-sm ${typeConfig.color}`}
-      style={{ top: `${top}px`, height: `${height}px` }}
     >
-      <div className="flex items-start gap-2">
-        {showAvatar && (
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-content-primary">
-            {event.patient_name?.charAt(0) || '?'}
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold text-sm text-content-primary truncate">
-            {event.patient_name}
-          </div>
-          {showTime && (
-            <div className="flex items-center gap-1 text-xs text-content-muted truncate">
-              <span className="truncate">{formatTime(event.start)} – {formatTime(event.end)}</span>
-              {compact && <ModeIcon className="h-3 w-3 shrink-0" strokeWidth={1.5} />}
-            </div>
-          )}
-          {showTypeRow && (
-            <div className="mt-1 flex items-center gap-2">
-              <div className="flex items-center gap-1 text-xs text-content-muted">
-                <ModeIcon className="h-3 w-3" strokeWidth={1.5} />
-                <span>{event.session_mode === 'online' ? 'Video' : 'In-Person'}</span>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-content-muted">
-                <TypeIcon className="h-3 w-3" strokeWidth={1.5} />
-                <span className="truncate">{typeConfig.label}</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      <span className="cal-event-name">{event.patient_name}</span>
+      {height >= 40 && (
+        <span className="cal-event-meta">
+          <ModeIcon size={11} strokeWidth={1.5} />
+          {formatTime(event.start)}
+        </span>
+      )}
     </div>
   )
 }

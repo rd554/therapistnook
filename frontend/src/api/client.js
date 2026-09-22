@@ -1044,6 +1044,14 @@ export async function cancelBookingRequest(bookingId, reason = null) {
   return res.data
 }
 
+// Accepts a public intro-call booking request: creates (or reuses) the
+// Patient and confirms the requested slot as a real Appointment. No payment
+// involved — mirrors acceptIntakeSubmission's lead -> Patient pattern.
+export async function acceptBookingRequest(bookingId) {
+  const res = await api.post(`/bookings/${bookingId}/accept`)
+  return res.data
+}
+
 export async function confirmBookingManually(bookingId, paymentMethod = 'cash') {
   const res = await api.post(`/bookings/${bookingId}/confirm-manual`, null, {
     params: { payment_method: paymentMethod }
@@ -1109,6 +1117,13 @@ export async function getPractitionerAnalytics({ period = 'this_month', startDat
 
 export async function getHomeDashboardSummary() {
   const res = await api.get('/analytics/home-summary')
+  return res.data
+}
+
+// Practice Analytics redesign — separate from the report-type endpoints
+// above, which stay in place for the export menu's CSV downloads.
+export async function getPracticeAnalyticsSummary({ year, month }) {
+  const res = await api.get('/analytics/summary', { params: { year, month } })
   return res.data
 }
 
@@ -1214,6 +1229,18 @@ export async function updateWhatsAppConfig(data) {
 
 export async function testWhatsAppConfig(recipientPhone) {
   const res = await api.post('/settings/whatsapp/test', { recipient_phone: recipientPhone })
+  return res.data
+}
+
+// ─── Messaging Preferences (Admin Only) — event × channel send gating ─────────
+
+export async function getMessagingPreferences() {
+  const res = await api.get('/settings/messaging')
+  return res.data
+}
+
+export async function updateMessagingPreferences(data) {
+  const res = await api.put('/settings/messaging', data)
   return res.data
 }
 

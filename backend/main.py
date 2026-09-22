@@ -1885,14 +1885,31 @@ async def upload_document(
                 ci.risk_factors = updated_data.get("risk_factors")
                 ci.timeline = updated_data.get("timeline")
                 ci.outstanding_questions = updated_data.get("outstanding_questions")
-        
+            else:
+                from models import generate_uuid as gen_update_uuid
+                ci_update = ClinicalIntelligenceUpdate(
+                    id=gen_update_uuid(),
+                    clinical_intelligence_id=ci.id,
+                    update_type=update.get("update_type"),
+                    section=update.get("section"),
+                    operation=update.get("operation"),
+                    proposed_changes=update.get("proposed_changes"),
+                    source_type=update.get("source_type"),
+                    source_id=update.get("source_id"),
+                    source_excerpt=update.get("source_excerpt"),
+                    confidence=update.get("confidence", "medium"),
+                    reasoning=update.get("reasoning"),
+                    review_status="pending",
+                )
+                db.add(ci_update)
+
         ci.last_processed_at = datetime.now(timezone.utc)
         ci.last_source_type = "clinical_document"
         ci.last_source_id = doc.id
         await db.commit()
     except Exception as e:
         print(f"Clinical Intelligence processing error: {e}")
-    
+
     from storage import is_unsupported_text_format
     upload_status = doc.processing_status
     if upload_status == "completed" and not doc.extracted_text and is_unsupported_text_format(doc.original_filename):
@@ -2874,12 +2891,16 @@ async def delete_assessment(
 
 @app.get("/api/practitioner/by-ref/{ref_code}")
 async def get_practitioner_by_ref(ref_code: str, db: AsyncSession = Depends(get_db)):
+    # Deliberately does not return the practitioner's name: this route is hit
+    # from the unauthenticated /test link before any patient identity exists,
+    # and a practitioner's name must never render on a patient-facing page.
+    # The frontend only needs this to know the link is valid.
     prac = (await db.execute(
         select(Practitioner).where(Practitioner.ref_code == ref_code, Practitioner.is_active == True)
     )).scalar_one_or_none()
     if not prac:
         raise HTTPException(404, "Invalid or inactive test link")
-    return {"name": prac.name, "ref_code": prac.ref_code}
+    return {"ref_code": prac.ref_code}
 
 
 @app.post("/api/patient/sessions", response_model=SessionResponse)
@@ -3075,6 +3096,7 @@ async def get_session_results(session_id: str, prac=Depends(get_current_practiti
         raise HTTPException(404, "Results not yet available. Assessment may still be in progress.")
 
     t = result.t_scores
+    validity_status, _validity_bullets, validity_cautions = _validity_section(result, session.gender)
     profile = []
     for scale in VALIDITY_SCALE_ORDER + CLINICAL_SCALE_ORDER:
         profile.append({
@@ -3091,6 +3113,9 @@ async def get_session_results(session_id: str, prac=Depends(get_current_practiti
         patient_dob=session.dob,
         patient_age=_compute_age(session.dob),
         patient_gender=session.gender,
+        assessed_at=result.created_at,
+        validity_status=validity_status,
+        validity_cautions=validity_cautions,
         raw_scores=result.raw_scores,
         k_corrected_scores=result.k_corrected_scores,
         t_scores=result.t_scores,
@@ -3296,28 +3321,28 @@ If the same characteristic appears in scale interpretation, two-point code, and 
 
 Generate a professional psychological report, formatted as bulleted, score-specific narrative statements (one bullet per scale/subscale, each naming the actual obtained T-score and stating what that score means for this patient — mirror the style of: "On the Lie scale (L), a T-score of 43 suggests..."), with these sections:
 
-## 1. Validity Scales
+## Validity Scales
 One bullet per available validity indicator (L, F, K, F-K Index, Fb, VRIN, TRIN), each citing the obtained score and its interpretation. State the overall Profile Validity Status.
 
-## 2. Clinical Scales
+## Clinical Scales
 One bullet per clinically elevated scale (T≥65), each citing the T-score and covering core characteristics, emotional functioning, behavior, interpersonal style, and cognitive features. If no scale is elevated, say so plainly and note any notably low scores (T≤35) briefly.
 
-## 3. Harris-Lingoes & Si Subscales
+## Harris-Lingoes & Si Subscales
 One bullet per elevated (T≥65) Harris-Lingoes/Si subscale, citing the T-score and its specific meaning, grouped under its parent clinical scale. If a subscale is elevated but its parent scale is not, say so explicitly. If none are elevated, say so.
 
-## 4. Code Type Interpretation
+## Code Type Interpretation
 Provide the full interpretation for the obtained code type ({two_point_code or three_point_code}). If fewer than two clinical scales are elevated, state plainly that no two-point or three-point code type is present rather than inventing one.
 
-## 5. Modifying Variables
+## Modifying Variables
 Address only the modifiers that actually apply (High/Low K, High/Low 5, High/Low 0). If none apply, say so.
 
-## 6. Diagnostic Considerations
+## Diagnostic Considerations
 List only diagnostic hypotheses directly suggested by the elevated scales/subscales above. Do not invent diagnoses, and do not suggest diagnoses for scales that are not elevated.
 
-## 7. Prognosis
+## Prognosis
 Base this on the actual profile configuration (including Ego Strength/Es and K if available).
 
-## 8. Treatment Implications
+## Treatment Implications
 Provide specific, bulleted treatment recommendations tied to the elevations actually present.
 
 ## Summary
@@ -3325,7 +3350,7 @@ A short integrative paragraph tying the validity status, elevated scale(s)/code 
 
 ---
 
-Write in a professional clinical tone, in the third person, using the patient's stated gender for pronouns. Never fabricate a score, code type, or elevation that is not present in the data above. Produce ONE integrated interpretation that reads like a professional psychological report rather than disconnected excerpts. Be specific and clinically relevant."""
+Write in a professional clinical tone, in the third person, using the patient's stated gender for pronouns. Never fabricate a score, code type, or elevation that is not present in the data above. Produce ONE integrated interpretation that reads like a professional psychological report rather than disconnected excerpts. Be specific and clinically relevant. Do not include a report title, a patient-name heading, or any heading before the first "## " section — begin directly with the first section heading."""
 
     return prompt
 
@@ -3406,7 +3431,12 @@ def _pronoun(gender: str) -> tuple:
 
 
 def _validity_section(result, gender: str) -> tuple:
-    """Build the Validity Scales bullets and an overall validity status label."""
+    """Build the Validity Scales bullets, an overall validity status label, and a
+    short list of named cautions (e.g. "elevated Fb (T=97)") for indicators that
+    warrant care in interpreting the rest of the profile, independent of whether
+    they alone are enough to call the overall profile invalid. Screen and PDF both
+    read this same function so the top-of-report validity summary and the
+    Validity Scales section narrative never disagree."""
     t = result.t_scores or {}
     raw = result.raw_scores or {}
     supp = result.supplementary_scales or {}
@@ -3507,7 +3537,29 @@ def _validity_section(result, gender: str) -> tuple:
     else:
         status = "Valid"
 
-    return status, bullets
+    # Named cautions — surfaced above the fold even when they aren't alone
+    # enough to change the overall status label above (e.g. an elevated Fb
+    # with an otherwise unremarkable F/L/K still means the second half of
+    # the profile should be read with care).
+    cautions = []
+    if f_t > 65:
+        cautions.append(f"elevated F (T={f_t:.0f})")
+    if l_t > 65:
+        cautions.append(f"elevated L (T={l_t:.0f})")
+    if k_t > 70:
+        cautions.append(f"elevated K (T={k_t:.0f})")
+    if fb_t is not None and fb_t > 80:
+        cautions.append(f"elevated Fb (T={fb_t:.0f}) — caution interpreting the latter part of the test")
+    if vrin_t is not None and vrin_t >= 70:
+        cautions.append(f"elevated VRIN (T={vrin_t:.0f})")
+    if trin_t is not None and trin_t >= 65:
+        cautions.append(f"elevated TRIN (T={trin_t:.0f})")
+    if f_minus_k >= 11:
+        cautions.append(f"F-K Index +{f_minus_k:.0f} (possible symptom exaggeration)")
+    elif f_minus_k <= -11:
+        cautions.append(f"F-K Index {f_minus_k:.0f} (possible symptom minimization)")
+
+    return status, bullets, cautions
 
 
 def _clinical_scales_section(result, gender: str) -> tuple:
@@ -3676,21 +3728,18 @@ def _generate_fallback_interpretation(session, age: int, result) -> str:
     gender = session.gender
     subj, poss, obj = _pronoun(gender)
 
-    validity_status, validity_bullets = _validity_section(result, gender)
+    validity_status, validity_bullets, _validity_cautions = _validity_section(result, gender)
     clinical_bullets, elevated, sorted_clinical = _clinical_scales_section(result, gender)
     hl_text = _harris_lingoes_section(result)
     code_text = _code_type_section(elevated, sorted_clinical, gender, result.t_scores or {})
     modifiers_text = _modifying_variables_section(result, gender)
 
     sections = [
-        "## MMPI-2 Clinical Interpretation Report",
-        f"**Patient:** {session.name} | **Age:** {age} | **Gender:** {gender}",
-        f"**Profile Validity Status:** {validity_status}",
-        "## 1. Validity Scales\n\n" + "\n\n".join(f"- {b}" for b in validity_bullets),
-        "## 2. Clinical Scales\n\n" + "\n\n".join(f"- {b}" for b in clinical_bullets),
-        "## 3. Harris-Lingoes & Si Subscales\n\n" + hl_text,
-        "## 4. Code Type Interpretation\n\n" + code_text,
-        "## 5. Modifying Variables\n\n" + modifiers_text,
+        "## Validity Scales\n\n" + "\n\n".join(f"- {b}" for b in validity_bullets),
+        "## Clinical Scales\n\n" + "\n\n".join(f"- {b}" for b in clinical_bullets),
+        "## Harris-Lingoes & Si Subscales\n\n" + hl_text,
+        "## Code Type Interpretation\n\n" + code_text,
+        "## Modifying Variables\n\n" + modifiers_text,
     ]
 
     # Diagnostic Considerations — only what the elevated scales/subscales actually suggest
@@ -3712,7 +3761,7 @@ def _generate_fallback_interpretation(session, age: int, result) -> str:
         diag_text = (f"The profile is consistent with hypotheses of {'; '.join(diag_bits)}." if diag_bits else "No diagnostic hypothesis is suggested by the clinical scales.") + tail
     else:
         diag_text = "No clinical scale elevation is present, so no diagnostic hypothesis is suggested by this profile."
-    sections.append("## 6. Diagnostic Considerations\n\n" + diag_text +
+    sections.append("## Diagnostic Considerations\n\n" + diag_text +
                      "\n\nFormal diagnostic conclusions should integrate this MMPI-2 data with clinical interview findings, behavioral observations, and collateral information. The MMPI-2 provides diagnostic hypotheses, not definitive diagnoses.")
 
     # Prognosis
@@ -3733,7 +3782,7 @@ def _generate_fallback_interpretation(session, age: int, result) -> str:
         prognosis_notes.append("Extreme clinical scale elevation(s) (T≥80) suggest more severe pathology requiring more intensive intervention.")
     if not prognosis_notes:
         prognosis_notes.append("The profile configuration suggests a moderate-to-favorable prognosis with appropriate treatment.")
-    sections.append("## 7. Prognosis\n\n" + " ".join(prognosis_notes))
+    sections.append("## Prognosis\n\n" + " ".join(prognosis_notes))
 
     # Treatment Implications
     treat_bits = ["- Individual psychotherapy targeting the primary areas of elevation identified above"]
@@ -3747,7 +3796,7 @@ def _generate_fallback_interpretation(session, age: int, result) -> str:
         treat_bits.append("- Monitoring for somatic/physical symptom overlay and coordination with medical providers as appropriate")
     treat_bits.append("- Regular reassessment of symptoms and treatment response")
     treat_bits.append("- Integration of this psychological testing with clinical observations and collateral history")
-    sections.append("## 8. Treatment Implications\n\n" + "\n".join(treat_bits))
+    sections.append("## Treatment Implications\n\n" + "\n".join(treat_bits))
 
     # Summary
     if elevated:
@@ -4458,18 +4507,47 @@ async def process_therapy_session(
     
     if therapy_session.processing_status == "processing":
         raise HTTPException(400, "Session is already being processed")
-    
+
     # Update status to processing
     therapy_session.processing_status = "processing"
     therapy_session.processing_error = None
     await db.commit()
-    
+
+    # Manually-provided transcripts (paste or file — the only path this UI
+    # actually creates sessions through) have no audio to transcribe; re-run
+    # just the summary/SOAP generation on the transcript text already on
+    # file, rather than the audio pipeline below.
+    if therapy_session.input_type == "transcript":
+        from session_intelligence import process_transcript_session
+        try:
+            result = await process_transcript_session(
+                therapy_session.transcript_text,
+                session_date=therapy_session.session_date,
+            )
+            therapy_session.summary = result.get("summary")
+            therapy_session.soap_notes = result.get("soap_notes")
+            therapy_session.processing_status = "completed"
+            await db.commit()
+            await db.refresh(therapy_session)
+
+            try:
+                await _apply_clinical_intelligence_from_session(db, patient_id, therapy_session)
+            except Exception as e:
+                print(f"Clinical Intelligence processing error: {e}")
+
+            return {"message": "Processing completed successfully"}
+        except Exception as e:
+            therapy_session.processing_status = "failed"
+            therapy_session.processing_error = str(e)
+            await db.commit()
+            raise HTTPException(500, f"Processing failed: {str(e)}")
+
     # Get voice profile for speaker identification
     voice_profile = (await db.execute(
         select(VoiceProfile).where(VoiceProfile.practitioner_id == prac.id)
     )).scalar_one_or_none()
     voice_embedding = voice_profile.embedding if voice_profile and voice_profile.status == "ready" else None
-    
+
     # Get audio file path
     full_path = await get_file_path(therapy_session.audio_storage_path)
     if not full_path:
@@ -4477,7 +4555,7 @@ async def process_therapy_session(
         therapy_session.processing_error = "Audio file not found"
         await db.commit()
         raise HTTPException(404, "Audio file not found")
-    
+
     # Process the session
     from session_intelligence import process_therapy_session as process_session
     try:
@@ -4486,7 +4564,7 @@ async def process_therapy_session(
             voice_embedding=voice_embedding,
             session_date=therapy_session.session_date,
         )
-        
+
         # Update session with results
         therapy_session.transcript = result.get("transcript")
         therapy_session.transcript_text = result.get("transcript_text")
@@ -4496,7 +4574,7 @@ async def process_therapy_session(
         therapy_session.summary = result.get("summary")
         therapy_session.soap_notes = result.get("soap_notes")
         therapy_session.processing_status = "completed"
-        
+
         await db.commit()
         await db.refresh(therapy_session)
 
@@ -6206,6 +6284,7 @@ async def _email_meeting_link_to_patient(db: AsyncSession, appt, patient, practi
                 "appointment_time": format_time(local_start),
                 "meeting_link": appt.meeting_link,
             },
+            db=db,
         )
         if not result.success:
             logger.error(
@@ -6821,6 +6900,8 @@ async def get_availability(
         default_session_duration=avail.default_session_duration,
         buffer_minutes=avail.buffer_minutes,
         timezone=avail.timezone,
+        min_booking_notice_hours=avail.min_booking_notice_hours,
+        max_advance_booking_days=avail.max_advance_booking_days,
         created_at=avail.created_at,
         updated_at=avail.updated_at,
     )
@@ -6862,10 +6943,14 @@ async def update_availability(
         avail.buffer_minutes = data.buffer_minutes
     if data.timezone is not None:
         avail.timezone = data.timezone
-    
+    if data.min_booking_notice_hours is not None:
+        avail.min_booking_notice_hours = data.min_booking_notice_hours
+    if data.max_advance_booking_days is not None:
+        avail.max_advance_booking_days = data.max_advance_booking_days
+
     await db.commit()
     await db.refresh(avail)
-    
+
     return AvailabilityResponse(
         id=avail.id,
         practitioner_id=avail.practitioner_id,
@@ -6877,6 +6962,8 @@ async def update_availability(
         default_session_duration=avail.default_session_duration,
         buffer_minutes=avail.buffer_minutes,
         timezone=avail.timezone,
+        min_booking_notice_hours=avail.min_booking_notice_hours,
+        max_advance_booking_days=avail.max_advance_booking_days,
         created_at=avail.created_at,
         updated_at=avail.updated_at,
     )
@@ -7081,7 +7168,22 @@ async def get_payment_dashboard(
 
     today_paid = [p for p in paid_payments if p.paid_at and _aware(p.paid_at) >= today_start]
     today_revenue = sum(p.final_amount for p in today_paid)
-    
+
+    # Overdue = pending payment for a session that's already happened, not
+    # "payment link has expired": the link's expiry tracks time since booking
+    # (see payment_link_expires_at), which can lapse before or after the
+    # appointment depending on how far ahead it was booked, so it's a weaker
+    # proxy for "this needs follow-up" than the appointment date itself.
+    pending_ids = [p.id for p in pending_payments]
+    appt_dates = {}
+    if pending_ids:
+        rows = (await db.execute(
+            select(Payment.id, Appointment.date).join(Appointment).where(Payment.id.in_(pending_ids))
+        )).all()
+        appt_dates = dict(rows)
+    today_date = today_start.date()
+    overdue_payments = [p for p in pending_payments if appt_dates.get(p.id) and appt_dates[p.id] < today_date]
+
     return PaymentDashboard(
         pending_count=len(pending_payments),
         pending_amount=sum(p.final_amount for p in pending_payments),
@@ -7094,6 +7196,8 @@ async def get_payment_dashboard(
         monthly_revenue=monthly_revenue,
         today_revenue=today_revenue,
         outstanding_amount=sum(p.final_amount for p in pending_payments),
+        overdue_count=len(overdue_payments),
+        overdue_amount=sum(p.final_amount for p in overdue_payments),
         currency="INR",
     )
 
@@ -8434,6 +8538,8 @@ def _profile_to_response(profile: PractitionerProfile) -> PractitionerProfileRes
         title=profile.title,
         tagline=profile.tagline,
         bio=profile.bio,
+        profession=profile.profession,
+        location_short=profile.location_short,
         qualifications=profile.qualifications,
         certifications=profile.certifications,
         license_number=profile.license_number,
@@ -8479,6 +8585,8 @@ def _profile_to_public_response(profile: PractitionerProfile) -> PublicProfileRe
         title=profile.title,
         tagline=profile.tagline,
         bio=profile.bio,
+        profession=profile.profession,
+        location_short=profile.location_short,
         qualifications=profile.qualifications,
         certifications=profile.certifications,
         license_number=profile.license_number,
@@ -8771,7 +8879,18 @@ async def get_public_availability(
             # Check if slot conflicts with existing appointment
             is_free = True
             for appt_start, appt_end in day_appointments:
-                if current_time < appt_end and slot_end > appt_start:
+                # SQLite doesn't persist tzinfo on DateTime(timezone=True)
+                # columns, so appt_start/appt_end can come back naive while
+                # current_time/slot_end are tz-aware (tz.localize above) —
+                # strip tzinfo before comparing, same fix as
+                # booking_service.py's equivalent slot generator.
+                if appt_start.tzinfo:
+                    appt_start = appt_start.replace(tzinfo=None)
+                if appt_end.tzinfo:
+                    appt_end = appt_end.replace(tzinfo=None)
+                current_time_naive = current_time.replace(tzinfo=None)
+                slot_end_naive = slot_end.replace(tzinfo=None)
+                if current_time_naive < appt_end and slot_end_naive > appt_start:
                     is_free = False
                     break
             
@@ -8867,7 +8986,7 @@ async def update_my_profile(
     
     # Update other fields
     update_fields = [
-        "display_name", "title", "tagline", "bio",
+        "display_name", "title", "tagline", "bio", "profession", "location_short",
         "qualifications", "certifications", "license_number", "professional_memberships",
         "years_of_experience", "areas_of_expertise", "specializations", "therapy_approaches",
         "languages",
@@ -9636,17 +9755,21 @@ async def create_public_booking(
             patient_phone=data.patient_phone,
             requested_date=data.requested_date,
             requested_start_time=data.requested_start_time,
-            session_type=data.session_type,
+            # Hardcoded, not read from the client — this is always the free
+            # introductory call, there is no patient-facing session-type
+            # choice on the public page (the old wizard's "Therapy Session /
+            # Initial Consultation / Follow-up" step was meaningless: all
+            # three were the same duration and fee).
+            session_type="consultation",
             session_mode=data.session_mode,
             patient_notes=data.patient_notes,
             duration_minutes=duration_minutes,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
-    
+
     booking = result["booking"]
-    payment = result["payment"]
-    
+
     return BookingRequestResponse(
         id=booking.id,
         booking_token=booking.booking_token,
@@ -9663,11 +9786,6 @@ async def create_public_booking(
         session_mode=booking.session_mode,
         status=booking.status,
         patient_notes=booking.patient_notes,
-        payment_id=payment.id if payment else None,
-        payment_status=payment.status if payment else None,
-        payment_amount=payment.final_amount if payment else None,
-        payment_currency=payment.currency if payment else None,
-        payment_link_url=result["payment_link_url"],
         expires_at=booking.expires_at,
         created_at=booking.created_at,
     )
@@ -9985,6 +10103,7 @@ async def list_booking_requests(
             session_type=b.session_type,
             session_mode=b.session_mode,
             status=b.status,
+            patient_notes=b.patient_notes,
             payment_status=payment_status,
             created_at=b.created_at,
         ))
@@ -10038,6 +10157,121 @@ async def get_booking_request(
         expires_at=booking.expires_at,
         created_at=booking.created_at,
         confirmed_at=booking.confirmed_at,
+    )
+
+
+@app.post("/api/bookings/{booking_id}/accept", response_model=PatientResponse)
+async def accept_booking_request(
+    booking_id: str,
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Accept a public introductory-call booking request: creates a real Patient
+    (or reuses one that already matches by email, so an existing patient
+    re-requesting an intro call doesn't get duplicated) and confirms the
+    requested slot as a real Appointment. No payment is involved — the intro
+    call is free; real payment only starts from the first session onward,
+    set by the practitioner separately. Mirrors accept_intake_submission's
+    lead -> Patient pattern.
+    """
+    booking = await db.get(BookingRequest, booking_id)
+    if not booking or booking.practitioner_id != prac.id:
+        raise HTTPException(404, "Booking not found")
+
+    if booking.status != "requested":
+        raise HTTPException(400, f"This booking has already been resolved (status: {booking.status})")
+
+    patient = (await db.execute(
+        select(Patient).where(
+            Patient.practitioner_id == prac.id,
+            Patient.email == booking.patient_email,
+        )
+    )).scalar_one_or_none()
+
+    if not patient:
+        # The public booking sheet deliberately doesn't collect date of birth,
+        # age, or gender (asking for them on a "book a free intro call" form
+        # would add friction the spec explicitly didn't want) but Patient
+        # requires all three. Seed obvious placeholders — same spirit as
+        # accept_intake_submission's approximate-DOB-from-age, just with
+        # nothing at all to approximate from — and leave them for the
+        # practitioner to fill in via the normal patient edit form. This is a
+        # real gap worth a follow-up decision, not a permanent answer.
+        patient = Patient(
+            practitioner_id=prac.id,
+            full_name=booking.patient_name,
+            date_of_birth=date(1900, 1, 1),
+            age=0,
+            gender="Not specified",
+            phone=booking.patient_phone,
+            email=booking.patient_email,
+            referral_source="Public booking page",
+            status="active",
+        )
+        db.add(patient)
+        await db.flush()
+
+        if booking.patient_notes:
+            db.add(ClinicalHistory(
+                patient_id=patient.id,
+                status="in_progress",
+                presenting_complaint={"chief_complaint": booking.patient_notes},
+            ))
+
+    overlap_query = select(Appointment).where(
+        Appointment.practitioner_id == prac.id,
+        Appointment.date == booking.requested_date,
+        Appointment.status.in_(["scheduled", "rescheduled"]),
+        or_(
+            (Appointment.start_time <= booking.requested_start_time) & (Appointment.end_time > booking.requested_start_time),
+            (Appointment.start_time < booking.requested_end_time) & (Appointment.end_time >= booking.requested_end_time),
+            (Appointment.start_time >= booking.requested_start_time) & (Appointment.end_time <= booking.requested_end_time),
+        )
+    )
+    if (await db.execute(overlap_query)).scalar_one_or_none():
+        raise HTTPException(409, "This time slot overlaps with an existing appointment")
+
+    appt = Appointment(
+        id=generate_uuid(),
+        practitioner_id=prac.id,
+        patient_id=patient.id,
+        date=booking.requested_date,
+        start_time=booking.requested_start_time,
+        end_time=booking.requested_end_time,
+        duration_minutes=booking.duration_minutes,
+        session_type=booking.session_type,
+        session_mode=booking.session_mode,
+        notes=booking.patient_notes,
+    )
+    db.add(appt)
+
+    booking.status = "confirmed"
+    booking.patient_id = patient.id
+    booking.confirmed_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(appt)
+    await db.refresh(patient)
+
+    await _create_calendar_event_for_appointment(db, appt, prac, patient, prac.id)
+
+    return PatientResponse(
+        id=patient.id,
+        practitioner_id=patient.practitioner_id,
+        full_name=patient.full_name,
+        date_of_birth=patient.date_of_birth,
+        age=patient.age,
+        gender=patient.gender,
+        phone=patient.phone,
+        email=patient.email,
+        emergency_contact=patient.emergency_contact,
+        referral_source=patient.referral_source,
+        status=patient.status,
+        avatar_id=getattr(patient, "avatar_id", None),
+        avatar_url=getattr(patient, "avatar_url", None),
+        created_at=patient.created_at,
+        updated_at=patient.updated_at,
     )
 
 
@@ -10186,7 +10420,7 @@ from schemas import (
     RevenueAnalyticsResponse, AssessmentAnalyticsResponse, PractitionerAnalyticsResponse,
     PractitionerAnalyticsItem, HomeDashboardSummary, DateRange, MonthlyCount,
     AppointmentTrendItem, MonthlyRevenue, PaymentMethodStats, AssessmentTypeStats,
-    AssessmentTrendItem, AnalyticsExportRequest,
+    AssessmentTrendItem, AnalyticsExportRequest, PracticeAnalyticsSummaryResponse,
 )
 
 
@@ -10384,6 +10618,30 @@ async def get_home_dashboard_summary(
     return HomeDashboardSummary(**result)
 
 
+@app.get("/api/analytics/summary", response_model=PracticeAnalyticsSummaryResponse)
+async def get_practice_analytics_summary(
+    year: int = Query(...),
+    month: int = Query(..., ge=1, le=12),
+    prac=Depends(get_current_practitioner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Backs the redesigned Practice Analytics page (PracticeAnalytics.jsx).
+
+    New, separate from the /api/analytics/* routes above — those stay as
+    they are, unused by the frontend once the new page ships, rather than
+    being torn out in the same change.
+    """
+    is_admin = prac.role == "owner"
+    result = await analytics_service.get_practice_analytics_summary(
+        db=db,
+        practitioner_id=prac.id,
+        is_admin=is_admin,
+        year=year,
+        month=month,
+    )
+    return PracticeAnalyticsSummaryResponse(**result)
+
+
 @app.get("/api/analytics/export")
 async def export_analytics_report(
     report_type: str = Query(..., description="overview, patients, appointments, revenue, assessments, practitioners"),
@@ -10511,6 +10769,7 @@ from schemas import (
     AppointmentConfigUpdate, AppointmentConfigResponse, HolidayItem,
     EmailConfigUpdate, EmailConfigResponse, TestEmailRequest, TestEmailResponse,
     WhatsAppConfigUpdate, WhatsAppConfigResponse, TestWhatsAppRequest, TestWhatsAppResponse,
+    MessagingPreferencesUpdate, MessagingPreferencesResponse,
     PaymentGatewayConfigUpdate, PaymentGatewayConfigResponse, TestPaymentGatewayResponse,
     BrandingUpdate, BrandingResponse,
     SecuritySettingsUpdate, SecuritySettingsResponse,
@@ -10718,6 +10977,7 @@ async def get_email_config(
         smtp_port=config.smtp_port,
         smtp_username=config.smtp_username,
         smtp_use_tls=config.smtp_use_tls,
+        has_smtp_password=bool(config.smtp_password),
         has_api_key=bool(config.api_key),
         last_test_at=config.last_test_at,
         last_test_status=config.last_test_status,
@@ -10756,6 +11016,7 @@ async def update_email_config(
         smtp_port=config.smtp_port,
         smtp_username=config.smtp_username,
         smtp_use_tls=config.smtp_use_tls,
+        has_smtp_password=bool(config.smtp_password),
         has_api_key=bool(config.api_key),
         last_test_at=config.last_test_at,
         last_test_status=config.last_test_status,
@@ -10842,6 +11103,75 @@ async def test_whatsapp_config(
     """Test WhatsApp configuration by sending a real message via the Meta Cloud API."""
     result = await settings_service.test_whatsapp_config(db, data.recipient_phone)
     return TestWhatsAppResponse(**result)
+
+
+# ─── Messaging Preferences (Admin Only) ────────────────────────────────────────
+# "What patients receive" — event x channel booleans, plus reminder timing.
+# Backs the Settings rebuild's Messaging section channel matrix.
+
+@app.get("/api/settings/messaging", response_model=MessagingPreferencesResponse)
+async def get_messaging_preferences(
+    prac=Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get messaging preferences (admin only)."""
+    prefs = await settings_service.get_messaging_preferences(db)
+    return MessagingPreferencesResponse(
+        id=prefs.id,
+        session_booked_email=prefs.session_booked_email,
+        session_booked_whatsapp=prefs.session_booked_whatsapp,
+        reminder_email=prefs.reminder_email,
+        reminder_whatsapp=prefs.reminder_whatsapp,
+        reminder_offset_minutes=prefs.reminder_offset_minutes,
+        session_rescheduled_email=prefs.session_rescheduled_email,
+        session_rescheduled_whatsapp=prefs.session_rescheduled_whatsapp,
+        session_cancelled_email=prefs.session_cancelled_email,
+        session_cancelled_whatsapp=prefs.session_cancelled_whatsapp,
+        payment_request_email=prefs.payment_request_email,
+        payment_request_whatsapp=prefs.payment_request_whatsapp,
+        payment_received_email=prefs.payment_received_email,
+        payment_received_whatsapp=prefs.payment_received_whatsapp,
+        created_at=prefs.created_at,
+        updated_at=prefs.updated_at,
+    )
+
+
+@app.put("/api/settings/messaging", response_model=MessagingPreferencesResponse)
+async def update_messaging_preferences(
+    data: MessagingPreferencesUpdate,
+    prac=Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update messaging preferences (admin only)."""
+    prefs = await settings_service.update_messaging_preferences(db, data.model_dump(exclude_none=True))
+
+    await settings_service.create_audit_log(
+        db=db,
+        action="settings_update",
+        description="Updated messaging preferences",
+        practitioner=prac,
+        resource_type="messaging_preferences",
+        resource_id=prefs.id,
+    )
+
+    return MessagingPreferencesResponse(
+        id=prefs.id,
+        session_booked_email=prefs.session_booked_email,
+        session_booked_whatsapp=prefs.session_booked_whatsapp,
+        reminder_email=prefs.reminder_email,
+        reminder_whatsapp=prefs.reminder_whatsapp,
+        reminder_offset_minutes=prefs.reminder_offset_minutes,
+        session_rescheduled_email=prefs.session_rescheduled_email,
+        session_rescheduled_whatsapp=prefs.session_rescheduled_whatsapp,
+        session_cancelled_email=prefs.session_cancelled_email,
+        session_cancelled_whatsapp=prefs.session_cancelled_whatsapp,
+        payment_request_email=prefs.payment_request_email,
+        payment_request_whatsapp=prefs.payment_request_whatsapp,
+        payment_received_email=prefs.payment_received_email,
+        payment_received_whatsapp=prefs.payment_received_whatsapp,
+        created_at=prefs.created_at,
+        updated_at=prefs.updated_at,
+    )
 
 
 # ─── Payment Gateway Configuration (Admin Only) ────────────────────────────────

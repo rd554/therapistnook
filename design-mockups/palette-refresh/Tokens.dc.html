@@ -1,0 +1,145 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+* { box-sizing: border-box; }
+body { margin: 0; font-family: 'Manrope', system-ui, sans-serif; background: #FFFFFF; color: #241F35; }
+.sheet { width: 900px; min-height: 1300px; padding: 48px; background: #FFFFFF; }
+.sheet__title { font-size: 24px; font-weight: 700; margin: 0 0 6px; }
+.sheet__subtitle { font-size: 14px; color: #5C5277; margin: 0 0 36px; max-width: 660px; line-height: 1.6; }
+.section-label { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #8B8098; margin: 36px 0 6px; }
+.section-label:first-of-type { margin-top: 0; }
+.section-note { font-size: 12px; color: #8B8098; margin: 0 0 16px; max-width: 640px; line-height: 1.5; }
+.row { display: grid; grid-template-columns: 150px 220px 40px 220px 1fr; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid #EBE7F5; }
+.row__label { font-size: 13px; font-weight: 600; color: #241F35; }
+.swatch-group { display: flex; align-items: center; gap: 10px; }
+.swatch { width: 44px; height: 44px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.06); flex-shrink: 0; }
+.swatch-hex { font-size: 12px; color: #5C5277; font-family: 'SF Mono', Menlo, monospace; }
+.swatch-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #8B8098; }
+.arrow { display: flex; align-items: center; justify-content: center; color: #C3BAD9; }
+.row__note { font-size: 12px; color: #8B8098; line-height: 1.5; }
+.hue-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #EBE7F5; }
+.hue-swatches { display: flex; gap: 12px; }
+.hue-chip { display: flex; align-items: center; gap: 8px; }
+.hue-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.hue-hex { font-size: 11px; color: #8B8098; font-family: 'SF Mono', Menlo, monospace; }
+.wheel-note { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #F1EEFC; border-radius: 12px; margin: 4px 0 20px; }
+.wheel-note__dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+.wheel-note__text { font-size: 12px; color: #5C5277; line-height: 1.5; }
+.ref-note { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; background: #FCFBFE; border: 1px dashed #DCD8EC; border-radius: 12px; margin: 4px 0 20px; }
+.ref-note__text { font-size: 12px; color: #5C5277; line-height: 1.6; }
+  </style>
+</helmet>
+
+<div class="sheet">
+  <h1 class="sheet__title">Color System &mdash; Dusk Lavender (v4)</h1>
+  <p class="sheet__subtitle">After the Behance EHR reference (HealthPlus), the &ldquo;quiet grey card&rdquo; direction from v3 is gone. Cards that were flat neutral grey now carry a genuinely visible lavender tint, and &ldquo;online&rdquo; gave up its separate steel-blue hue to become solid lavender too &mdash; the product now runs on exactly <strong>two</strong> hues: lavender for everything routine, and one deep berry rose reserved for the single alarm state (overdue / pending / absent). Page ground stays pure white; color lives on cards and chips, never the page.</p>
+
+  <div class="ref-note">
+    <div class="ref-note__text"><strong>Reference:</strong> the HealthPlus EHR project on Behance. Its cards separate from a near-all-white page via a genuinely tinted fill or a solid brand-color &ldquo;hero&rdquo; card &mdash; never a grey that reads as absence of color. That's the move borrowed here: replace grey fills with visible lavender, and fold the third status hue (steel blue) into lavender so the whole app reads as one consistent color family.</div>
+  </div>
+
+  <div class="section-label">Surfaces &mdash; unchanged</div>
+  <div class="row">
+    <span class="row__label">Page / panels</span>
+    <div class="swatch-group"><div class="swatch" style="background:#FFFFFF; border:1px solid #EBE7F5;"></div><div><div class="swatch-tag">Stays</div><div class="swatch-hex">#FFFFFF</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#FFFFFF; border:1px solid #EBE7F5;"></div><div><div class="swatch-tag">Same</div><div class="swatch-hex">#FFFFFF</div></div></div>
+    <div class="row__note">No wash. ~90% of every screen stays pure white &mdash; only cards get color now, never the ground beneath them.</div>
+  </div>
+
+  <div class="section-label">Card fill &mdash; grey retired, real lavender in</div>
+  <p class="section-note">The single biggest change in v4. Recent-patient rows, patient-list rows, and &ldquo;received&rdquo; payment cards all used a near-invisible violet-grey (<code>#F5F3FA</code>) that read as plain grey at a glance. They now use a new token, <code>--primary-tint</code>, saturated enough to actually register as lavender while staying light enough for a full-row fill.</p>
+  <div class="row">
+    <span class="row__label">Recent Patients row / Patient row / Received card</span>
+    <div class="swatch-group"><div class="swatch" style="background:#F5F3FA; border:1px solid #EBE7F5;"></div><div><div class="swatch-tag">v3 (read as grey)</div><div class="swatch-hex">#F5F3FA</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#F1EEFC;"></div><div><div class="swatch-tag">v4 &mdash; primary-tint</div><div class="swatch-hex">#F1EEFC</div></div></div>
+    <div class="row__note">&ldquo;Received&rdquo; status text also moved off dark ink onto <code>#6D63D9</code> (primary-hover) so the whole card reads as one lavender unit, not a grey card with black text.</div>
+  </div>
+
+  <div class="section-label">Status &mdash; two hues total, alarm reserved for one</div>
+  <p class="section-note">Steel blue is gone. &ldquo;Online&rdquo; session cards are now solid lavender (a &ldquo;hero&rdquo; treatment, borrowed straight from the reference's bold blue appointment card) with white text; &ldquo;offline&rdquo; cards are white with a hairline lavender border instead of a flat neutral fill. Berry rose remains the one color in the app that means &ldquo;needs attention.&rdquo;</p>
+
+  <div class="row">
+    <span class="row__label">Online (video)</span>
+    <div class="swatch-group"><div class="swatch" style="background:#3D6E99"></div><div><div class="swatch-tag">v3</div><div class="swatch-hex">#3D6E99</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#7C72E8"></div><div><div class="swatch-tag">v4 &mdash; solid lavender</div><div class="swatch-hex">#7C72E8</div></div></div>
+    <div class="row__note">Steel blue retired. The card fills solid with the primary color, white text/icon on top &mdash; the reference's &ldquo;hero&rdquo; card, reused for the one session that's actually live right now.</div>
+  </div>
+
+  <div class="row">
+    <span class="row__label">Offline (in-person)</span>
+    <div class="swatch-group"><div class="swatch" style="background:#463F5C"></div><div><div class="swatch-tag">v3</div><div class="swatch-hex">#463F5C</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#FFFFFF; border:1.5px solid #C6B8F5;"></div><div><div class="swatch-tag">v4 &mdash; white + lavender border</div><div class="swatch-hex">border #C6B8F5</div></div></div>
+    <div class="row__note">No fill at all now &mdash; separates from the white page with a hairline lavender border only, quieter than the solid online card by design (it isn't the one needing action).</div>
+  </div>
+
+  <div class="row">
+    <span class="row__label">Received / active / present</span>
+    <div class="swatch-group"><div class="swatch" style="background:#F5F3FA; border:1px solid #EBE7F5;"></div><div><div class="swatch-tag">v3</div><div class="swatch-hex">#241F35 text</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#F1EEFC;"></div><div><div class="swatch-tag">v4</div><div class="swatch-hex">#6D63D9 text</div></div></div>
+    <div class="row__note">Back to a visibly lavender card (not the plain-grey v3 treatment) &mdash; status text moves from flat ink to primary-hover so the card reads as one consistent lavender unit.</div>
+  </div>
+
+  <div class="row">
+    <span class="row__label">Overdue / pending / absent</span>
+    <div class="swatch-group"><div class="swatch" style="background:#A23B5C"></div><div><div class="swatch-tag">v3</div><div class="swatch-hex">#A23B5C</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#A23B5C"></div><div><div class="swatch-tag">v4 &mdash; unchanged</div><div class="swatch-hex">#A23B5C</div></div></div>
+    <div class="row__note">Untouched. Still the only alarm color in the product &mdash; card fill tint <code>#F5DCE5</code>, absent marker, notif dot, new-intake chip.</div>
+  </div>
+
+  <div class="section-label">Patient identity colors &mdash; unchanged from v3</div>
+  <p class="section-note">A small rotating set for avatars, kept inside the lavender/violet family so it reads as &ldquo;part of this palette&rdquo; rather than a competing status hue.</p>
+
+  <div class="hue-row">
+    <span class="row__label">Avatar set</span>
+    <div class="hue-swatches">
+      <div class="hue-chip"><div class="hue-dot" style="background:#ECE8FC; color:#7C72E8;">PS</div><div><div class="swatch-tag">Lavender (default)</div><div class="hue-hex">#7C72E8</div></div></div>
+      <div class="hue-chip"><div class="hue-dot" style="background:#F0DCEF; color:#75397A;">SK</div><div><div class="swatch-tag">Plum</div><div class="hue-hex">#75397A</div></div></div>
+      <div class="hue-chip"><div class="hue-dot" style="background:#F7E0D2; color:#9A5023;">MI</div><div><div class="swatch-tag">Terracotta</div><div class="hue-hex">#9A5023</div></div></div>
+    </div>
+  </div>
+
+  <div class="section-label">Why this still holds up</div>
+  <div class="wheel-note">
+    <div class="wheel-note__dot" style="background:#A23B5C;"></div>
+    <div class="wheel-note__text">Berry rose is still the only alarm color in the app. Everything else &mdash; online, offline, received, active, and now every row fill &mdash; is some strength of the one lavender hue. A user scanning Payments or Patients has exactly one non-lavender color to notice: the one that needs action.</div>
+  </div>
+
+  <div class="section-label">Neutrals</div>
+  <div class="row">
+    <span class="row__label">Small icon chips only</span>
+    <div class="swatch-group"><div class="swatch" style="background:#F5F3FA; border:1px solid #EBE7F5;"></div><div><div class="swatch-tag">slate-50</div><div class="swatch-hex">#F5F3FA</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#F5F3FA; border:1px solid #EBE7F5;"></div><div><div class="swatch-tag">Kept</div><div class="swatch-hex">#F5F3FA</div></div></div>
+    <div class="row__note">No longer used for any card &mdash; only the tiny 30&times;32px note-card date-picker icon button. Everything &ldquo;card&rdquo;-shaped now uses <code>--primary-tint</code> instead.</div>
+  </div>
+  <div class="row">
+    <span class="row__label">Border</span>
+    <div class="swatch-group"><div class="swatch" style="background:#EBE7F5"></div><div><div class="swatch-tag">Unchanged</div><div class="swatch-hex">#EBE7F5</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#EBE7F5"></div><div><div class="swatch-tag">Same</div><div class="swatch-hex">#EBE7F5</div></div></div>
+    <div class="row__note">Hairlines, dividers, dashed intake-row borders, and the new offline-card border.</div>
+  </div>
+  <div class="row">
+    <span class="row__label">Text</span>
+    <div class="swatch-group"><div class="swatch" style="background:#241F35"></div><div><div class="swatch-tag">Unchanged</div><div class="swatch-hex">#241F35</div></div></div>
+    <div class="arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+    <div class="swatch-group"><div class="swatch" style="background:#241F35"></div><div><div class="swatch-tag">Same</div><div class="swatch-hex">#241F35</div></div></div>
+    <div class="row__note">Primary body text, a violet-black. No longer doubles as a status color anywhere (received text moved to primary-hover).</div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

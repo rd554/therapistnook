@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Therapist Nook — Clinical Intelligence prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&display=swap" rel="stylesheet">
+<style>
+/* =========================================================================
+   SELF-CONTAINED — all tokens inlined, identical to design/tokens.css.
+   Open this file from anywhere; nothing external to resolve except the fonts.
+   ========================================================================= */
+:root{
+  --canvas:#FFFFFF; --paper:#FAF8F4; --surface:#F7F7F9; --surface-hover:#F2F2F5;
+  --text-primary:#15151B; --text-secondary:#4E4E5A; --text-muted:#8A8A96; --text-inverse:#FFFFFF;
+  --border:#E6E6EB; --hairline:#F1F1F4;
+  --accent:#5A4AD1; --accent-hover:#4A3BBA; --accent-tint:#EFEDFB; --accent-border:#D9D4F5;
+  --selected:#E9E6F9; --focus-ring:rgba(90,74,209,.28);
+  --error:#A32E43; --error-tint:#FBEDEF; --warning:#8F6414; --warning-tint:#FBF3E3;
+  --icon:#4E4E5A; --icon-muted:#8A8A96;
+  --font-ui:'Manrope','Inter',-apple-system,'Segoe UI',sans-serif;
+  --font-serif:'Newsreader',Georgia,serif;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s7:28px;--s8:32px;--s9:40px;
+  --r-sm:6px;--r-md:8px;--r-lg:12px;--r-xl:16px;
+  --shadow-xs:0 1px 2px rgba(21,21,27,.04);
+  --shadow-md:0 8px 24px -4px rgba(21,21,27,.10),0 2px 6px rgba(21,21,27,.04);
+  --shadow-panel:0 16px 48px -8px rgba(21,21,27,.16),0 4px 12px rgba(21,21,27,.06);
+}
+*{box-sizing:border-box}
+body{margin:0;padding:40px 24px 80px;background:#E9E9EC;font-family:var(--font-ui);
+     color:var(--text-primary);-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer}
+h1,h2,h3,h4,p{margin:0}
+input,textarea{font-family:inherit}
+
+/* ---- type ---- */
+.t-h1{font-size:28px;line-height:34px;font-weight:700;letter-spacing:-.025em}
+.t-h2{font-size:19px;line-height:26px;font-weight:600;letter-spacing:-.015em}
+.t-h3{font-size:15px;line-height:22px;font-weight:600;letter-spacing:-.01em}
+.t-h4{font-size:13px;line-height:18px;font-weight:600;color:var(--text-secondary)}
+.t-body-s{font-size:13px;line-height:20px;font-weight:500;color:var(--text-secondary)}
+.t-caption{font-size:12px;line-height:16px;font-weight:500;color:var(--text-muted)}
+.t-cell{font-size:14px;line-height:21px;font-weight:500;color:var(--text-secondary)}
+.t-cell-key{font-size:14px;line-height:20px;font-weight:700;color:var(--text-primary)}
+.t-label{font-size:13px;line-height:18px;font-weight:500;color:var(--text-secondary)}
+.t-narrative{font-family:var(--font-serif);font-size:16px;line-height:28px;font-weight:400;
+             color:var(--text-primary);max-width:62ch}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---- ordered-scale words: colour only at the top of the scale ---- */
+.status-plain{font-size:13px;line-height:20px;font-weight:500;color:var(--text-secondary)}
+.status-quiet{font-size:13px;line-height:20px;font-weight:500;color:var(--text-muted)}
+.status-warn{font-size:13px;line-height:20px;font-weight:600;color:var(--warning)}
+.status-alert{font-size:13px;line-height:20px;font-weight:600;color:var(--error)}
+
+/* ---- buttons ---- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);height:36px;
+     padding:0 14px;border-radius:var(--r-md);border:1px solid transparent;font-size:14px;
+     line-height:20px;font-weight:600;letter-spacing:-.01em;transition:background-color 120ms ease}
+.btn-sm{height:32px;padding:0 12px;font-size:13px}
+.btn-primary{background:var(--accent);color:var(--text-inverse)}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-secondary{background:var(--canvas);color:var(--text-primary);border-color:var(--border)}
+.btn-secondary:hover{background:var(--surface)}
+.btn-ghost{background:transparent;color:var(--text-secondary)}
+.btn-ghost:hover{background:var(--surface);color:var(--text-primary)}
+.btn-icon{width:36px;height:36px;padding:0;flex:none}
+.btn-icon.btn-sm{width:32px;height:32px}
+.btn-active{background:var(--selected);color:var(--accent);border-color:transparent}
+.grow{flex:1 1 auto;min-width:0}
+svg.icon{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;
+         flex:none;display:block}
+
+/* ---- surfaces ---- */
+.card{background:var(--canvas);border:1px solid var(--border);border-radius:var(--r-lg);
+      box-shadow:var(--shadow-xs);padding:var(--s5)}
+.card-compact{padding:var(--s4)}
+.card-narrative{background:var(--paper);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--s6)}
+
+/* ---- artboards ---- */
+.artboard-label{margin-bottom:8px}
+.artboard{background:var(--canvas);border-radius:var(--r-xl);overflow:hidden;
+          box-shadow:0 18px 48px -12px rgba(21,21,27,.18);position:relative}
+.artboard-desktop{width:1280px}
+.artboard-mobile{width:390px}
+.proto-page{display:flex;flex-direction:column;gap:56px;align-items:flex-start}
+.qa-toggle{position:fixed;top:12px;right:16px;background:var(--canvas);border:1px solid var(--border);
+           border-radius:var(--r-md);padding:6px 10px;z-index:99;font-size:13px;font-weight:500}
+.qa-grayscale{filter:grayscale(1)}
+
+/* ---- shell ---- */
+.app-shell{display:flex;min-height:980px}
+.sidebar{width:240px;flex:none;border-right:1px solid var(--border);padding:var(--s5) var(--s3);
+         display:flex;flex-direction:column}
+.shell-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.logo-row{display:flex;align-items:center;gap:10px;padding:0 var(--s3) var(--s6)}
+.logo-tile{width:32px;height:32px;border-radius:var(--r-md);background:var(--accent);color:#fff;
+           display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+.nav-item{display:flex;align-items:center;gap:var(--s3);height:40px;padding:0 var(--s3);margin-bottom:2px;
+          border-radius:var(--r-md);font-size:14px;font-weight:600;color:var(--text-secondary);text-decoration:none}
+.nav-item svg{color:var(--icon-muted)}
+.nav-item.is-active{background:var(--selected);color:var(--accent);font-weight:700}
+.nav-item.is-active svg{color:var(--accent)}
+.sidebar-footer{margin-top:auto;padding:var(--s4) var(--s3) 0;border-top:1px solid var(--hairline);
+                display:flex;align-items:center;gap:10px}
+.sidebar-footer-text{display:flex;flex-direction:column}
+.app-header{height:64px;flex:none;border-bottom:1px solid var(--border);padding:0 var(--s8);
+            display:flex;align-items:center;justify-content:space-between}
+.header-left{display:flex;align-items:center;gap:8px}
+.header-right{display:flex;align-items:center;gap:var(--s3)}
+.bell-wrap{position:relative;display:inline-flex;color:var(--icon-muted)}
+.notif-dot{position:absolute;top:0;right:0;width:6px;height:6px;border-radius:50%;background:var(--error)}
+.avatar{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;
+        border-radius:999px;background:var(--surface);color:var(--text-secondary);font-size:11px;font-weight:700;flex:none}
+.page{padding:var(--s8);max-width:920px}
+.m-topbar{height:56px;padding:0 var(--s4);border-bottom:1px solid var(--border);
+          display:flex;align-items:center;justify-content:space-between}
+.m-page{padding:var(--s5) var(--s5) 32px}
+.topbar-actions{display:flex;align-items:center;gap:var(--s2)}
+.action-row{display:flex;align-items:center;gap:var(--s2)}
+
+/* =========================================================================
+   .ci-*  Clinical Intelligence
+   ========================================================================= */
+.ci-patient-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s4);margin-bottom:var(--s8)}
+.ci-patient-id{display:flex;align-items:center;gap:var(--s4)}
+.ci-patient-name{display:flex;flex-direction:column;gap:2px}
+.ci-toolbar{display:flex;align-items:center;justify-content:space-between;gap:var(--s4);margin-bottom:var(--s5)}
+.ci-toolbar-actions{display:flex;align-items:center;gap:var(--s2)}
+.ci-card-head{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s4)}
+.ci-count{margin-left:auto}
+.icon-badge{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;
+            border-radius:var(--r-md);background:var(--surface);color:var(--icon);flex:none}
+.ci-sub{display:flex;align-items:baseline;justify-content:space-between;margin:var(--s5) 0 var(--s1)}
+.ci-line{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s6);padding:12px 0;
+         border-bottom:1px solid var(--hairline)}
+.ci-line:last-of-type{border-bottom:none}
+.ci-line-meta{flex:none;text-align:right}
+.ci-row{display:flex;gap:var(--s3);padding:14px 0;border-bottom:1px solid var(--hairline)}
+.ci-row:last-of-type{border-bottom:none}
+.ci-row-caret{color:var(--icon-muted);margin-top:3px}
+.ci-row-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.ci-row-text{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ci-row-meta{flex:none;text-align:right}
+.ci-disclose{display:flex;align-items:center;gap:6px;margin-top:var(--s4);padding:var(--s4) 0 0;
+             border:0;border-top:1px solid var(--hairline);background:none;width:100%;
+             color:var(--text-muted);font-size:12px;font-weight:500}
+.ci-disclose:hover{color:var(--text-secondary)}
+.ci-more{border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--canvas)}
+.ci-more-head{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s5);
+              background:var(--surface);border-bottom:1px solid var(--border)}
+.ci-more-body{padding:var(--s5)}
+.ci-entry{border:1px solid var(--border);border-radius:var(--r-md);padding:var(--s4)}
+.ci-entry-head{display:flex;align-items:center;gap:var(--s3);margin-bottom:6px}
+.ci-timeline{position:relative;padding-left:var(--s6)}
+.ci-timeline:before{content:'';position:absolute;left:5px;top:8px;bottom:8px;width:1px;background:var(--border)}
+.ci-timeline-dot{position:absolute;left:0;top:18px;width:11px;height:11px;border-radius:50%;
+                 background:var(--canvas);border:2px solid var(--accent)}
+.stack-lg>*+*{margin-top:var(--s5)}
+
+/* =========================================================================
+   .nook-*  Ask Nook panel
+   Chrome is neutral. The only accent in the panel is the send button.
+   ========================================================================= */
+.nook-panel{position:absolute;right:var(--s6);bottom:var(--s6);width:392px;height:588px;
+            background:var(--canvas);border:1px solid var(--border);border-radius:var(--r-xl);
+            box-shadow:var(--shadow-panel);display:flex;flex-direction:column;overflow:hidden}
+.nook-head{display:flex;align-items:center;gap:var(--s3);height:52px;padding:0 var(--s3) 0 var(--s5);
+           background:var(--text-primary);flex:none}
+.nook-head .t-h3{color:var(--text-inverse)}
+.nook-head .t-caption{color:rgba(255,255,255,.62)}
+.nook-head .nook-mark{background:rgba(255,255,255,.14);color:var(--text-inverse)}
+.nook-head .btn-ghost{color:rgba(255,255,255,.72)}
+.nook-head .btn-ghost:hover{background:rgba(255,255,255,.12);color:#fff}
+.nook-mark{width:26px;height:26px;border-radius:var(--r-sm);background:var(--accent-tint);
+           color:var(--accent);display:flex;align-items:center;justify-content:center;flex:none}
+.nook-note{padding:10px var(--s5);background:var(--surface);border-bottom:1px solid var(--hairline);
+           font-size:12px;line-height:17px;font-weight:500;color:var(--text-muted);flex:none}
+.nook-body{flex:1;overflow-y:auto;padding:var(--s5);display:flex;flex-direction:column;gap:var(--s4)}
+.nook-turn{display:flex;gap:10px}
+.nook-turn-user{justify-content:flex-end}
+.nook-bubble{background:var(--surface);border-radius:var(--r-lg);padding:10px var(--s4);
+             max-width:84%;font-size:14px;line-height:21px;font-weight:500;color:var(--text-primary)}
+.nook-answer{flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--r-lg);
+             padding:var(--s4);background:var(--canvas)}
+.nook-answer p{font-size:14px;line-height:22px;font-weight:500;color:var(--text-secondary)}
+.nook-avatar{width:24px;height:24px;border-radius:var(--r-sm);background:var(--accent-tint);
+             color:var(--accent);display:flex;align-items:center;justify-content:center;flex:none;margin-top:2px}
+.nook-sources{display:flex;align-items:center;gap:6px;margin-top:var(--s3);padding-top:var(--s3);
+              border-top:1px solid var(--hairline);border-left:0;border-right:0;border-bottom:0;
+              background:none;width:100%;color:var(--text-muted);font-size:12px;font-weight:500}
+.nook-composer{flex:none;border-top:1px solid var(--hairline);padding:var(--s3) var(--s4);
+               display:flex;align-items:flex-end;gap:var(--s2)}
+.nook-input{flex:1;min-height:40px;max-height:96px;padding:10px 12px;border:1px solid var(--border);
+            border-radius:var(--r-md);font-size:14px;line-height:20px;font-weight:500;
+            color:var(--text-primary);resize:none;background:var(--canvas)}
+.nook-input::placeholder{color:var(--text-muted)}
+.nook-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--focus-ring)}
+.nook-suggest{display:flex;flex-wrap:wrap;gap:var(--s2)}
+.nook-suggest button{height:30px;padding:0 10px;border-radius:var(--r-md);border:1px solid var(--border);
+                     background:var(--canvas);color:var(--text-secondary);font-size:12px;font-weight:600}
+.nook-suggest button:hover{background:var(--surface);color:var(--text-primary)}
+
+/* mobile sheet */
+.nook-sheet{position:absolute;inset:0;background:var(--canvas);display:flex;flex-direction:column}
+.nook-scrim{position:absolute;inset:0;background:rgba(21,21,27,.32)}
+
+/* --- header variants under consideration --- */
+.nook-head-white{background:var(--canvas);border-bottom:1px solid var(--hairline)}
+.nook-head-white .t-h3{color:var(--text-primary)}
+.nook-head-white .t-caption{color:var(--text-muted)}
+.nook-head-white .nook-mark{background:var(--accent-tint);color:var(--accent)}
+.nook-head-white .btn-ghost{color:var(--text-secondary)}
+
+.nook-panel-static{position:static;width:392px;height:560px;flex:none}
+.nook-panel-surface{background:var(--surface)}
+.nook-panel-surface .nook-note{background:transparent}
+.nook-panel-surface .nook-answer{background:var(--canvas)}
+.nook-panel-surface .nook-bubble{background:var(--canvas);border:1px solid var(--border)}
+.nook-panel-surface .nook-composer{background:var(--canvas)}
+.nook-compare{display:flex;gap:24px;align-items:flex-start}
+.nook-caption{width:392px;margin-top:12px}
+
+/* reference block */
+.ref{background:var(--canvas);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--s6);width:620px}
+.ref-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;
+         border-bottom:1px solid var(--hairline)}
+.ref-row:last-child{border-bottom:none}
+</style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5L12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M9.5 20v-6.5h5V20"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20v-1c0-3 3-5 6.5-5s6.5 2 6.5 5v1"/><path d="M16.3 8.3a2.4 2.4 0 1 1 0 4.8"/><path d="M18 14.3c2.2.5 3.5 2.1 3.5 4.2V20"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 3v4M16 3v4M3.5 10h17"/></symbol>
+<symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2"/><path d="M9 4.5V3.8a1.3 1.3 0 0 1 1.3-1.3h3.4A1.3 1.3 0 0 1 15 3.8v.7"/><path d="M9 10.5h6M9 14h6"/></symbol>
+<symbol id="i-card" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="13" rx="2"/><path d="M2.5 10.2h19"/><path d="M6 14.5h4"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M4.5 20V10.5M12 20V4.5M19.5 20v-7"/><path d="M2.5 20h19"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.3 13.2a7.7 7.7 0 0 0 0-2.4l1.9-1.4-1.9-3.3-2.3.9a7.6 7.6 0 0 0-2-1.2L14.6 3.5h-4L10.2 5.8a7.6 7.6 0 0 0-2 1.2l-2.3-.9-1.9 3.3 1.9 1.4a7.7 7.7 0 0 0 0 2.4l-1.9 1.4 1.9 3.3 2.3-.9a7.6 7.6 0 0 0 2 1.2l.4 2.3h4l.4-2.3a7.6 7.6 0 0 0 2-1.2l2.3.9 1.9-3.3-1.9-1.4Z"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 8.5a5.5 5.5 0 0 1 11 0c0 4 1.4 5.3 2 6H4.5c.6-.7 2-2 2-6Z"/><path d="M10.2 19.5a1.9 1.9 0 0 0 3.6 0"/></symbol>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17"/></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+<symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3.2 2.5"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5V9h4.5"/><path d="M12 8v4.3l3 1.8"/></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9Z"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-13.7-5.3L3.5 8.5"/><path d="M4 13a8 8 0 0 0 13.7 5.3l2.8-2.8"/><path d="M3.5 4.5v4h4M20.5 19.5v-4h-4"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M4.5 20v-.8c0-3.2 3.4-5.2 7.5-5.2s7.5 2 7.5 5.2v.8"/></symbol>
+<symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6Z"/><path d="M14 3.5v4h4"/><path d="M9 12h6M9 15.5h6"/></symbol>
+<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></symbol>
+<symbol id="i-question" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.7.3-1 .9-1 1.6v.4"/><path d="M12 17.2h.01"/></symbol>
+<symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12.5h3.5l2-5 3 10 2.5-5h7"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-7.5-6 16-2.5-6.5L4 12Z"/></symbol>
+</svg>
+
+<div class="qa-toggle"><label><input type="checkbox" id="qa"> Grayscale</label></div>
+<script>document.getElementById('qa').addEventListener('change',function(e){document.body.classList.toggle('qa-grayscale',e.target.checked)})</script>
+
+<div class="proto-page">
+
+<!-- ==================== DESKTOP, Nook open ==================== -->
+<div>
+<div class="artboard-label t-caption">Clinical intelligence — desktop, Ask Nook open</div>
+<div class="artboard artboard-desktop">
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="logo-row"><div class="logo-tile">TN</div><span class="t-h3">Therapist Nook</span></div>
+    <nav>
+      <a class="nav-item"><svg class="icon" width="18" height="18"><use href="#i-home"/></svg>Dashboard</a>
+      <a class="nav-item is-active"><svg class="icon" width="18" height="18"><use href="#i-users"/></svg>Patients</a>
+      <a class="nav-item"><svg class="icon" width="18" height="18"><use href="#i-calendar"/></svg>Calendar</a>
+      <a class="nav-item"><svg class="icon" width="18" height="18"><use href="#i-clipboard"/></svg>Assessments</a>
+      <a class="nav-item"><svg class="icon" width="18" height="18"><use href="#i-card"/></svg>Billing</a>
+      <a class="nav-item"><svg class="icon" width="18" height="18"><use href="#i-chart"/></svg>Analytics</a>
+      <a class="nav-item"><svg class="icon" width="18" height="18"><use href="#i-settings"/></svg>Settings</a>
+    </nav>
+    <div class="sidebar-footer">
+      <span class="avatar">DN</span>
+      <div class="sidebar-footer-text">
+        <span class="t-label" style="color:var(--text-primary)">Dr. Neha Kapoor</span>
+        <span class="t-caption">Practice Owner</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="shell-main">
+    <header class="app-header">
+      <div class="header-left t-body-s"><svg class="icon" width="16" height="16"><use href="#i-clock"/></svg>Sunday, Sep 13 · 7:36 AM</div>
+      <div class="header-right">
+        <button class="btn btn-primary">Schedule session</button>
+        <button class="btn btn-secondary btn-icon" aria-label="Add patient" title="Add patient"><svg class="icon" width="18" height="18"><use href="#i-plus"/></svg></button>
+        <span class="bell-wrap"><svg class="icon" width="20" height="20"><use href="#i-bell"/></svg><span class="notif-dot"></span></span>
+        <span class="avatar">DN</span>
+      </div>
+    </header>
+
+    <div class="page">
+      <div class="ci-patient-head">
+        <div class="ci-patient-id">
+          <button class="btn btn-secondary btn-icon" aria-label="Back to patients"><svg class="icon" width="18" height="18"><use href="#i-arrow-left"/></svg></button>
+          <div class="ci-patient-name">
+            <h1 class="t-h1">Elena Vasquez</h1>
+            <span class="t-body-s">25 yrs · Female</span>
+          </div>
+        </div>
+        <button class="btn btn-secondary">Clinical intelligence <svg class="icon" width="16" height="16"><use href="#i-chevron-down"/></svg></button>
+      </div>
+
+      <div class="ci-toolbar">
+        <h2 class="t-h2">Clinical intelligence</h2>
+        <div class="ci-toolbar-actions">
+          <button class="btn btn-ghost btn-icon btn-sm" aria-label="Version history" title="Version history"><svg class="icon" width="16" height="16"><use href="#i-history"/></svg></button>
+          <button class="btn btn-secondary btn-sm">Reprocess sources</button>
+          <!-- Ask Nook shows its open/active state; the panel now owns the accent -->
+          <button class="btn btn-active btn-sm"><svg class="icon" width="16" height="16"><use href="#i-sparkle"/></svg> Ask Nook</button>
+        </div>
+      </div>
+
+      <div class="stack-lg">
+        <div class="card-narrative">
+          <div class="ci-card-head">
+            <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-user"/></svg></span>
+            <span class="t-h3">Patient summary</span>
+          </div>
+          <p class="t-narrative">The patient presents with heightened social anxiety, perfectionism, and feelings of isolation that have worsened since beginning university. She has a history of mild social anxiety identified during high school and reports no significant medical conditions. These symptoms are adversely affecting her social interactions and overall well-being.</p>
+          <div class="t-caption" style="margin-top:var(--s5)">2 current diagnoses · 10 active goals · 1 open question</div>
+          <button class="ci-disclose"><svg class="icon" width="14" height="14"><use href="#i-chevron-right"/></svg> Sources (1)</button>
+        </div>
+
+        <div class="card">
+          <div class="ci-card-head">
+            <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-doc"/></svg></span>
+            <span class="t-h3">Clinical picture</span>
+          </div>
+          <div class="ci-sub"><span class="t-h4">Diagnoses</span><span class="t-caption ci-count">3 total</span></div>
+          <div class="ci-line"><span class="t-cell">Mild social anxiety noted in high school</span><span class="ci-line-meta status-quiet">History</span></div>
+          <div class="ci-line"><span class="t-cell">Medical: none significant</span><span class="ci-line-meta status-plain">Current</span></div>
+          <div class="ci-line"><span class="t-cell">Neurological: none</span><span class="ci-line-meta status-plain">Current</span></div>
+          <div class="ci-sub"><span class="t-h4">Symptoms</span><span class="t-caption ci-count">2 total</span></div>
+          <div class="ci-line"><span class="t-cell">Social anxiety, perfectionism and isolation since starting university</span><span class="ci-line-meta status-plain">Moderate</span></div>
+          <div class="ci-line"><span class="t-cell">Session-reported symptoms</span><span class="ci-line-meta status-plain">Moderate</span></div>
+          <button class="ci-disclose"><svg class="icon" width="14" height="14"><use href="#i-chevron-right"/></svg> Sources (2) · all high confidence</button>
+        </div>
+
+        <div class="card">
+          <div class="ci-card-head">
+            <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-target"/></svg></span>
+            <span class="t-h3">Treatment goals</span><span class="t-caption ci-count">10 total</span>
+          </div>
+          <div class="ci-row">
+            <svg class="icon ci-row-caret" width="16" height="16"><use href="#i-chevron-right"/></svg>
+            <div class="ci-row-body">
+              <span class="t-cell ci-row-text">Continue to explore coping strategies for managing anxiety in group settings. Schedule follow-up sessions to assess progress and introduce cognitive-behavioural techniques.</span>
+              <span class="t-caption tnum">Aug 20</span>
+            </div>
+          </div>
+          <div class="ci-row">
+            <svg class="icon ci-row-caret" width="16" height="16"><use href="#i-chevron-right"/></svg>
+            <div class="ci-row-body">
+              <span class="t-cell ci-row-text">Continue to work on mapping avoidance patterns, with an emphasis on ranking situations from least to most anxiety-provoking. Future sessions will explore the thoughts and feelings contributing to each.</span>
+              <span class="t-caption tnum">Aug 20</span>
+            </div>
+          </div>
+          <div class="ci-row">
+            <svg class="icon ci-row-caret" width="16" height="16"><use href="#i-chevron-right"/></svg>
+            <div class="ci-row-body">
+              <span class="t-cell ci-row-text">Continue to explore the origins of Elena's perfectionistic standards in future sessions. Introduce coping strategies including cognitive restructuring techniques.</span>
+              <span class="t-caption tnum">Aug 20</span>
+            </div>
+          </div>
+          <button class="ci-disclose" style="justify-content:center">Show 7 more goals <svg class="icon" width="14" height="14"><use href="#i-chevron-down"/></svg></button>
+        </div>
+
+        <div class="card">
+          <div class="ci-card-head">
+            <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-question"/></svg></span>
+            <span class="t-h3">Outstanding questions</span><span class="t-caption ci-count">1 total</span>
+          </div>
+          <div class="ci-row">
+            <svg class="icon ci-row-caret" width="16" height="16"><use href="#i-chevron-right"/></svg>
+            <div class="ci-row-body">
+              <span class="t-cell">What specific experiences contribute to Elena's fear of judgement?</span>
+              <span class="t-caption tnum">Aug 20</span>
+            </div>
+            <span class="ci-row-meta status-quiet">Medium priority</span>
+          </div>
+        </div>
+
+        <div class="ci-more">
+          <div class="ci-more-head">
+            <svg class="icon" width="16" height="16" style="color:var(--icon-muted)"><use href="#i-chevron-down"/></svg>
+            <span class="t-h3">More detail</span><span class="t-body-s">Life events · Timeline</span>
+            <span class="t-caption ci-count">2 sections</span>
+          </div>
+          <div class="ci-more-body">
+            <div class="ci-sub" style="margin-top:0"><span class="t-h4">Life events</span></div>
+            <div class="ci-entry">
+              <div class="ci-entry-head">
+                <svg class="icon" width="16" height="16" style="color:var(--icon-muted)"><use href="#i-calendar"/></svg>
+                <span class="t-cell-key">Occupation</span><span class="t-caption">Job change</span>
+              </div>
+              <div class="t-cell">Current occupation: student</div>
+            </div>
+            <div class="ci-sub"><span class="t-h4">Timeline</span></div>
+            <div class="ci-timeline">
+              <span class="ci-timeline-dot"></span>
+              <div class="ci-entry">
+                <div class="ci-entry-head">
+                  <svg class="icon" width="16" height="16" style="color:var(--icon-muted)"><use href="#i-pulse"/></svg>
+                  <span class="t-cell-key">Therapy session</span>
+                </div>
+                <div class="t-cell">Elena experiences significant anxiety in group settings, leading to avoidance behaviours such as skipping seminars and eating lunch alone.</div>
+                <div class="t-caption tnum" style="margin-top:6px">11 June 2026</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="t-caption" style="text-align:center;padding:var(--s6) 0 var(--s8)">Updated 20 Aug 2026 · Source: clinical history</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+  <!-- ---------- Ask Nook panel ---------- -->
+  <div class="nook-panel">
+    <div class="nook-head">
+      <span class="nook-mark"><svg class="icon" width="15" height="15"><use href="#i-sparkle"/></svg></span>
+      <span class="t-h3">Nook</span>
+      <span class="t-caption" style="margin-left:auto">Elena Vasquez</span>
+      <button class="btn btn-ghost btn-icon btn-sm" aria-label="Close"><svg class="icon" width="16" height="16"><use href="#i-close"/></svg></button>
+    </div>
+
+    <div class="nook-note">Answers draw only from this patient's approved record. Updates still awaiting review aren't included.</div>
+
+    <div class="nook-body">
+      <div class="nook-turn">
+        <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+        <div class="nook-answer">
+          <p>Elena has been working through an exposure ladder, focusing on group presentations and larger social events, with plans to explore additional strategies to reduce anxiety in these settings in future sessions.</p>
+          <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (2)</button>
+        </div>
+      </div>
+
+      <div class="nook-turn nook-turn-user">
+        <div class="nook-bubble">Does the client have any drug abuse history?</div>
+      </div>
+
+      <div class="nook-turn">
+        <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+        <div class="nook-answer">
+          <p>No. There are no significant medical conditions reported, and no indication of substance use in Elena's clinical record.</p>
+          <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (1)</button>
+        </div>
+      </div>
+
+      <div class="nook-suggest">
+        <button>What changed since last session?</button>
+        <button>Summarise avoidance patterns</button>
+      </div>
+    </div>
+
+    <div class="nook-composer">
+      <textarea class="nook-input" rows="1" placeholder="Ask about Elena's record…"></textarea>
+      <button class="btn btn-primary btn-icon" aria-label="Send"><svg class="icon" width="18" height="18"><use href="#i-send"/></svg></button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ==================== MOBILE — record ==================== -->
+<div style="display:flex;gap:32px;align-items:flex-start">
+
+<div>
+<div class="artboard-label t-caption">Clinical intelligence — mobile</div>
+<div class="artboard artboard-mobile">
+  <div class="m-topbar">
+    <button class="btn btn-ghost btn-icon" aria-label="Menu"><svg class="icon" width="20" height="20"><use href="#i-menu"/></svg></button>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-icon" aria-label="Schedule session"><svg class="icon" width="20" height="20"><use href="#i-calendar"/></svg></button>
+      <span class="bell-wrap"><svg class="icon" width="20" height="20"><use href="#i-bell"/></svg><span class="notif-dot"></span></span>
+      <span class="avatar">DN</span>
+    </div>
+  </div>
+  <div class="m-page">
+    <div class="ci-patient-id" style="margin-bottom:var(--s4)">
+      <button class="btn btn-secondary btn-icon" aria-label="Back to patients"><svg class="icon" width="18" height="18"><use href="#i-arrow-left"/></svg></button>
+      <div class="ci-patient-name">
+        <h1 class="t-h1" style="font-size:24px;line-height:30px">Elena Vasquez</h1>
+        <span class="t-body-s">25 yrs · Female</span>
+      </div>
+    </div>
+    <button class="btn btn-secondary" style="width:100%;justify-content:space-between;margin-bottom:var(--s4)">
+      Clinical intelligence <svg class="icon" width="16" height="16"><use href="#i-chevron-down"/></svg>
+    </button>
+    <div class="action-row" style="margin-bottom:var(--s5)">
+      <button class="btn btn-primary grow"><svg class="icon" width="16" height="16"><use href="#i-sparkle"/></svg> Ask Nook</button>
+      <button class="btn btn-secondary btn-icon" aria-label="Reprocess sources"><svg class="icon" width="18" height="18"><use href="#i-refresh"/></svg></button>
+      <button class="btn btn-secondary btn-icon" aria-label="Version history"><svg class="icon" width="18" height="18"><use href="#i-history"/></svg></button>
+    </div>
+    <div class="stack-lg">
+      <div class="card-narrative" style="padding:var(--s5)">
+        <div class="ci-card-head">
+          <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-user"/></svg></span>
+          <span class="t-h3">Patient summary</span>
+        </div>
+        <p class="t-narrative" style="line-height:27px">The patient presents with heightened social anxiety, perfectionism, and feelings of isolation that have worsened since beginning university. She has a history of mild social anxiety identified during high school and reports no significant medical conditions.</p>
+        <div class="t-caption" style="margin-top:var(--s4)">2 current diagnoses · 10 active goals · 1 open question</div>
+        <button class="ci-disclose"><svg class="icon" width="14" height="14"><use href="#i-chevron-right"/></svg> Sources (1)</button>
+      </div>
+      <div class="card card-compact">
+        <div class="ci-card-head">
+          <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-doc"/></svg></span>
+          <span class="t-h3">Clinical picture</span>
+        </div>
+        <div class="ci-sub" style="margin-top:0"><span class="t-h4">Diagnoses</span><span class="t-caption ci-count">3 total</span></div>
+        <div class="ci-line"><span class="t-cell">Mild social anxiety noted in high school</span><span class="ci-line-meta status-quiet">History</span></div>
+        <div class="ci-line"><span class="t-cell">Medical: none significant</span><span class="ci-line-meta status-plain">Current</span></div>
+        <div class="ci-line"><span class="t-cell">Neurological: none</span><span class="ci-line-meta status-plain">Current</span></div>
+        <div class="ci-sub"><span class="t-h4">Symptoms</span><span class="t-caption ci-count">2 total</span></div>
+        <div class="ci-line"><span class="t-cell">Social anxiety, perfectionism and isolation since starting university</span><span class="ci-line-meta status-plain">Moderate</span></div>
+        <div class="ci-line"><span class="t-cell">Session-reported symptoms</span><span class="ci-line-meta status-plain">Moderate</span></div>
+        <button class="ci-disclose"><svg class="icon" width="14" height="14"><use href="#i-chevron-right"/></svg> Sources (2)</button>
+      </div>
+      <div class="card card-compact">
+        <div class="ci-card-head">
+          <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-target"/></svg></span>
+          <span class="t-h3">Treatment goals</span><span class="t-caption ci-count">10 total</span>
+        </div>
+        <div class="ci-row">
+          <svg class="icon ci-row-caret" width="16" height="16"><use href="#i-chevron-right"/></svg>
+          <div class="ci-row-body">
+            <span class="t-cell ci-row-text">Continue to explore coping strategies for managing anxiety in group settings.</span>
+            <span class="t-caption tnum">Aug 20</span>
+          </div>
+        </div>
+        <div class="ci-row">
+          <svg class="icon ci-row-caret" width="16" height="16"><use href="#i-chevron-right"/></svg>
+          <div class="ci-row-body">
+            <span class="t-cell ci-row-text">Continue to work on mapping avoidance patterns, ranking situations from least to most anxiety-provoking.</span>
+            <span class="t-caption tnum">Aug 20</span>
+          </div>
+        </div>
+        <button class="ci-disclose" style="justify-content:center">Show 8 more goals <svg class="icon" width="14" height="14"><use href="#i-chevron-down"/></svg></button>
+      </div>
+      <div class="card card-compact">
+        <div class="ci-card-head">
+          <span class="icon-badge"><svg class="icon" width="16" height="16"><use href="#i-question"/></svg></span>
+          <span class="t-h3">Outstanding questions</span><span class="t-caption ci-count">1 total</span>
+        </div>
+        <div class="ci-row">
+          <svg class="icon ci-row-caret" width="16" height="16"><use href="#i-chevron-right"/></svg>
+          <div class="ci-row-body">
+            <span class="t-cell">What specific experiences contribute to Elena's fear of judgement?</span>
+            <span class="t-caption tnum">Aug 20 · Medium priority</span>
+          </div>
+        </div>
+      </div>
+      <div class="t-caption" style="text-align:center;padding:var(--s5) 0 var(--s6)">Updated 20 Aug 2026 · Source: clinical history</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ==================== MOBILE — Nook sheet ==================== -->
+<div>
+<div class="artboard-label t-caption">Ask Nook — mobile sheet</div>
+<div class="artboard artboard-mobile" style="height:760px">
+  <div class="nook-scrim"></div>
+  <div class="nook-sheet">
+    <div class="nook-head">
+      <span class="nook-mark"><svg class="icon" width="15" height="15"><use href="#i-sparkle"/></svg></span>
+      <span class="t-h3">Nook</span>
+      <span class="t-caption" style="margin-left:auto">Elena Vasquez</span>
+      <button class="btn btn-ghost btn-icon btn-sm" aria-label="Close"><svg class="icon" width="16" height="16"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="nook-note">Answers draw only from this patient's approved record. Updates still awaiting review aren't included.</div>
+    <div class="nook-body">
+      <div class="nook-turn">
+        <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+        <div class="nook-answer">
+          <p>Elena has been working through an exposure ladder, focusing on group presentations and larger social events, with plans to explore additional strategies in future sessions.</p>
+          <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (2)</button>
+        </div>
+      </div>
+      <div class="nook-turn nook-turn-user">
+        <div class="nook-bubble">Does the client have any drug abuse history?</div>
+      </div>
+      <div class="nook-turn">
+        <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+        <div class="nook-answer">
+          <p>No. There are no significant medical conditions reported, and no indication of substance use in Elena's clinical record.</p>
+          <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (1)</button>
+        </div>
+      </div>
+      <div class="nook-suggest">
+        <button>What changed since last session?</button>
+        <button>Summarise avoidance patterns</button>
+      </div>
+    </div>
+    <div class="nook-composer">
+      <textarea class="nook-input" rows="1" placeholder="Ask about Elena's record…"></textarea>
+      <button class="btn btn-primary btn-icon" aria-label="Send"><svg class="icon" width="18" height="18"><use href="#i-send"/></svg></button>
+    </div>
+  </div>
+</div>
+</div>
+
+</div>
+
+
+<!-- ==================== HEADER VARIANTS ==================== -->
+<div>
+<div class="artboard-label t-caption">Ask Nook — header treatment (B selected)</div>
+<div class="nook-compare">
+  <div>
+    <div class="nook-panel nook-panel-static ">
+      <div class="nook-head nook-head-white">
+        <span class="nook-mark"><svg class="icon" width="15" height="15"><use href="#i-sparkle"/></svg></span>
+        <span class="t-h3">Nook</span>
+        <span class="t-caption" style="margin-left:auto">Elena Vasquez</span>
+        <button class="btn btn-ghost btn-icon btn-sm" aria-label="Close"><svg class="icon" width="16" height="16"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="nook-note">Answers draw only from this patient's approved record.</div>
+      <div class="nook-body">
+        <div class="nook-turn">
+          <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+          <div class="nook-answer">
+            <p>Elena has been working through an exposure ladder, focusing on group presentations and larger social events.</p>
+            <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (2)</button>
+          </div>
+        </div>
+        <div class="nook-turn nook-turn-user">
+          <div class="nook-bubble">Does the client have any drug abuse history?</div>
+        </div>
+        <div class="nook-turn">
+          <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+          <div class="nook-answer">
+            <p>No. There are no significant medical conditions reported, and no indication of substance use in Elena's record.</p>
+            <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (1)</button>
+          </div>
+        </div>
+      </div>
+      <div class="nook-composer">
+        <textarea class="nook-input" rows="1" placeholder="Ask about Elena's record…"></textarea>
+        <button class="btn btn-primary btn-icon" aria-label="Send"><svg class="icon" width="18" height="18"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+    <div class="nook-caption">
+      <div class="t-h4" style="margin-bottom:4px">A · White header — not selected</div>
+      <div class="t-caption" style="line-height:18px">Panel reads as a quiet extension of the record. Separation comes from the border and shadow alone. Lightest of the three; least distinct as an overlay.</div>
+    </div>
+  </div>
+  <div>
+    <div class="nook-panel nook-panel-static ">
+      <div class="nook-head">
+        <span class="nook-mark"><svg class="icon" width="15" height="15"><use href="#i-sparkle"/></svg></span>
+        <span class="t-h3">Nook</span>
+        <span class="t-caption" style="margin-left:auto">Elena Vasquez</span>
+        <button class="btn btn-ghost btn-icon btn-sm" aria-label="Close"><svg class="icon" width="16" height="16"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="nook-note">Answers draw only from this patient's approved record.</div>
+      <div class="nook-body">
+        <div class="nook-turn">
+          <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+          <div class="nook-answer">
+            <p>Elena has been working through an exposure ladder, focusing on group presentations and larger social events.</p>
+            <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (2)</button>
+          </div>
+        </div>
+        <div class="nook-turn nook-turn-user">
+          <div class="nook-bubble">Does the client have any drug abuse history?</div>
+        </div>
+        <div class="nook-turn">
+          <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+          <div class="nook-answer">
+            <p>No. There are no significant medical conditions reported, and no indication of substance use in Elena's record.</p>
+            <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (1)</button>
+          </div>
+        </div>
+      </div>
+      <div class="nook-composer">
+        <textarea class="nook-input" rows="1" placeholder="Ask about Elena's record…"></textarea>
+        <button class="btn btn-primary btn-icon" aria-label="Send"><svg class="icon" width="18" height="18"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+    <div class="nook-caption">
+      <div class="t-h4" style="margin-bottom:4px">B · Graphite header — SELECTED</div>
+      <div class="t-caption" style="line-height:18px">Distinct identity, no new colour, accent budget untouched. Cost: graphite currently means \u201cthe option you chose\u201d in the segmented control, so reusing it as chrome softens that meaning. Also the heaviest object on a screen whose record is deliberately quiet.</div>
+    </div>
+  </div>
+  <div>
+    <div class="nook-panel nook-panel-static nook-panel-surface">
+      <div class="nook-head ">
+        <span class="nook-mark"><svg class="icon" width="15" height="15"><use href="#i-sparkle"/></svg></span>
+        <span class="t-h3">Nook</span>
+        <span class="t-caption" style="margin-left:auto">Elena Vasquez</span>
+        <button class="btn btn-ghost btn-icon btn-sm" aria-label="Close"><svg class="icon" width="16" height="16"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="nook-note">Answers draw only from this patient's approved record.</div>
+      <div class="nook-body">
+        <div class="nook-turn">
+          <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+          <div class="nook-answer">
+            <p>Elena has been working through an exposure ladder, focusing on group presentations and larger social events.</p>
+            <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (2)</button>
+          </div>
+        </div>
+        <div class="nook-turn nook-turn-user">
+          <div class="nook-bubble">Does the client have any drug abuse history?</div>
+        </div>
+        <div class="nook-turn">
+          <span class="nook-avatar"><svg class="icon" width="13" height="13"><use href="#i-sparkle"/></svg></span>
+          <div class="nook-answer">
+            <p>No. There are no significant medical conditions reported, and no indication of substance use in Elena's record.</p>
+            <button class="nook-sources"><svg class="icon" width="13" height="13"><use href="#i-chevron-right"/></svg> Sources (1)</button>
+          </div>
+        </div>
+      </div>
+      <div class="nook-composer">
+        <textarea class="nook-input" rows="1" placeholder="Ask about Elena's record…"></textarea>
+        <button class="btn btn-primary btn-icon" aria-label="Send"><svg class="icon" width="18" height="18"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+    <div class="nook-caption">
+      <div class="t-h4" style="margin-bottom:4px">C · Grey panel — not selected</div>
+      <div class="t-caption" style="line-height:18px">Panel body sits on --surface with white message cards inside. Separates from the white record without a dark bar, and the messages gain definition. No semantic reuse.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ==================== SCALE REFERENCE ==================== -->
+<div>
+<div class="artboard-label t-caption">Ordered scales — colour only at the top of the scale</div>
+<div class="ref">
+  <div class="ci-sub" style="margin-top:0"><span class="t-h4">Symptom severity</span></div>
+  <div class="ref-row"><span class="t-cell">Mild</span><span class="status-plain">Mild</span></div>
+  <div class="ref-row"><span class="t-cell">Moderate</span><span class="status-plain">Moderate</span></div>
+  <div class="ref-row"><span class="t-cell">Severe</span><span class="status-warn">Severe</span></div>
+
+  <div class="ci-sub"><span class="t-h4">Question priority</span></div>
+  <div class="ref-row"><span class="t-cell">Low</span><span class="status-quiet">Low priority</span></div>
+  <div class="ref-row"><span class="t-cell">Medium</span><span class="status-quiet">Medium priority</span></div>
+  <div class="ref-row"><span class="t-cell">High</span><span class="status-warn">High priority</span></div>
+
+  <div class="ci-sub"><span class="t-h4">Extraction confidence</span></div>
+  <div class="ref-row"><span class="t-cell">High — stated once in the sources line, never per row</span><span class="status-quiet">(not shown)</span></div>
+  <div class="ref-row"><span class="t-cell">Low</span><span class="status-warn">Low confidence</span></div>
+
+  <div class="ci-sub"><span class="t-h4">Reserved</span></div>
+  <div class="ref-row"><span class="t-cell">Safety / safeguarding concern — the only use of red on this screen</span><span class="status-alert">Risk flagged</span></div>
+
+  <div class="t-caption" style="margin-top:var(--s5);line-height:19px">On Elena's record every value is moderate, medium and high-confidence, so nothing is coloured. A coloured word here means something genuinely uncommon.</div>
+</div>
+</div>
+
+</div>
+</body>
+</html>

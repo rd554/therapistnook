@@ -1592,11 +1592,17 @@ def merge_intelligence_update(
         if operation == "add":
             current_data[section].append(changes)
         elif operation == "update":
-            # Find and update existing item by id
+            # Find and update existing item by id. Assigns a new merged dict
+            # via __setitem__ rather than mutating the existing dict in
+            # place with .update() - when current_data[section] is a
+            # MutableList (see ClinicalIntelligence model), only __setitem__
+            # on the list itself is observed; mutating a plain dict nested
+            # inside it is invisible to the tracker and would silently fail
+            # to persist on commit.
             item_id = changes.get("id")
             for i, item in enumerate(current_data[section]):
                 if item.get("id") == item_id:
-                    current_data[section][i].update(changes)
+                    current_data[section][i] = {**item, **changes}
                     break
             else:
                 # If not found, add as new

@@ -402,6 +402,10 @@
   background: var(--text-primary); color: var(--text-inverse); font-weight: 700;
 }
 .clinical-ink .seg-option:disabled { color: var(--text-muted); cursor: not-allowed; }
+@media (pointer: coarse) {
+  .clinical-ink .seg { height: 44px; }
+  .clinical-ink .seg-option { height: 40px; }
+}
 
 /* ==========================================================================
    Sidebar & nav
@@ -713,6 +717,7 @@
   cursor: pointer;
 }
 .clinical-ink .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+.clinical-ink .select-sm { height: 32px; padding: 0 32px 0 10px; font-size: 13px; background-size: 14px; background-position: right 10px center; }
 
 .clinical-ink .textarea {
   width: 100%; min-height: 88px; padding: 10px 12px;
@@ -1450,3 +1455,123 @@
   .clinical-ink .interp-body, .clinical-ink .interp-list li { font-size: 16px; line-height: 26px; }
   .clinical-ink .interp-summary .interp-body { font-size: 16px; line-height: 26px; }
 }
+
+/* ==========================================================================
+   Calendar  ·  full 24-hour grid, off-hours dimming, now indicator
+   ========================================================================== */
+
+.clinical-ink .cal-wrap {
+  background: var(--canvas); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-xs);
+}
+/* the scroller: fixed viewport height, 24h of rows inside it */
+.clinical-ink .cal-scroll { max-height: calc(100vh - 280px); min-height: 480px; overflow-y: auto;
+              overflow-x: auto; -webkit-overflow-scrolling: touch; position: relative; }
+.clinical-ink .cal-grid { display: grid; grid-template-columns: 64px repeat(var(--days, 7), minmax(108px, 1fr));
+            min-width: 100%; }
+
+/* sticky day header */
+.clinical-ink .cal-head { position: sticky; top: 0; z-index: 3; background: var(--canvas);
+            border-bottom: var(--border-width) solid var(--border);
+            display: grid; grid-template-columns: 64px repeat(var(--days, 7), minmax(108px, 1fr)); }
+.clinical-ink .cal-daycell { padding: 8px 4px; text-align: center; border-left: var(--border-width) solid var(--hairline); }
+.clinical-ink .cal-daycell:first-child { border-left: none; }
+.clinical-ink .cal-dayname { font: 500 12px/16px var(--font-ui); color: var(--text-muted); }
+.clinical-ink .cal-daynum { font: 700 18px/24px var(--font-ui); color: var(--text-primary);
+              font-variant-numeric: tabular-nums; }
+.clinical-ink .cal-daycell.is-today { background: var(--selected); }
+.clinical-ink .cal-daycell.is-today .cal-dayname,
+.clinical-ink .cal-daycell.is-today .cal-daynum { color: var(--accent); }
+
+/* hour rows — 24 of them, always rendered */
+.clinical-ink .cal-timecol { border-right: var(--border-width) solid var(--hairline); }
+.clinical-ink .cal-hourlabel { height: 56px; padding: 2px 8px 0 0; text-align: right;
+                 font: 500 11px/1 var(--font-ui); color: var(--text-muted);
+                 font-variant-numeric: tabular-nums; }
+.clinical-ink .cal-cell { height: 56px; border-top: var(--border-width) solid var(--hairline);
+            border-left: var(--border-width) solid var(--hairline); position: relative; }
+.clinical-ink .cal-cell::after {                     /* half-hour guide */
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: var(--border-width) dotted var(--hairline);
+}
+/* outside practice hours: dimmed, never hidden */
+.clinical-ink .cal-cell.is-offhours { background: var(--surface); }
+.clinical-ink .cal-hourlabel.is-offhours { color: var(--text-muted); opacity: .6; }
+
+/* current time */
+.clinical-ink .cal-now { position: absolute; left: 0; right: 0; height: 0; z-index: 2;
+           border-top: 2px solid var(--accent); pointer-events: none; }
+.clinical-ink .cal-now::before { content: ''; position: absolute; left: -4px; top: -4px;
+                   width: 8px; height: 8px; border-radius: 999px; background: var(--accent); }
+
+/* event block */
+.clinical-ink .cal-event {
+  position: absolute; left: 3px; right: 3px; z-index: 1;
+  background: var(--canvas); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-xs);
+  padding: 5px 8px; overflow: hidden; text-align: left; cursor: pointer;
+  box-shadow: inset var(--rule-width) 0 0 var(--accent), var(--shadow-xs);
+}
+.clinical-ink .cal-event:hover { background: var(--surface-hover); }
+.clinical-ink .cal-event.is-cancelled { box-shadow: inset var(--rule-width) 0 0 var(--border), var(--shadow-xs); opacity: .6; }
+.clinical-ink .cal-event.is-noshow { box-shadow: inset var(--rule-width) 0 0 var(--warning), var(--shadow-xs); }
+.clinical-ink .cal-event.is-done { box-shadow: inset var(--rule-width) 0 0 var(--hairline), var(--shadow-xs); }
+.clinical-ink .cal-event-name { display: block; font: 700 12px/16px var(--font-ui); color: var(--text-primary);
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clinical-ink .cal-event-meta { display: flex; align-items: center; gap: 4px;
+                  font: 500 11px/15px var(--font-ui); color: var(--text-muted);
+                  font-variant-numeric: tabular-nums; }
+.clinical-ink .cal-event-meta svg { color: var(--icon-muted); flex: none; }
+
+@media (max-width: 860px) {
+  .clinical-ink .cal-grid, .clinical-ink .cal-head { grid-template-columns: 52px repeat(var(--days, 7), minmax(96px, 1fr)); }
+  .clinical-ink .cal-scroll { max-height: calc(100vh - 220px); }
+}
+
+/* ==========================================================================
+   Mobile sheet  ·  a modal that fills the screen without losing its footer
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .clinical-ink .modal.as-sheet {
+    position: fixed; inset: 0; max-width: none; width: 100%; height: 100%;
+    border-radius: 0; padding: 0; display: flex; flex-direction: column;
+  }
+  .clinical-ink .modal.as-sheet .sheet-head {
+    position: sticky; top: 0; z-index: 2; flex: none;
+    padding: var(--space-4) var(--space-5);
+    border-bottom: var(--border-width) solid var(--hairline); background: var(--canvas);
+  }
+  .clinical-ink .modal.as-sheet .sheet-body {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: var(--space-5);
+  }
+  .clinical-ink .modal.as-sheet .sheet-foot {
+    position: sticky; bottom: 0; z-index: 2; flex: none;
+    display: flex; gap: var(--space-2);
+    padding: var(--space-3) var(--space-5);
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    border-top: var(--border-width) solid var(--hairline); background: var(--canvas);
+  }
+  .clinical-ink .modal.as-sheet .sheet-foot .btn { flex: 1; height: 44px; }
+}
+
+/* ==========================================================================
+   Toggle group  ·  several mutually exclusive options that must wrap evenly
+   ========================================================================== */
+
+.clinical-ink .toggle-group { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.clinical-ink .toggle-opt {
+  flex: 1 1 88px; min-width: 88px; height: 36px; padding: 0 12px;
+  background: var(--canvas); border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  font: 600 13px/1 var(--font-ui); color: var(--text-secondary);
+  display: inline-flex; align-items: center; justify-content: center;
+  white-space: nowrap; cursor: pointer;
+}
+.clinical-ink .toggle-opt:hover { background: var(--surface); color: var(--text-primary); }
+.clinical-ink .toggle-opt[aria-pressed='true'] {
+  background: var(--text-primary); border-color: var(--text-primary);
+  color: var(--text-inverse); font-weight: 700;
+}
+@media (pointer: coarse) { .clinical-ink .toggle-opt { height: 44px; } }

@@ -1,15 +1,16 @@
-import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom'
 import { useState, lazy, Suspense } from 'react'
 import { Loader2 } from 'lucide-react'
 
 // Layout
 import { WorkspaceLayout } from './layouts'
 
-// Legacy Header for patient routes
-import Header from './components/Header'
+// Patient-facing test flow header (deliberately distinct from the app chrome)
+import PublicHeader from './components/PublicHeader'
 
 // Auth Pages (eager load)
 import Login from './pages/Login'
+import ForgotPassword from './pages/ForgotPassword'
 import ChangePassword from './pages/ChangePassword'
 import Landing from './pages/Landing'
 import VerifyEmail from './pages/VerifyEmail'
@@ -27,7 +28,12 @@ const PractitionerPatients = lazy(() => import('./pages/PractitionerPatients'))
 const PatientProfile = lazy(() => import('./pages/PatientProfile'))
 const PatientEdit = lazy(() => import('./pages/PatientEdit'))
 const Results = lazy(() => import('./pages/Results'))
-const Settings = lazy(() => import('./pages/Settings'))
+const SettingsShell = lazy(() => import('./pages/settings/SettingsShell'))
+const SchedulingSection = lazy(() => import('./pages/settings/SchedulingSection'))
+const MessagingSection = lazy(() => import('./pages/settings/MessagingSection'))
+const PaymentsSection = lazy(() => import('./pages/settings/PaymentsSection'))
+const IntegrationsSection = lazy(() => import('./pages/settings/IntegrationsSection'))
+const SecuritySection = lazy(() => import('./pages/settings/SecuritySection'))
 const Assessments = lazy(() => import('./pages/Assessments'))
 const Analytics = lazy(() => import('./pages/Analytics'))
 const Calendar = lazy(() => import('./pages/Calendar'))
@@ -37,7 +43,13 @@ const GoogleOAuthCallback = lazy(() => import('./pages/GoogleOAuthCallback'))
 
 // Public Profile Pages (lazy load)
 const PublicProfile = lazy(() => import('./pages/PublicProfile'))
-const PatientOnboarding = lazy(() => import('./pages/PatientOnboarding'))
+
+// The old onboarding guide route folded into the profile page's "Before
+// your first session" accordion — redirect rather than render a page.
+function OnboardingRedirect() {
+  const { slug } = useParams()
+  return <Navigate to={`/p/${slug}#before-your-first-session`} replace />
+}
 
 // Legal Pages (lazy load)
 const Privacy = lazy(() => import('./pages/Privacy'))
@@ -151,7 +163,7 @@ export default function App() {
     <Routes>
       {/* ── Public Therapist Profile routes (No auth required) ─────────────────── */}
       <Route path="/p/:slug" element={<Suspense fallback={<PageLoader />}><PublicProfile /></Suspense>} />
-      <Route path="/p/:slug/onboarding" element={<Suspense fallback={<PageLoader />}><PatientOnboarding /></Suspense>} />
+      <Route path="/p/:slug/onboarding" element={<OnboardingRedirect />} />
 
       {/* ── Phase 5: Public Booking routes (No auth required) ────────────────────── */}
       <Route path="/pay/:paymentToken" element={<Suspense fallback={<PageLoader />}><PaymentPage /></Suspense>} />
@@ -162,7 +174,7 @@ export default function App() {
       <Route path="/terms" element={<Suspense fallback={<PageLoader />}><Terms /></Suspense>} />
 
       {/* ── Patient-facing routes (Public, with minimal header) ──────────────── */}
-      <Route element={<PatientLayout auth={auth} onLogout={handleLogout} patientSession={patientSession} />}>
+      <Route element={<PatientLayout patientSession={patientSession} />}>
         <Route path="/test" element={<PatientEntry onSessionResumed={handleSessionResumed} />} />
         <Route path="/test/intake" element={<IntakeForm onSessionCreated={handleSessionCreated} />} />
         <Route
@@ -179,6 +191,7 @@ export default function App() {
       {/* ── Auth routes ────────────────────────────────────────────────────────── */}
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<Login onLogin={handleLogin} onLogout={handleLogout} />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/verify-email" element={<VerifyEmail onLogin={handleLogin} />} />
         <Route path="/auth/google/callback" element={<GoogleLoginCallback onLogin={handleLogin} />} />
         <Route
@@ -211,7 +224,14 @@ export default function App() {
         <Route path="/results/:sessionId" element={<Suspense fallback={<PageLoader />}><Results /></Suspense>} />
 
         {/* Settings */}
-        <Route path="/settings" element={<Suspense fallback={<PageLoader />}><Settings auth={auth} /></Suspense>} />
+        <Route path="/settings" element={<Suspense fallback={<PageLoader />}><SettingsShell auth={auth} /></Suspense>}>
+          <Route index element={null} />
+          <Route path="scheduling" element={<SchedulingSection />} />
+          <Route path="messaging" element={<MessagingSection />} />
+          <Route path="payments" element={<PaymentsSection />} />
+          <Route path="integrations" element={<IntegrationsSection />} />
+          <Route path="security" element={<SecuritySection />} />
+        </Route>
         <Route path="/settings/google-callback" element={<Suspense fallback={<PageLoader />}><GoogleOAuthCallback /></Suspense>} />
 
         {/* Calendar */}
@@ -363,12 +383,13 @@ export default function App() {
   )
 }
 
-// Patient Layout - minimal header for patient test routes
-function PatientLayout({ auth, onLogout, patientSession }) {
+// Patient Layout - calmer, deliberately distinct shell for the unauthenticated
+// /test flow. No practitioner identity ever renders here — see Bug 2.
+function PatientLayout({ patientSession }) {
   return (
-    <div className="min-h-screen bg-surface-gradient">
-      <Header auth={auth} onLogout={onLogout} patientSession={patientSession} />
-      <main className="mx-auto max-w-5xl px-6 py-8">
+    <div className="clinical-ink public-page">
+      <PublicHeader patientName={patientSession?.name} />
+      <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
         <Outlet />
       </main>
     </div>

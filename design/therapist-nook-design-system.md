@@ -79,6 +79,18 @@ Everything in this document follows from these. If a future decision conflicts w
 | `--warning` | "Pending" chip text, "No-show" label in history, "Cancelled" label, unsigned-note reminder | Anything a user cannot act on |
 | `--success` | Text only, in a confirmation toast, and nowhere else | Chips, fills, borders, icons, status text in lists |
 
+### Graphite as a surface
+
+`--text-primary` (#15151B) is also, on rare occasions, a surface — not just body text. Call this **graphite**. It has one job:
+
+**Graphite marks a temporary layer over the record, or a state the user actively set.**
+
+*Permitted:* the Ask Nook panel header and its mobile sheet header; tooltips; toasts; a future command palette or overlay; the selected half of a segmented control (e.g. Present/Absent) and any future toggle group or selected filter pill.
+
+*Forbidden:* card headers, section headings, the `.ci-more` header band, icon badges, table header rows, timeline entries, or anything permanently part of the record. A graphite bar across "Treatment goals" is the tinted-card problem in a darker shade — the same mistake the closed palette exists to prevent, just without a new hue.
+
+*Budget:* one graphite surface visible at a time, plus repeating selection states inside controls. If the Ask Nook panel is open, a toast waits.
+
 **Closed palette.** Do not add a hue. No teal, sage, plum, steel blue, berry-rose as a second brand color. The plum avatars and steel-blue online state in the current build are removed, not re-tuned.
 
 ---

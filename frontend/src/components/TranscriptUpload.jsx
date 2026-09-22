@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react'
-import { X, FileText, Upload, Loader2, AlertCircle, Calendar, CheckCircle } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { X, FileText, Upload } from 'lucide-react'
 import { uploadTherapySessionTranscript, uploadTherapySessionTranscriptFile } from '../api/client'
 
 // Local (not UTC) "yyyy-MM-ddTHH:mm" for a <input type="datetime-local">
@@ -11,92 +11,114 @@ function toLocalDateTimeInputValue(date) {
 }
 
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt']
+const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 
-// Session recording/audio upload is disabled for now (see SessionUpload.jsx,
-// kept but no longer wired into PatientProfile.jsx) in favor of this
-// transcript flow — no audio, no transcription, no speaker-ID needed. Text
-// can either be pasted directly or uploaded as a PDF/DOCX/TXT file (text is
-// extracted server-side).
+function formatFileSize(bytes) {
+  if (!bytes) return '-'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function validateFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase()
+  if (!ALLOWED_EXTENSIONS.includes(ext)) return `Unsupported type — use ${ALLOWED_EXTENSIONS.join(', ').toUpperCase()}`
+  if (file.size > MAX_FILE_SIZE) return 'File too large'
+  return null
+}
+
+// Reuses the same modal shell, .dropzone and .file-list chrome as
+// DocumentUpload.jsx (Documents & assessments tab) rather than a second
+// visual language for uploads. The flow itself still differs from that
+// one — a session has no pre-existing record to attach to, so this creates
+// the therapy session directly, either from pasted text or a single
+// PDF/DOCX/TXT file, dated by a required "Session date & time" field
+// instead of a category picker. Session recording/audio upload is disabled
+// for now (see SessionUpload.jsx, kept but no longer wired into
+// PatientProfile.jsx) in favor of this transcript flow.
 export default function TranscriptUpload({ patientId, onUploadComplete, onClose }) {
   const [mode, setMode] = useState('paste') // 'paste' | 'file'
   const [transcriptText, setTranscriptText] = useState('')
   const [file, setFile] = useState(null)
-  const [isDragging, setIsDragging] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const [dropInvalid, setDropInvalid] = useState(false)
   const [sessionDate, setSessionDate] = useState(() => toLocalDateTimeInputValue(new Date()))
   const [submitting, setSubmitting] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [liveMessage, setLiveMessage] = useState('')
 
-  const fileInputRef = useRef(null)
+  const inputRef = useRef(null)
+  const dateRef = useRef(null)
+  const invalidTimerRef = useRef(null)
+
+  useEffect(() => {
+    dateRef.current?.focus()
+    return () => clearTimeout(invalidTimerRef.current)
+  }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && !submitting) onClose?.()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [submitting, onClose])
 
   const wordCount = transcriptText.trim() ? transcriptText.trim().split(/\s+/).length : 0
 
-  const formatFileSize = (bytes) => {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  const flagInvalid = (message) => {
+    setDropInvalid(true)
+    setLiveMessage(message)
+    clearTimeout(invalidTimerRef.current)
+    invalidTimerRef.current = setTimeout(() => setDropInvalid(false), 2000)
   }
 
-  const validateFile = (f) => {
-    if (!f) return 'Please select a file'
-    const ext = f.name.split('.').pop().toLowerCase()
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return `Invalid file type. Supported formats: ${ALLOWED_EXTENSIONS.join(', ').toUpperCase()}`
-    }
-    if (f.size > 50 * 1024 * 1024) {
-      return 'File size exceeds 50MB limit'
-    }
-    return null
-  }
-
-  const handleFileSelect = useCallback((selectedFile) => {
-    const validationError = validateFile(selectedFile)
-    if (validationError) {
-      setError(validationError)
+  const selectFile = useCallback((selected) => {
+    const err = validateFile(selected)
+    if (err) {
+      flagInvalid(`${selected.name}: ${err}`)
       return
     }
-    setFile(selectedFile)
+    setFile(selected)
     setError('')
     setSuccess('')
+    setLiveMessage(`${selected.name} added`)
   }, [])
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault()
-    setIsDragging(false)
-    const droppedFile = e.dataTransfer.files[0]
-    if (droppedFile) handleFileSelect(droppedFile)
-  }, [handleFileSelect])
-
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault()
-    setIsDragging(true)
+  const handleDragEnter = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation()
+    setDragActive(true)
+    setLiveMessage('Drop file to upload')
   }, [])
-
+  const handleDragOver = useCallback((e) => { e.preventDefault(); e.stopPropagation() }, [])
   const handleDragLeave = useCallback((e) => {
-    e.preventDefault()
-    setIsDragging(false)
+    e.preventDefault(); e.stopPropagation()
+    setDragActive(false)
   }, [])
+  const handleDrop = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation()
+    setDragActive(false)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) selectFile(e.dataTransfer.files[0])
+  }, [selectFile])
 
-  const clearFile = () => {
-    setFile(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
+  const handleFileSelect = (e) => {
+    if (e.target.files && e.target.files.length > 0) selectFile(e.target.files[0])
+    e.target.value = ''
   }
 
-  const handleSubmit = async () => {
-    if (mode === 'paste' && !transcriptText.trim()) {
-      setError('Please paste or enter the session transcript')
-      return
-    }
-    if (mode === 'file' && !file) {
-      setError('Please select a transcript file')
-      return
-    }
-    if (!sessionDate) {
-      setError('Please select a session date')
-      return
-    }
+  const openBrowse = () => inputRef.current?.click()
+  const handleZoneKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBrowse() }
+  }
 
+  const removeFile = () => setFile(null)
+
+  const canSubmit = (mode === 'paste' ? !!transcriptText.trim() : !!file) && !!sessionDate
+
+  const handleSubmit = async () => {
+    if (!canSubmit || submitting) return
     setSubmitting(true)
     setError('')
     setSuccess('')
@@ -119,217 +141,149 @@ export default function TranscriptUpload({ patientId, onUploadComplete, onClose 
           (pct) => setProgress(pct)
         )
       }
-      setSuccess('Transcript processed! Summary and SOAP notes have been generated.')
-      setTimeout(() => {
-        onUploadComplete?.()
-      }, 1500)
+      setSuccess('Transcript processed — summary and SOAP notes generated.')
+      setTimeout(() => onUploadComplete?.(), 1200)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to process transcript')
+      setError(err.userMessage || err.response?.data?.detail || 'Failed to process transcript')
     } finally {
       setSubmitting(false)
     }
   }
 
-  const canSubmit = mode === 'paste' ? !!transcriptText.trim() : !!file
-
   return (
-    <div className="card">
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-          <FileText className="h-5 w-5 text-gray-400" />
-          Upload Transcript
-        </h3>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-          >
-            <X className="h-5 w-5" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" style={{ padding: 'var(--space-4)' }}>
+      <div className="modal doc-upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-transcript-title">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-5)' }}>
+          <h3 id="upload-transcript-title" className="modal-title">Upload transcript</h3>
+          <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label="Close" onClick={onClose} disabled={submitting}>
+            <X size={16} strokeWidth={1.5} />
           </button>
-        )}
-      </div>
+        </div>
 
-      {/* Mode Toggle */}
-      <div className="mb-4 inline-flex rounded-lg bg-gray-100 p-1">
-        <button
-          onClick={() => setMode('paste')}
-          disabled={submitting}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            mode === 'paste' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Paste Text
-        </button>
-        <button
-          onClick={() => setMode('file')}
-          disabled={submitting}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            mode === 'file' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Upload PDF / Word
-        </button>
-      </div>
+        <div className="field-head" style={{ marginBottom: '6px' }}>
+          <span className="t-caption">Transcript source</span>
+        </div>
+        <div role="group" aria-label="Transcript source" style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
+          <button
+            type="button"
+            className={`btn btn-secondary${mode === 'paste' ? ' btn-active' : ''}`}
+            aria-pressed={mode === 'paste'}
+            disabled={submitting}
+            onClick={() => setMode('paste')}
+          >
+            Paste text
+          </button>
+          <button
+            type="button"
+            className={`btn btn-secondary${mode === 'file' ? ' btn-active' : ''}`}
+            aria-pressed={mode === 'file'}
+            disabled={submitting}
+            onClick={() => setMode('file')}
+          >
+            Upload file
+          </button>
+        </div>
 
-      {/* Session Date */}
-      <div className="mb-4">
-        <label className="mb-1 block text-sm font-medium text-gray-700">
-          Session Date & Time
-        </label>
-        <div className="relative">
-          <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+        <div style={{ marginBottom: 'var(--space-4)' }}>
+          <div className="field-head">
+            <label htmlFor="session_date">Session date &amp; time</label>
+          </div>
           <input
+            id="session_date"
+            ref={dateRef}
             type="datetime-local"
+            className="input"
             value={sessionDate}
             onChange={(e) => setSessionDate(e.target.value)}
-            className="input-field pl-10"
             disabled={submitting}
           />
         </div>
-      </div>
 
-      {mode === 'paste' ? (
-        /* Transcript Text */
-        <div className="mb-4">
-          <div className="mb-1 flex items-center justify-between">
-            <label className="block text-sm font-medium text-gray-700">
-              Session Transcript
-            </label>
-            {wordCount > 0 && (
-              <span className="text-xs text-gray-500">{wordCount.toLocaleString()} words</span>
-            )}
-          </div>
-          <textarea
-            value={transcriptText}
-            onChange={(e) => setTranscriptText(e.target.value)}
-            disabled={submitting}
-            rows={14}
-            placeholder="Paste the full session transcript here (a typical 50-60 minute session works fine)…"
-            className="input-field resize-y font-mono text-sm"
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Session Intelligence will generate a summary and SOAP notes from this text, and feed relevant updates into Clinical Intelligence.
-          </p>
-        </div>
-      ) : (
-        /* Transcript File */
-        <div className="mb-4">
-          <label className="mb-1 block text-sm font-medium text-gray-700">
-            Transcript File
-          </label>
-          <div
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            className={`rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
-              isDragging
-                ? 'border-primary-400 bg-primary-50'
-                : file
-                ? 'border-green-300 bg-green-50'
-                : 'border-gray-300 hover:border-gray-400'
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.docx,.txt"
-              onChange={(e) => handleFileSelect(e.target.files[0])}
+        {mode === 'paste' ? (
+          <div style={{ marginBottom: 'var(--space-2)' }}>
+            <div className="field-head">
+              <label htmlFor="transcript_text">Session transcript</label>
+              {wordCount > 0 && <span className="field-optional">{wordCount.toLocaleString()} words</span>}
+            </div>
+            <textarea
+              id="transcript_text"
+              className="textarea"
+              style={{ minHeight: '260px', fontFamily: 'monospace', fontSize: '13px' }}
+              value={transcriptText}
+              onChange={(e) => setTranscriptText(e.target.value)}
+              placeholder="Paste the full session transcript here (a typical 50-60 minute session works fine)…"
               disabled={submitting}
-              className="hidden"
             />
-
-            {file ? (
-              <div className="flex flex-col items-center gap-3">
-                <FileText className="h-12 w-12 text-green-500" />
-                <div className="text-center">
-                  <p className="font-medium text-gray-900">{file.name}</p>
-                  <p className="text-sm text-gray-500">{formatFileSize(file.size)}</p>
-                </div>
-                {!submitting && (
-                  <button onClick={clearFile} className="text-sm text-red-500 hover:text-red-600">
-                    Remove
-                  </button>
-                )}
-              </div>
-            ) : (
-              <>
-                <Upload className="mx-auto mb-3 h-10 w-10 text-gray-400" />
-                <p className="mb-2 text-sm text-gray-600">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={submitting}
-                    className="font-medium text-primary-600 hover:text-primary-700"
-                  >
-                    Click to browse
-                  </button>
-                  {' '}or drag and drop
-                </p>
-                <p className="text-xs text-gray-500">PDF, DOCX, or TXT (max 50MB)</p>
-              </>
-            )}
           </div>
-          <p className="mt-1 text-xs text-gray-500">
-            Text is extracted from the file, then Session Intelligence generates a summary and SOAP notes and feeds relevant updates into Clinical Intelligence.
-          </p>
-        </div>
-      )}
-
-      {/* Upload Progress (file mode) */}
-      {submitting && mode === 'file' && progress > 0 && progress < 100 && (
-        <div className="mb-4">
-          <div className="mb-1 flex justify-between text-sm">
-            <span className="text-gray-600">Uploading…</span>
-            <span className="font-medium text-gray-700">{progress}%</span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-gray-200">
+        ) : (
+          <>
             <div
-              className="h-full rounded-full bg-primary-500 transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      )}
+              className={`dropzone${dragActive ? ' is-over' : ''}${dropInvalid ? ' is-invalid' : ''}`}
+              role="button"
+              tabIndex={0}
+              aria-label="Upload transcript file. Drag and drop, or activate to browse"
+              aria-describedby="transcript-dropzone-hint"
+              onClick={openBrowse}
+              onKeyDown={handleZoneKeyDown}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              style={{ marginBottom: 'var(--space-2)' }}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".pdf,.docx,.txt"
+                onChange={handleFileSelect}
+                className="hidden"
+                disabled={submitting}
+                tabIndex={-1}
+              />
+              <Upload size={24} strokeWidth={1.5} aria-hidden="true" />
+              <p className="dropzone-prompt">
+                Drag &amp; drop a file here, or <span className="link">browse</span>
+              </p>
+              <p className="dropzone-hint" id="transcript-dropzone-hint">PDF, DOCX or TXT · 50 MB max</p>
+            </div>
+            {dropInvalid && <p className="input-error-text">{liveMessage}</p>}
 
-      {/* Error Message */}
-      {error && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-          <AlertCircle className="h-4 w-4" />
-          {error}
-        </div>
-      )}
+            {file && (
+              <div className="file-list">
+                <div className="file-item">
+                  <span className="type-icon"><FileText size={16} strokeWidth={1.5} /></span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p className="file-item-name">{file.name}</p>
+                    {submitting && progress > 0 && progress < 100 && (
+                      <div className="file-progress" role="progressbar" aria-label={`Uploading ${file.name}`} aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+                        <div style={{ width: `${progress}%` }} />
+                      </div>
+                    )}
+                  </div>
+                  <span className="file-item-size">{formatFileSize(file.size)}</span>
+                  {!submitting && (
+                    <button type="button" className="btn btn-ghost btn-icon btn-icon-sm" aria-label={`Remove ${file.name}`} onClick={removeFile}>
+                      <X size={16} strokeWidth={1.5} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        <span className="sr-only" role="status" aria-live="polite">{liveMessage}</span>
 
-      {/* Success Message */}
-      {success && !error && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-700">
-          <CheckCircle className="h-4 w-4" />
-          {success}
-        </div>
-      )}
+        {error && <p className="input-error-text" style={{ marginTop: 'var(--space-3)' }}>{error}</p>}
+        {success && !error && <p className="t-body-s" style={{ marginTop: 'var(--space-3)', color: 'var(--text-secondary)' }}>{success}</p>}
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-3">
-        {onClose && (
-          <button onClick={onClose} disabled={submitting} className="btn-secondary">
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={submitting}>
             Cancel
           </button>
-        )}
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit || submitting}
-          className="btn-primary"
-        >
-          {submitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {mode === 'file' && progress > 0 && progress < 100 ? 'Uploading…' : 'Generating notes…'}
-            </>
-          ) : (
-            <>
-              <FileText className="h-4 w-4" />
-              Generate Summary &amp; SOAP Notes
-            </>
-          )}
-        </button>
+          <button type="button" className="btn btn-primary" disabled={!canSubmit || submitting} onClick={handleSubmit}>
+            {submitting ? 'Generating notes…' : 'Upload'}
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -22,6 +22,14 @@ log = logging.getLogger(__name__)
 
 SITE_URL = os.getenv("SITE_URL", "http://localhost:5173")
 BOOKING_EXPIRY_HOURS = 24
+# The public "Book a session" CTA books a free introductory screening call, not
+# a paid session (see accept_booking_request in main.py) — the therapist calls
+# the prospective client, decides fit, then accepts or declines. That can take
+# days, unlike a real payment link. Give the request a much longer runway than
+# BOOKING_EXPIRY_HOURS (which still governs actual payment links elsewhere) so
+# it doesn't quietly expire — and free up the slot in the double-booking guard
+# below — while she's still deciding.
+BOOKING_REQUEST_EXPIRY_DAYS = 14
 
 
 class SlotGenerator:
@@ -153,17 +161,15 @@ class BookingService:
         if not practitioner:
             return None
 
-        # Clinic-wide booking policy (max advance window, minimum notice, holidays).
-        # These are the fields on AppointmentConfiguration that aren't already
-        # covered by the per-practitioner PractitionerAvailability row above.
-        # Read-only lookup (unlike settings_service.get_appointment_config, this
-        # must not write/commit — it runs on every public, unauthenticated slot
-        # request) and tolerant of zero or duplicate rows.
+        # Holidays still live on the (global) AppointmentConfiguration singleton —
+        # "Time off" in the Settings rebuild is UnavailableDate rows, a separate
+        # concept, so this field wasn't part of the scheduling merge. Read-only
+        # lookup (unlike settings_service.get_appointment_config, this must not
+        # write/commit — it runs on every public, unauthenticated slot request)
+        # and tolerant of zero or duplicate rows.
         appt_config = (
             await db.execute(select(AppointmentConfiguration).limit(1))
         ).scalars().first()
-        max_advance_days = appt_config.max_advance_booking_days if appt_config else None
-        min_notice_hours = appt_config.min_booking_notice_hours if appt_config else None
         holiday_dates = set()
         for h in ((appt_config.holidays if appt_config else None) or []):
             h_date = h.get("date") if isinstance(h, dict) else None
@@ -179,8 +185,12 @@ class BookingService:
             )
         )
         availability = avail_result.scalar_one_or_none()
-        
+
         if not availability:
+            # Every active practitioner gets a PractitionerAvailability row via
+            # the database.py migration now, so this is just a defensive
+            # fallback (e.g. a brand-new practitioner created after startup,
+            # before Settings has been visited once) — not the normal path.
             working_days = [0, 1, 2, 3, 4]
             work_start = time(9, 0)
             work_end = time(18, 0)
@@ -189,6 +199,8 @@ class BookingService:
             duration_minutes = 50
             buffer_minutes = 10
             tz_name = "Asia/Kolkata"
+            max_advance_days = appt_config.max_advance_booking_days if appt_config else 30
+            min_notice_hours = appt_config.min_booking_notice_hours if appt_config else 24
         else:
             working_days = availability.working_days or [0, 1, 2, 3, 4]
             work_start = datetime.strptime(availability.work_start_time, "%H:%M").time()
@@ -198,6 +210,11 @@ class BookingService:
             duration_minutes = availability.default_session_duration
             buffer_minutes = availability.buffer_minutes
             tz_name = availability.timezone
+            # The merged scheduling record — this is what Settings' Scheduling
+            # page now writes to, replacing AppointmentConfiguration for these
+            # two fields (see settings-phase1-plan.md).
+            max_advance_days = availability.max_advance_booking_days
+            min_notice_hours = availability.min_booking_notice_hours
         
         end_date = start_date + timedelta(days=days)
         
@@ -381,8 +398,8 @@ class BookingService:
         Returns booking request with payment details.
         """
         from models import (
-            BookingRequest, Payment, Practitioner, PractitionerProfile,
-            PractitionerAvailability, generate_uuid, generate_booking_token, generate_payment_link_token
+            BookingRequest, Practitioner, PractitionerProfile,
+            PractitionerAvailability, generate_uuid, generate_booking_token
         )
         from notification_service import notification_service, format_date, format_time, format_amount
         
@@ -410,15 +427,60 @@ class BookingService:
         
         if not duration_minutes:
             duration_minutes = availability.default_session_duration if availability else 50
-        
+
         requested_end_time = requested_start_time + timedelta(minutes=duration_minutes)
-        
+
+        # Guard against double-booking. Nothing upstream of this call checks
+        # whether the requested slot is still open — the public availability
+        # endpoint only reflects appointments/requests that existed at the
+        # time it was *read*, so two visitors can race to request the same
+        # slot. Reject the second one here, against both confirmed
+        # appointments and other live (non-cancelled/expired) booking
+        # requests for this practitioner.
+        #
+        # Compared as naive wall-clock times, same as SlotGenerator above —
+        # SQLite doesn't persist tzinfo on DateTime(timezone=True) columns,
+        # so a tz-aware bound parameter would silently never match a naive
+        # column value read back from the DB.
+        from models import Appointment
+
+        naive_start = requested_start_time.replace(tzinfo=None) if requested_start_time.tzinfo else requested_start_time
+        naive_end = requested_end_time.replace(tzinfo=None) if requested_end_time.tzinfo else requested_end_time
+        # expires_at is stored as naive-UTC under SQLite (same tzinfo-loss as
+        # everywhere else), unlike naive_start/naive_end above which are
+        # naive-*local* wall-clock time — don't mix the two. Strip tzinfo
+        # from this bound parameter too, or it never matches under SQLite.
+        naive_now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        conflicting_appt = (await db.execute(
+            select(Appointment.id).where(
+                Appointment.practitioner_id == practitioner_id,
+                Appointment.status.in_(["scheduled", "rescheduled"]),
+                Appointment.start_time < naive_end,
+                Appointment.end_time > naive_start,
+            ).limit(1)
+        )).scalar_one_or_none()
+
+        conflicting_request = (await db.execute(
+            select(BookingRequest.id).where(
+                BookingRequest.practitioner_id == practitioner_id,
+                # "confirmed" included defensively even though accept_booking_request
+                # (main.py) also creates a real Appointment in the same transaction —
+                # the Appointment half of this guard already covers that case, this
+                # just avoids relying on that being the only path in.
+                BookingRequest.status.in_(["requested", "pending_payment", "payment_processing", "paid", "confirmed"]),
+                BookingRequest.expires_at > naive_now_utc,
+                BookingRequest.requested_start_time < naive_end,
+                BookingRequest.requested_end_time > naive_start,
+            ).limit(1)
+        )).scalar_one_or_none()
+
+        if conflicting_appt or conflicting_request:
+            raise ValueError("This time is no longer available. Please choose another.")
+
         booking_id = generate_uuid()
         booking_token = generate_booking_token()
-        
-        consultation_fee = profile.consultation_fee if profile else 0
-        fee_currency = profile.consultation_fee_currency if profile else "INR"
-        
+
         booking = BookingRequest(
             id=booking_id,
             practitioner_id=practitioner_id,
@@ -432,49 +494,29 @@ class BookingService:
             duration_minutes=duration_minutes,
             session_type=session_type,
             session_mode=session_mode,
-            status="pending_payment",
+            # The public CTA books a free introductory screening call, not a
+            # paid session — no Payment row is created here at all (a Payment
+            # requires a real appointment_id/patient_id, neither of which
+            # exist yet). The therapist reviews and accepts/declines via
+            # accept_booking_request (main.py); accepting is what creates the
+            # real Appointment. Real payment only starts from the first paid
+            # session onward, set by the therapist — unrelated to this flow.
+            status="requested",
             patient_notes=patient_notes,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=BOOKING_EXPIRY_HOURS),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=BOOKING_REQUEST_EXPIRY_DAYS),
         )
         db.add(booking)
-        
-        payment_id = generate_uuid()
-        payment_token = generate_payment_link_token()
-        
-        from models import Payment
-        payment = Payment(
-            id=payment_id,
-            appointment_id=None,
-            practitioner_id=practitioner_id,
-            patient_id=None,
-            session_fee=consultation_fee,
-            discount_amount=0,
-            tax_amount=0,
-            final_amount=consultation_fee,
-            currency=fee_currency,
-            status="pending",
-            payment_link_token=payment_token,
-            payment_link_expires_at=datetime.now(timezone.utc) + timedelta(hours=BOOKING_EXPIRY_HOURS),
-        )
-        db.add(payment)
-        
-        booking.payment_id = payment_id
-        
+
         await db.commit()
         await db.refresh(booking)
-        await db.refresh(payment)
-        
-        payment_link_url = f"{SITE_URL}/pay/{payment_token}"
+
         booking_url = f"{SITE_URL}/booking/{booking_token}"
-        
+
         placeholders = {
             "patient_name": patient_name,
             "therapist_name": practitioner.name,
             "appointment_date": format_date(requested_date),
             "appointment_time": format_time(requested_start_time),
-            "session_type": session_type.replace("_", " ").title(),
-            "payment_link": payment_link_url,
-            "payment_amount": format_amount(consultation_fee, fee_currency),
             "booking_url": booking_url,
         }
         
@@ -482,8 +524,10 @@ class BookingService:
             recipient_email=patient_email,
             event_type="booking_created",
             placeholders=placeholders,
+            db=db,
+            gate_event="session_booked",
         )
-        
+
         if profile and profile.public_email:
             therapist_placeholders = {
                 "patient_name": patient_name,
@@ -491,16 +535,18 @@ class BookingService:
                 "appointment_time": format_time(requested_start_time),
                 "session_type": session_type.replace("_", " ").title(),
             }
+            # Not gated on messaging preferences — that table governs what
+            # patients receive; this is the therapist's own new-booking
+            # alert, a separate (pre-existing) preference surface.
             await notification_service.send_email(
                 recipient_email=profile.public_email,
                 event_type="new_booking_therapist",
                 placeholders=therapist_placeholders,
+                db=db,
             )
         
         return {
             "booking": booking,
-            "payment": payment,
-            "payment_link_url": payment_link_url,
             "booking_url": booking_url,
         }
     
@@ -718,8 +764,10 @@ class BookingService:
             recipient_email=booking.patient_email,
             event_type="appointment_confirmed",
             placeholders=placeholders,
+            db=db,
+            gate_event="payment_received",
         )
-        
+
         if profile and profile.public_email:
             therapist_placeholders = {
                 "patient_name": booking.patient_name,
@@ -728,10 +776,13 @@ class BookingService:
                 "appointment_date": format_date(booking.requested_date),
                 "appointment_time": format_time(booking.requested_start_time),
             }
+            # Not gated on messaging preferences — therapist's own alert, see
+            # the note on the new_booking_therapist send above.
             await notification_service.send_email(
                 recipient_email=profile.public_email,
                 event_type="payment_received_therapist",
                 placeholders=therapist_placeholders,
+                db=db,
             )
         
         await reminder_scheduler.schedule_reminders_for_booking(
@@ -841,6 +892,8 @@ class BookingService:
             recipient_email=booking.patient_email,
             event_type="appointment_cancelled",
             placeholders=placeholders,
+            db=db,
+            gate_event="session_cancelled",
         )
         
         return {"booking": booking}
